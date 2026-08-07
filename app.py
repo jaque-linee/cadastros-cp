@@ -3,7 +3,6 @@ import requests
 from google import genai
 from google.genai import types
 import json
-import pandas as pd
 
 # Configuração da página
 st.set_page_config(page_title="Sistema de Cadastro CP", layout="centered", page_icon="🗳️")
@@ -22,48 +21,53 @@ client = genai.Client(api_key=API_KEY)
 st.title("🗳️ Sistema de Cadastro CP")
 st.markdown("---")
 
-# 1. Menu Principal focado primeiro em consultar/puxar os cadastrados
-menu_principal = st.selectbox("Selecione a Ação:", [
-    "📋 Consultar Cadastrados", 
-    "📸 Envio de Documentos (Lote)", 
-    "✍️ Formulário Manual"
-])
+# Gerenciamento de Supervisores na sessão do Streamlit para permitir cadastrar novos
+if 'lista_supervisores' not in st.session_state:
+    st.session_state.lista_supervisores = ["ADEILTON", "ADRIANO BATISTA", "TESTE"]
 
-# Seletor de Supervisor/Sub comum para as operações
-col1, col2 = st.columns(2)
-with col1:
-    supervisor = st.selectbox("Supervisor", ["ADEILTON", "ADRIANO BATISTA", "TESTE"])
-with col2:
-    sub = st.text_input("Subsupervisor", "SEM SUBSUPERVISOR")
+if 'lista_subs' not in st.session_state:
+    st.session_state.lista_subs = ["SEM SUBSUPERVISOR"]
 
-st.markdown("---")
-
-if menu_principal == "📋 Consultar Cadastrados":
-    st.subheader("Cadastrados na Base")
-    st.info("Aqui você poderá puxar e visualizar a listagem de todos os registros salvos.")
+# Barra Lateral para configuração e menus
+with st.sidebar:
+    st.header("⚙️ Configuração")
     
-    if st.button("🔄 Puxar / Atualizar Lista"):
-        try:
-            # Enviando um pedido GET ou POST de listagem para o Webhook (dependendo de como configurou o Apps Script)
-            response = requests.get(WEBHOOK_URL)
-            if response.status_code == 200:
-                dados = response.json()
-                if dados:
-                    df = pd.DataFrame(dados)
-                    st.dataframe(df, use_container_width=True)
-                else:
-                    st.warning("Nenhum cadastro encontrado na planilha.")
-            else:
-                st.error("Erro ao conectar com a planilha para puxar os dados.")
-        except Exception as e:
-            st.warning("Ainda ajustando a rota de leitura do Sheets. O botão está pronto para quando a rota GET estiver ativa.")
+    # Seleção ou Cadastro de Supervisor
+    sup_opcao = st.selectbox("Supervisor", st.session_state.lista_supervisores + ["➕ Cadastrar Novo Supervisor"])
+    if sup_opcao == "➕ Cadastrar Novo Supervisor":
+        novo_sup = st.text_input("Nome do Novo Supervisor").upper()
+        if st.button("Salvar Supervisor") and novo_sup:
+            if novo_sup not in st.session_state.lista_supervisores:
+                st.session_state.lista_supervisores.append(novo_sup)
+                st.success(f"Supervisor {novo_sup} cadastrado!")
+                st.rerun()
+        supervisor = novo_sup if novo_sup else "INDEFINIDO"
+    else:
+        supervisor = sup_opcao
 
-elif menu_principal == "📸 Envio de Documentos (Lote)":
-    st.subheader("Upload de Documentos em Lote")
+    # Seleção ou Cadastro de Subsupervisor
+    sub_opcao = st.selectbox("Subsupervisor", st.session_state.lista_subs + ["➕ Cadastrar Novo Sub"])
+    if sub_opcao == "➕ Cadastrar Novo Sub":
+        novo_sub = st.text_input("Nome do Novo Subsupervisor").upper()
+        if st.button("Salvar Sub") and novo_sub:
+            if novo_sub not in st.session_state.lista_subs:
+                st.session_state.lista_subs.append(novo_sub)
+                st.success(f"Subsupervisor {novo_sub} cadastrado!")
+                st.rerun()
+        sub = novo_sub if novo_sub else "SEM SUBSUPERVISOR"
+    else:
+        sub = sub_opcao
+
+    st.markdown("---")
+    menu = st.radio("Escolha a Operação:", ["📸 Envio de Documentos", "✍️ Formulário Manual"])
+
+# Corpo Principal baseado na escolha do menu
+if menu == "📸 Envio de Documentos":
+    st.subheader(f"📁 Envio de Documentos - Sup: {supervisor} / Sub: {sub}")
     arquivos = st.file_uploader("Arraste ou escolha as fotos/PDFs", accept_multiple_files=True, type=['pdf', 'jpg', 'png'])
     
     if arquivos:
-        if st.button("Processar e Enviar Lote"):
+        if st.button("Processar Lote"):
             barra_progresso = st.progress(0)
             total = len(arquivos)
             sucessos = 0
@@ -107,8 +111,8 @@ elif menu_principal == "📸 Envio de Documentos (Lote)":
             
             st.success(f"Processamento concluído! {sucessos} de {total} arquivo(s) salvos com sucesso.")
 
-elif menu_principal == "✍️ Formulário Manual":
-    st.subheader("Cadastro Manual Individual")
+elif menu == "✍️ Formulário Manual":
+    st.subheader(f"✍️ Cadastro Manual - Sup: {supervisor} / Sub: {sub}")
     titulo = st.text_input("Título de Eleitor")
     nome = st.text_input("Nome Completo")
     cpf = st.text_input("CPF")
