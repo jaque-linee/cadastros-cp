@@ -141,18 +141,20 @@ elif menu == "✍️ Formulário Manual":
         btn_buscar = st.button("🔍 Pesquisar")
 
     if btn_buscar:
-        titulo_limpo = re.sub(r'\D', '', titulo_input)
+        titulo_limpo = re.sub(r'\D', '', titulo_input).lstrip('0')
         if not titulo_limpo:
             st.warning("Por favor, informe um Título de Eleitor válido.")
         else:
-            st.session_state.titulo_pesquisado = titulo_limpo
+            st.session_state.titulo_pesquisado = titulo_input
             st.session_state.busca_realizada = True
             
             dados_base = carregar_dados_planilha()
             encontrado = None
             for reg in dados_base:
-                tit_reg = re.sub(r'\D', '', str(reg.get("titulo", "")))
-                if tit_reg and tit_reg.upper() != "TITULO" and tit_reg == titulo_limpo:
+                tit_reg_bruto = str(reg.get("titulo", ""))
+                tit_reg_limpo = re.sub(r'\D', '', tit_reg_bruto).lstrip('0')
+                
+                if tit_reg_limpo and tit_reg_limpo.upper() != "TITULO" and tit_reg_limpo == titulo_limpo:
                     encontrado = reg
                     break
             
