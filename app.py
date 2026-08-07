@@ -4,56 +4,57 @@ from google import genai
 from google.genai import types
 import json
 
-# Configuração da página
 st.set_page_config(page_title="Sistema de Cadastro CP", layout="centered", page_icon="🗳️")
 
-# Lendo as chaves do cofre de segurança (Secrets)
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     WEBHOOK_URL = st.secrets["WEBHOOK_URL"]
 except Exception as e:
-    st.error("Erro: As chaves de segurança (Secrets) não foram configuradas corretamente no Streamlit.")
+    st.error("Erro nas chaves de segurança (Secrets) do Streamlit.")
     st.stop()
 
-# Inicializa o cliente do Gemini
 client = genai.Client(api_key=API_KEY)
 
 st.title("🗳️ Sistema de Cadastro CP")
 st.markdown("---")
 
-# Gerenciamento de Supervisores na sessão do Streamlit para permitir cadastrar novos
-if 'lista_supervisores' not in st.session_state:
-    st.session_state.lista_supervisores = ["ADEILTON", "ADRIANO BATISTA", "TESTE"]
+# Função de leitura sem cache para forçar a busca imediata
+def buscar_supervisores_da_planilha():
+    supervisores_encontrados = ["ADEILTON", "ADRIANO BATISTA", "TESTE"]
+    subs_encontrados = ["SEM SUBSUPERVISOR"]
+    try:
+        response = requests.get(WEBHOOK_URL, timeout=10)
+        if response.status_code == 200:
+            dados = response.json()
+            for item in dados:
+                sup = str(item.get("supervisor", "")).strip().upper()
+                sub = str(item.get("subsupervisor", "")).strip().upper()
+                if sup and sup not in supervisores_encontrados:
+                    supervisores_encontrados.append(sup)
+                if sub and sub not in subs_encontrados:
+                    subs_encontrados.append(sub)
+        else:
+            st.sidebar.warning(f"Status HTTP: {response.status_code}")
+    except Exception as err:
+        st.sidebar.error(f"Erro de conexão: {err}")
+        
+    return sorted(supervisores_encontrados), sorted(subs_encontrados)
 
-if 'lista_subs' not in st.session_state:
-    st.session_state.lista_subs = ["SEM SUBSUPERVISOR"]
+lista_sup, lista_sub = buscar_supervisores_da_planilha()
 
-# Barra Lateral para configuração e menus
 with st.sidebar:
     st.header("⚙️ Configuração")
     
-    # Seleção ou Cadastro de Supervisor
-    sup_opcao = st.selectbox("Supervisor", st.session_state.lista_supervisores + ["➕ Cadastrar Novo Supervisor"])
+    sup_opcao = st.selectbox("Supervisor", lista_sup + ["➕ Cadastrar Novo Supervisor"])
     if sup_opcao == "➕ Cadastrar Novo Supervisor":
         novo_sup = st.text_input("Nome do Novo Supervisor").upper()
-        if st.button("Salvar Supervisor") and novo_sup:
-            if novo_sup not in st.session_state.lista_supervisores:
-                st.session_state.lista_supervisores.append(novo_sup)
-                st.success(f"Supervisor {novo_sup} cadastrado!")
-                st.rerun()
         supervisor = novo_sup if novo_sup else "INDEFINIDO"
     else:
         supervisor = sup_opcao
 
-    # Seleção ou Cadastro de Subsupervisor
-    sub_opcao = st.selectbox("Subsupervisor", st.session_state.lista_subs + ["➕ Cadastrar Novo Sub"])
+    sub_opcao = st.selectbox("Subsupervisor", lista_sub + ["➕ Cadastrar Novo Sub"])
     if sub_opcao == "➕ Cadastrar Novo Sub":
         novo_sub = st.text_input("Nome do Novo Subsupervisor").upper()
-        if st.button("Salvar Sub") and novo_sub:
-            if novo_sub not in st.session_state.lista_subs:
-                st.session_state.lista_subs.append(novo_sub)
-                st.success(f"Subsupervisor {novo_sub} cadastrado!")
-                st.rerun()
         sub = novo_sub if novo_sub else "SEM SUBSUPERVISOR"
     else:
         sub = sub_opcao
@@ -61,14 +62,13 @@ with st.sidebar:
     st.markdown("---")
     menu = st.radio("Escolha a Operação:", ["📸 Envio de Documentos", "✍️ Formulário Manual"])
 
-# Corpo Principal baseado na escolha do menu
 if menu == "📸 Envio de Documentos":
-    st.subheader(f"📁 Envio de Documentos - Sup: {supervisor} / Sub: {sub}")
+    st.subheader(f"📁 Envio - Sup: {supervisor} / Sub: {sub}")
     arquivos = st.file_uploader("Arraste ou escolha as fotos/PDFs", accept_multiple_files=True, type=['pdf', 'jpg', 'png'])
     
     if arquivos:
         if st.button("Processar Lote"):
-            barra_progresso = st.progress(0)
+            barra = st.progress(0)
             total = len(arquivos)
             sucessos = 0
             
@@ -76,43 +76,47 @@ if menu == "📸 Envio de Documentos":
                 bytes_dados = arquivo.getvalue()
                 mime_type = "application/pdf" if arquivo.type == "application/pdf" else "image/jpeg"
                 
-                prompt_extracao = """
+                prompt = """
                 Analise este documento e extraia os dados em formato JSON puro contendo exatamente estas chaves:
-                - titulo_eleitor
+                - titulo
                 - nome
                 - cpf
                 - data_nascimento
                 - zona
                 - secao
+                - rg
+                - nome_mae
+                - endereco
+                - numero
+                - bairro
+                - cidade
                 Retorne apenas o JSON válido, sem markdown extra.
                 """
                 
                 try:
                     resposta = client.models.generate_content(
                         model='gemini-2.5-flash',
-                        contents=[
-                            types.Part.from_bytes(data=bytes_dados, mime_type=mime_type),
-                            prompt_extracao
-                        ]
+                        contents=[types.Part.from_bytes(data=bytes_dados, mime_type=mime_type), prompt]
                     )
+                    texto = resposta.text.replace("```json", "").replace("```", "").strip()
+                    dados = json.loads(texto)
                     
-                    texto_resposta = resposta.text.replace("```json", "").replace("```", "").strip()
-                    dados_extraidos = json.loads(texto_resposta)
-                    dados_extraidos["supervisor"] = supervisor
-                    dados_extraidos["subsupervisor"] = sub
+                    dados["supervisor"] = supervisor
+                    dados["subsupervisor"] = sub
                     
-                    response_webhook = requests.post(WEBHOOK_URL, json=dados_extraidos)
-                    if response_webhook.status_code == 200:
-                        sucessos += 1
-                except Exception as e:
+                    res_web = requests.post(WEBHOOK_URL, json=dados)
+                    if res_web.status_code == 200:
+                        res_json = res_web.json()
+                        if res_json.get("status") == "SUCESSO":
+                            sucessos += 1
+                except Exception:
                     pass
                 
-                barra_progresso.progress((i + 1) / total)
-            
-            st.success(f"Processamento concluído! {sucessos} de {total} arquivo(s) salvos com sucesso.")
+                barra.progress((i + 1) / total)
+            st.success(f"Processamento concluído! {sucessos} de {total} salvos com sucesso.")
 
 elif menu == "✍️ Formulário Manual":
-    st.subheader(f"✍️ Cadastro Manual - Sup: {supervisor} / Sub: {sub}")
+    st.subheader(f"✍️ Manual - Sup: {supervisor} / Sub: {sub}")
     titulo = st.text_input("Título de Eleitor")
     nome = st.text_input("Nome Completo")
     cpf = st.text_input("CPF")
@@ -120,7 +124,7 @@ elif menu == "✍️ Formulário Manual":
     if st.button("Salvar Cadastro Manual"):
         if titulo and nome:
             payload = {
-                "titulo_eleitor": titulo,
+                "titulo": titulo,
                 "nome": nome,
                 "cpf": cpf,
                 "supervisor": supervisor,
@@ -129,10 +133,14 @@ elif menu == "✍️ Formulário Manual":
             try:
                 res = requests.post(WEBHOOK_URL, json=payload)
                 if res.status_code == 200:
-                    st.success("Cadastro manual salvo com sucesso!")
+                    resposta_servidor = res.json()
+                    if resposta_servidor.get("status") == "DUPLICADO":
+                        st.warning(resposta_servidor.get("mensagem"))
+                    else:
+                        st.success("Cadastro salvo com sucesso!")
                 else:
-                    st.error("Erro ao enviar para a planilha.")
+                    st.error("Erro ao enviar.")
             except Exception as e:
-                st.error(f"Erro de conexão: {e}")
+                st.error(f"Erro: {e}")
         else:
-            st.warning("Preencha ao menos o Título de Eleitor e o Nome.")
+            st.warning("Preencha ao menos o Título e o Nome.")
