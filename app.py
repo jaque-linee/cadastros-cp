@@ -3,6 +3,7 @@ import requests
 from google import genai
 from google.genai import types
 import json
+import re
 
 st.set_page_config(page_title="Sistema de Cadastro CP", layout="centered", page_icon="🗳️")
 
@@ -18,26 +19,26 @@ client = genai.Client(api_key=API_KEY)
 st.title("🗳️ Sistema de Cadastro CP")
 st.markdown("---")
 
-# Função de leitura sem cache para forçar a busca imediata
-def buscar_supervisores_da_planilha():
-    supervisores_encontrados = ["ADEILTON", "ADRIANO BATISTA", "TESTE"]
-    subs_encontrados = ["SEM SUBSUPERVISOR"]
+def carregar_dados_planilha():
     try:
         response = requests.get(WEBHOOK_URL, timeout=10)
         if response.status_code == 200:
-            dados = response.json()
-            for item in dados:
-                sup = str(item.get("supervisor", "")).strip().upper()
-                sub = str(item.get("subsupervisor", "")).strip().upper()
-                if sup and sup not in supervisores_encontrados:
-                    supervisores_encontrados.append(sup)
-                if sub and sub not in subs_encontrados:
-                    subs_encontrados.append(sub)
-        else:
-            st.sidebar.warning(f"Status HTTP: {response.status_code}")
-    except Exception as err:
-        st.sidebar.error(f"Erro de conexão: {err}")
-        
+            return response.json()
+    except Exception:
+        pass
+    return []
+
+def buscar_supervisores_da_planilha():
+    supervisores_encontrados = ["ADEILTON", "ADRIANO BATISTA", "TESTE"]
+    subs_encontrados = ["SEM SUBSUPERVISOR"]
+    dados = carregar_dados_planilha()
+    for item in dados:
+        sup = str(item.get("supervisor", "")).strip().upper()
+        sub = str(item.get("subsupervisor", "")).strip().upper()
+        if sup and sup not in supervisores_encontrados:
+            supervisores_encontrados.append(sup)
+        if sub and sub not in subs_encontrados:
+            subs_encontrados.append(sub)
     return sorted(supervisores_encontrados), sorted(subs_encontrados)
 
 lista_sup, lista_sub = buscar_supervisores_da_planilha()
@@ -90,6 +91,12 @@ if menu == "📸 Envio de Documentos":
                 - numero
                 - bairro
                 - cidade
+                - comunidade
+                - domicilio
+                - telefone
+                - nis
+                - dap
+                - sus
                 Retorne apenas o JSON válido, sem markdown extra.
                 """
                 
@@ -116,31 +123,118 @@ if menu == "📸 Envio de Documentos":
             st.success(f"Processamento concluído! {sucessos} de {total} salvos com sucesso.")
 
 elif menu == "✍️ Formulário Manual":
-    st.subheader(f"✍️ Manual - Sup: {supervisor} / Sub: {sub}")
-    titulo = st.text_input("Título de Eleitor")
-    nome = st.text_input("Nome Completo")
-    cpf = st.text_input("CPF")
+    st.subheader(f"✍️ Consulta & Cadastro Manual - Sup: {supervisor} / Sub: {sub}")
     
-    if st.button("Salvar Cadastro Manual"):
-        if titulo and nome:
-            payload = {
-                "titulo": titulo,
-                "nome": nome,
-                "cpf": cpf,
-                "supervisor": supervisor,
-                "subsupervisor": sub
-            }
-            try:
-                res = requests.post(WEBHOOK_URL, json=payload)
-                if res.status_code == 200:
-                    resposta_servidor = res.json()
-                    if resposta_servidor.get("status") == "DUPLICADO":
-                        st.warning(resposta_servidor.get("mensagem"))
-                    else:
-                        st.success("Cadastro salvo com sucesso!")
-                else:
-                    st.error("Erro ao enviar.")
-            except Exception as e:
-                st.error(f"Erro: {e}")
+    if "busca_realizada" not in st.session_state:
+        st.session_state.busca_realizada = False
+    if "titulo_pesquisado" not in st.session_state:
+        st.session_state.titulo_pesquisado = ""
+    if "eleitor_encontrado" not in st.session_state:
+        st.session_state.eleitor_encontrado = None
+
+    col_busca, col_btn = st.columns([3, 1])
+    with col_busca:
+        titulo_input = st.text_input("Digite o Título de Eleitor para consultar:", value=st.session_state.titulo_pesquisado)
+    with col_btn:
+        st.write("")
+        st.write("")
+        btn_buscar = st.button("🔍 Pesquisar")
+
+    if btn_buscar:
+        titulo_limpo = re.sub(r'\D', '', titulo_input)
+        if not titulo_limpo:
+            st.warning("Por favor, informe um Título de Eleitor válido.")
         else:
-            st.warning("Preencha ao menos o Título e o Nome.")
+            st.session_state.titulo_pesquisado = titulo_limpo
+            st.session_state.busca_realizada = True
+            
+            dados_base = carregar_dados_planilha()
+            encontrado = None
+            for reg in dados_base:
+                tit_reg = re.sub(r'\D', '', str(reg.get("titulo", "")))
+                if tit_reg and tit_reg.upper() != "TITULO" and tit_reg == titulo_limpo:
+                    encontrado = reg
+                    break
+            
+            st.session_state.eleitor_encontrado = encontrado
+
+    if st.session_state.busca_realizada:
+        if st.session_state.eleitor_encontrado:
+            st.error("⚠️ **Título já cadastrado na base!**")
+            e = st.session_state.eleitor_encontrado
+            st.info(f"""
+            **Nome:** {e.get('nome', 'N/A')}  
+            **CPF:** {e.get('cpf', 'N/A')}  
+            **Supervisor:** {e.get('supervisor', 'N/A')}  
+            **Subsupervisor:** {e.get('subsupervisor', 'N/A')}
+            """)
+        else:
+            st.success("✅ **Título não encontrado.** Preencha os campos abaixo para realizar o cadastro completo:")
+            
+            with st.form("form_cadastro_manual_completo"):
+                titulo_f = st.text_input("Título de Eleitor", value=st.session_state.titulo_pesquisado, disabled=True)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    nome_f = st.text_input("Nome Completo *")
+                    cpf_f = st.text_input("CPF")
+                    rg_f = st.text_input("RG")
+                    data_nasc_f = st.text_input("Data de Nascimento (DD/MM/AAAA)")
+                    nome_mae_f = st.text_input("Nome da Mãe")
+                    endereco_f = st.text_input("Endereço")
+                    numero_f = st.text_input("Nº")
+                    bairro_f = st.text_input("Bairro")
+                with col2:
+                    cidade_f = st.text_input("Cidade")
+                    zona_f = st.text_input("Zona")
+                    secao_f = st.text_input("Seção")
+                    comunidade_f = st.text_input("Comunidade")
+                    domicilio_f = st.text_input("Domicílio (Ex: R)")
+                    telefone_f = st.text_input("Telefone")
+                    nis_f = st.text_input("NIS")
+                    dap_f = st.text_input("DAP")
+                    sus_f = st.text_input("SUS")
+                
+                btn_salvar = st.form_submit_button("💾 Salvar Cadastro Completo")
+                
+                if btn_salvar:
+                    if not nome_f:
+                        st.error("O campo Nome Completo é obrigatório.")
+                    else:
+                        payload = {
+                            "titulo": st.session_state.titulo_pesquisado,
+                            "nome": nome_f,
+                            "cpf": cpf_f,
+                            "rg": rg_f,
+                            "data_nascimento": data_nasc_f,
+                            "nome_mae": nome_mae_f,
+                            "endereco": endereco_f,
+                            "numero": numero_f,
+                            "bairro": bairro_f,
+                            "cidade": cidade_f,
+                            "zona": zona_f,
+                            "secao": secao_f,
+                            "comunidade": comunidade_f,
+                            "domicilio": domicilio_f,
+                            "telefone": telefone_f,
+                            "nis": nis_f,
+                            "dap": dap_f,
+                            "sus": sus_f,
+                            "supervisor": supervisor,
+                            "subsupervisor": sub
+                        }
+                        try:
+                            res = requests.post(WEBHOOK_URL, json=payload)
+                            if res.status_code == 200:
+                                res_json = res.json()
+                                if res_json.get("status") == "SUCESSO":
+                                    st.success("🎉 Cadastro realizado com sucesso!")
+                                    st.session_state.busca_realizada = False
+                                    st.session_state.titulo_pesquisado = ""
+                                    st.session_state.eleitor_encontrado = None
+                                else:
+                                    st.warning(res_json.get("mensagem", "Erro ao salvar."))
+                            else:
+                                st.error("Erro na comunicação com a planilha.")
+                        except Exception as ex:
+                            st.error(f"Erro ao salvar: {ex}")
