@@ -19,31 +19,26 @@ client = genai.Client(api_key=API_KEY)
 st.title("🗳️ Sistema de Cadastro CP")
 st.markdown("---")
 
-# Cache otimizado para a aplicação rodar muito mais rápido sem travar
-@st.cache_data(ttl=300)
-def carregar_dados_planilha():
-    try:
-        response = requests.get(WEBHOOK_URL, timeout=5)
-        if response.status_code == 200:
-            return response.json()
-    except Exception:
-        pass
-    return []
-
-def buscar_supervisores_da_planilha():
+# Função leve apenas para buscar supervisores salvos em cache rápido
+@st.cache_data(ttl=600)
+def carregar_supervisores_rapido():
     supervisores_encontrados = ["ADEILTON", "ADRIANO BATISTA", "TESTE"]
     subs_encontrados = ["SEM SUBSUPERVISOR"]
-    dados = carregar_dados_planilha()
-    for item in dados:
-        sup = str(item.get("supervisor", "")).strip().upper()
-        sub = str(item.get("subsupervisor", "")).strip().upper()
-        if sup and sup not in supervisores_encontrados:
-            supervisores_encontrados.append(sup)
-        if sub and sub not in subs_encontrados:
-            subs_encontrados.append(sub)
+    try:
+        response = requests.get(WEBHOOK_URL, timeout=3)
+        if response.status_code == 200:
+            for item in response.json():
+                sup = str(item.get("supervisor", "")).strip().upper()
+                sub = str(item.get("subsupervisor", "")).strip().upper()
+                if sup and sup not in supervisores_encontrados:
+                    supervisores_encontrados.append(sup)
+                if sub and sub not in subs_encontrados:
+                    subs_encontrados.append(sub)
+    except Exception:
+        pass
     return sorted(supervisores_encontrados), sorted(subs_encontrados)
 
-lista_sup, lista_sub = buscar_supervisores_da_planilha()
+lista_sup, lista_sub = carregar_supervisores_rapido()
 
 with st.sidebar:
     st.header("⚙️ Configuração")
@@ -150,12 +145,17 @@ elif menu == "✍️ Formulário Manual":
             st.session_state.titulo_pesquisado = titulo_input
             st.session_state.busca_realizada = True
             
-            dados_base = carregar_dados_planilha()
+            # Busca pontual apenas no clique do botão para não travar a aplicação
+            try:
+                res_busca = requests.get(WEBHOOK_URL, timeout=5)
+                dados_base = res_busca.json() if res_busca.status_code == 200 else []
+            except Exception:
+                dados_base = []
+
             encontrado = None
             for reg in dados_base:
                 tit_reg_bruto = str(reg.get("titulo", ""))
                 tit_reg_limpo = re.sub(r'\D', '', tit_reg_bruto).lstrip('0')
-                
                 if tit_reg_limpo and tit_reg_limpo.upper() != "TITULO" and tit_reg_limpo == titulo_limpo:
                     encontrado = reg
                     break
@@ -172,20 +172,21 @@ elif menu == "✍️ Formulário Manual":
             **Supervisor:** {e.get('supervisor', 'N/A')}  
             **Subsupervisor:** {e.get('subsupervisor', 'N/A')}
             """)
+            if st.button("🔄 Consultar Outro Título"):
+                st.session_state.busca_realizada = False
+                st.session_state.titulo_pesquisado = ""
+                st.session_state.eleitor_encontrado = None
+                st.rerun()
         else:
             st.success("✅ **Título não encontrado.** Preencha os campos abaixo:")
             
-            with st.form("form_cadastro_manual_completo"):
+            with st.form("form_cadastro_manual_completo", clear_on_submit=True):
                 titulo_f = st.text_input("Título de Eleitor", value=st.session_state.titulo_pesquisado, disabled=True)
                 
-                # Sequência linear única de campos para o Tab funcionar perfeitamente de cima a baixo
                 nome_f = st.text_input("Nome Completo *")
                 cpf_f = st.text_input("CPF")
                 rg_f = st.text_input("RG")
-                
-                # Tratamento automático de data no formato DD/MM/AAAA
                 data_nasc_f = st.text_input("Data de Nascimento (DD/MM/AAAA)")
-                
                 nome_mae_f = st.text_input("Nome da Mãe")
                 endereco_f = st.text_input("Endereço")
                 numero_f = st.text_input("Nº")
@@ -206,7 +207,6 @@ elif menu == "✍️ Formulário Manual":
                     if not nome_f:
                         st.error("O campo Nome Completo é obrigatório.")
                     else:
-                        # Validação e formatação limpa da data com barras
                         data_limpa = re.sub(r'\D', '', data_nasc_f)
                         data_formatada = data_nasc_f
                         if len(data_limpa) == 8:
@@ -243,6 +243,7 @@ elif menu == "✍️ Formulário Manual":
                                     st.session_state.busca_realizada = False
                                     st.session_state.titulo_pesquisado = ""
                                     st.session_state.eleitor_encontrado = None
+                                    st.rerun()
                                 else:
                                     st.warning(res_json.get("mensagem", "Erro ao salvar."))
                             else:
