@@ -19,9 +19,11 @@ client = genai.Client(api_key=API_KEY)
 st.title("🗳️ Sistema de Cadastro CP")
 st.markdown("---")
 
+# Cache otimizado para a aplicação rodar muito mais rápido sem travar
+@st.cache_data(ttl=300)
 def carregar_dados_planilha():
     try:
-        response = requests.get(WEBHOOK_URL, timeout=10)
+        response = requests.get(WEBHOOK_URL, timeout=5)
         if response.status_code == 200:
             return response.json()
     except Exception:
@@ -171,31 +173,32 @@ elif menu == "✍️ Formulário Manual":
             **Subsupervisor:** {e.get('subsupervisor', 'N/A')}
             """)
         else:
-            st.success("✅ **Título não encontrado.** Preencha os campos abaixo para realizar o cadastro completo:")
+            st.success("✅ **Título não encontrado.** Preencha os campos abaixo:")
             
             with st.form("form_cadastro_manual_completo"):
                 titulo_f = st.text_input("Título de Eleitor", value=st.session_state.titulo_pesquisado, disabled=True)
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    nome_f = st.text_input("Nome Completo *")
-                    cpf_f = st.text_input("CPF")
-                    rg_f = st.text_input("RG")
-                    data_nasc_f = st.text_input("Data de Nascimento (DD/MM/AAAA)")
-                    nome_mae_f = st.text_input("Nome da Mãe")
-                    endereco_f = st.text_input("Endereço")
-                    numero_f = st.text_input("Nº")
-                    bairro_f = st.text_input("Bairro")
-                with col2:
-                    cidade_f = st.text_input("Cidade")
-                    zona_f = st.text_input("Zona")
-                    secao_f = st.text_input("Seção")
-                    comunidade_f = st.text_input("Comunidade")
-                    domicilio_f = st.text_input("Domicílio (Ex: R)")
-                    telefone_f = st.text_input("Telefone")
-                    nis_f = st.text_input("NIS")
-                    dap_f = st.text_input("DAP")
-                    sus_f = st.text_input("SUS")
+                # Sequência linear única de campos para o Tab funcionar perfeitamente de cima a baixo
+                nome_f = st.text_input("Nome Completo *")
+                cpf_f = st.text_input("CPF")
+                rg_f = st.text_input("RG")
+                
+                # Tratamento automático de data no formato DD/MM/AAAA
+                data_nasc_f = st.text_input("Data de Nascimento (DD/MM/AAAA)")
+                
+                nome_mae_f = st.text_input("Nome da Mãe")
+                endereco_f = st.text_input("Endereço")
+                numero_f = st.text_input("Nº")
+                bairro_f = st.text_input("Bairro")
+                cidade_f = st.text_input("Cidade")
+                zona_f = st.text_input("Zona")
+                secao_f = st.text_input("Seção")
+                comunidade_f = st.text_input("Comunidade")
+                domicilio_f = st.text_input("Domicílio (Ex: R)")
+                telefone_f = st.text_input("Telefone")
+                nis_f = st.text_input("NIS")
+                dap_f = st.text_input("DAP")
+                sus_f = st.text_input("SUS")
                 
                 btn_salvar = st.form_submit_button("💾 Salvar Cadastro Completo")
                 
@@ -203,12 +206,18 @@ elif menu == "✍️ Formulário Manual":
                     if not nome_f:
                         st.error("O campo Nome Completo é obrigatório.")
                     else:
+                        # Validação e formatação limpa da data com barras
+                        data_limpa = re.sub(r'\D', '', data_nasc_f)
+                        data_formatada = data_nasc_f
+                        if len(data_limpa) == 8:
+                            data_formatada = f"{data_limpa[:2]}/{data_limpa[2:4]}/{data_limpa[4:]}"
+
                         payload = {
                             "titulo": st.session_state.titulo_pesquisado,
                             "nome": nome_f,
                             "cpf": cpf_f,
                             "rg": rg_f,
-                            "data_nascimento": data_nasc_f,
+                            "data_nascimento": data_formatada,
                             "nome_mae": nome_mae_f,
                             "endereco": endereco_f,
                             "numero": numero_f,
