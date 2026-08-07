@@ -4,8 +4,12 @@ from google import genai
 from google.genai import types
 import json
 import re
+import styles
 
 st.set_page_config(page_title="Sistema de Cadastro CP", layout="centered", page_icon="🗳️")
+
+# Aplicação do Layout Moderno
+st.markdown(styles.get_css(), unsafe_allow_html=True)
 
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -19,7 +23,6 @@ client = genai.Client(api_key=API_KEY)
 st.title("🗳️ Sistema de Cadastro CP")
 st.markdown("---")
 
-# Função leve apenas para buscar supervisores salvos em cache rápido
 @st.cache_data(ttl=600)
 def carregar_supervisores_rapido():
     supervisores_encontrados = ["ADEILTON", "ADRIANO BATISTA", "TESTE"]
@@ -145,7 +148,6 @@ elif menu == "✍️ Formulário Manual":
             st.session_state.titulo_pesquisado = titulo_input
             st.session_state.busca_realizada = True
             
-            # Busca pontual apenas no clique do botão para não travar a aplicação
             try:
                 res_busca = requests.get(WEBHOOK_URL, timeout=5)
                 dados_base = res_busca.json() if res_busca.status_code == 200 else []
