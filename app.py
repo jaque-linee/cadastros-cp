@@ -1,11 +1,27 @@
 import streamlit as st
 import requests
-from google import genai
-from google.genai import types
-import json
-import re
+# ... outros imports ...
 
+# 1. Configuração da página
 st.set_page_config(page_title="Sistema de Cadastro CP", layout="centered", page_icon="🗳️")
+
+# 2. CSS "Força Bruta" (Adicione aqui)
+st.markdown("""
+    <style>
+    /* Pinta o fundo de um azul bem claro para testar se o CSS está sendo lido */
+    .stApp {
+        background-color: #eef2f5 !important;
+    }
+    /* Estiliza os botões com cor e arredondamento */
+    div.stButton > button {
+        background-color: #0056b3 !important;
+        color: white !important;
+        border-radius: 15px !important;
+        border: 2px solid #0056b3 !important;
+        font-weight: bold !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
