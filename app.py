@@ -78,15 +78,25 @@ with st.sidebar:
     menu = st.radio("Escolha a Operação:", ["📸 Envio de Documentos", "✍️ Formulário Manual"])
 
 if menu == "📸 Envio de Documentos":
-    st.subheader(f"📁 Envio - Sup: {supervisor} / Sub: {sub}")
+    st.markdown(f"#### 📁 Envio e Leitura Automática — **Sup:** {supervisor} | **Sub:** {sub}")
+    st.info("💡 Envie fotos ou PDFs dos documentos. A inteligência artificial vai ler os dados, verificar se já existe na base e cadastrar automaticamente!")
+    
     arquivos = st.file_uploader("Arraste ou escolha as fotos/PDFs", accept_multiple_files=True, type=['pdf', 'jpg', 'png'])
     
     if arquivos:
-        if st.button("Processar Lote"):
+        if st.button("🚀 Processar e Cadastrar Lote"):
             barra = st.progress(0)
             total = len(arquivos)
             sucessos = 0
+            duplicados = 0
             
+            # Carrega a base atual uma única vez para checar duplicados antes de enviar
+            try:
+                res_base = requests.get(WEBHOOK_URL, timeout=5)
+                dados_base = res_base.json() if res_base.status_code == 200 else []
+            except Exception:
+                dados_base = []
+
             for i, arquivo in enumerate(arquivos):
                 bytes_dados = arquivo.getvalue()
                 mime_type = "application/pdf" if arquivo.type == "application/pdf" else "image/jpeg"
@@ -122,19 +132,41 @@ if menu == "📸 Envio de Documentos":
                     texto = resposta.text.replace("```json", "").replace("```", "").strip()
                     dados = json.loads(texto)
                     
-                    dados["supervisor"] = supervisor
-                    dados["subsupervisor"] = sub
+                    # Limpa e valida o título extraído pela IA
+                    titulo_lido = str(dados.get("titulo", ""))
+                    titulo_limpo = re.sub(r'\D', '', titulo_lido).lstrip('0')
                     
-                    res_web = requests.post(WEBHOOK_URL, json=dados)
-                    if res_web.status_code == 200:
-                        res_json = res_web.json()
-                        if res_json.get("status") == "SUCESSO":
-                            sucessos += 1
+                    if titulo_limpo:
+                        # Verifica se já existe na base
+                        ja_existe = False
+                        for reg in dados_base:
+                            tit_reg = re.sub(r'\D', '', str(reg.get("titulo", ""))).lstrip('0')
+                            if tit_reg == titulo_limpo:
+                                ja_existe = True
+                                break
+                        
+                        if not ja_existe:
+                            # Adiciona supervisor, subsupervisor e formata data se necessário
+                            dados["titulo"] = titulo_limpo
+                            dados["supervisor"] = supervisor
+                            dados["subsupervisor"] = sub
+                            
+                            # Envia para o Webhook salvar na planilha
+                            res_web = requests.post(WEBHOOK_URL, json=dados)
+                            if res_web.status_code == 200:
+                                res_json = res_web.json()
+                                if res_json.get("status") == "SUCESSO":
+                                    sucessos += 1
+                        else:
+                            duplicados += 1
                 except Exception:
                     pass
                 
                 barra.progress((i + 1) / total)
-            st.success(f"Processamento concluído! {sucessos} de {total} salvos com sucesso.")
+                
+            st.success(f"✨ Processamento concluído! **{sucessos}** novos cadastros salvos com sucesso.")
+            if duplicados > 0:
+                st.warning(f"⚠️ {duplicados} documento(s) ignorado(s) pois o Título de Eleitor já constava na base.")
 
 elif menu == "✍️ Formulário Manual":
     st.subheader(f"✍️ Consulta & Cadastro Manual - Sup: {supervisor} / Sub: {sub}")
