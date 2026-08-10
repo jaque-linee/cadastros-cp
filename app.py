@@ -92,10 +92,11 @@ if menu == "📸 Envio de Documentos":
         for i, arquivo in enumerate(arquivos):
             bytes_dados = arquivo.getvalue()
             mime_type = "application/pdf" if arquivo.type == "application/pdf" else "image/jpeg"
-            prompt = "Extraia dados do documento em JSON: titulo, nome, cpf, data_nascimento, zona, secao, rg, nome_mae, endereco, numero, bairro, cidade, comunidade, domicilio, telefone, nis, dap, sus. Apenas JSON puro."
+            prompt = "Extraia dados do documento em JSON puro: titulo, nome, cpf, data_nascimento, zona, secao, rg, nome_mae, endereco, numero, bairro, cidade, comunidade, domicilio, telefone, nis, dap, sus. Retorne apenas o JSON."
             
             try:
-                resposta = client.models.generate_content(model='gemini-2.5-flash', contents=[types.Part.from_bytes(data=bytes_dados, mime_type=mime_type), prompt])
+                # Modelo corrigido para gemini-2.0-flash
+                resposta = client.models.generate_content(model='gemini-2.0-flash', contents=[types.Part.from_bytes(data=bytes_dados, mime_type=mime_type), prompt])
                 texto = resposta.text.replace("```json", "").replace("```", "").strip()
                 dados = json.loads(texto)
                 titulo_limpo = re.sub(r'\D', '', str(dados.get("titulo", ""))).lstrip('0')
@@ -121,8 +122,11 @@ elif menu == "✍️ Formulário Manual":
     if "busca_realizada" not in st.session_state: st.session_state.update({"busca_realizada": False, "titulo_pesquisado": "", "eleitor_encontrado": None})
     
     col_busca, col_btn = st.columns([3, 1])
-    with col_busca: titulo_input = st.text_input("Título de Eleitor:", value=st.session_state.titulo_pesquisado)
-    with col_btn: btn_buscar = st.button("🔍 Pesquisar")
+    with col_busca: titulo_input = st.text_input("Título de Eleitor para consultar:", value=st.session_state.titulo_pesquisado)
+    with col_btn: 
+        st.write("")
+        st.write("")
+        btn_buscar = st.button("🔍 Pesquisar")
 
     if btn_buscar:
         titulo_limpo = re.sub(r'\D', '', titulo_input).lstrip('0')
@@ -137,13 +141,53 @@ elif menu == "✍️ Formulário Manual":
 
     if st.session_state.busca_realizada:
         if st.session_state.eleitor_encontrado:
-            st.error("⚠️ Título já cadastrado!"); st.info(f"**Nome:** {st.session_state.eleitor_encontrado.get('nome')}")
-            if st.button("🔄 Consultar Outro"): st.session_state.update({"busca_realizada": False}); st.rerun()
+            st.error("⚠️ Título já cadastrado na base!")
+            e = st.session_state.eleitor_encontrado
+            st.info(f"**Nome:** {e.get('nome')} | **CPF:** {e.get('cpf')} | **Sup:** {e.get('supervisor')}")
+            if st.button("🔄 Consultar Outro Título"): st.session_state.update({"busca_realizada": False, "titulo_pesquisado": "", "eleitor_encontrado": None}); st.rerun()
         else:
-            st.success("✅ Título não encontrado. Preencha abaixo:"); 
-            with st.form("form_manual"):
+            st.success("✅ Título não encontrado. Preencha os campos abaixo:")
+            with st.form("form_cadastro_manual_completo", clear_on_submit=True):
+                st.text_input("Título de Eleitor", value=st.session_state.titulo_pesquisado, disabled=True)
                 nome_f = st.text_input("Nome Completo *")
-                # ... (adicionar aqui o restante dos campos que você tinha)
-                if st.form_submit_button("💾 Salvar"):
-                    if not nome_f: st.error("Nome obrigatório.")
-                    else: st.success("Cadastro realizado!")
+                cpf_f = st.text_input("CPF")
+                rg_f = st.text_input("RG")
+                data_nasc_f = st.text_input("Data de Nascimento (DD/MM/AAAA)")
+                nome_mae_f = st.text_input("Nome da Mãe")
+                endereco_f = st.text_input("Endereço")
+                numero_f = st.text_input("Nº")
+                bairro_f = st.text_input("Bairro")
+                cidade_f = st.text_input("Cidade")
+                zona_f = st.text_input("Zona")
+                secao_f = st.text_input("Seção")
+                comunidade_f = st.text_input("Comunidade")
+                domicilio_f = st.text_input("Domicílio (Ex: R)")
+                telefone_f = st.text_input("Telefone")
+                nis_f = st.text_input("NIS")
+                dap_f = st.text_input("DAP")
+                sus_f = st.text_input("SUS")
+                
+                if st.form_submit_button("💾 Salvar Cadastro Completo"):
+                    if not nome_f:
+                        st.error("O campo Nome Completo é obrigatório.")
+                    else:
+                        data_limpa = re.sub(r'\D', '', data_nasc_f)
+                        data_formatada = f"{data_limpa[:2]}/{data_limpa[2:4]}/{data_limpa[4:]}" if len(data_limpa) == 8 else data_nasc_f
+                        payload = {
+                            "titulo": st.session_state.titulo_pesquisado, "nome": nome_f, "cpf": cpf_f, "rg": rg_f,
+                            "data_nascimento": data_formatada, "nome_mae": nome_mae_f, "endereco": endereco_f,
+                            "numero": numero_f, "bairro": bairro_f, "cidade": cidade_f, "zona": zona_f,
+                            "secao": secao_f, "comunidade": comunidade_f, "domicilio": domicilio_f,
+                            "telefone": telefone_f, "nis": nis_f, "dap": dap_f, "sus": sus_f,
+                            "supervisor": supervisor, "subsupervisor": sub
+                        }
+                        try:
+                            res = requests.post(WEBHOOK_URL, json=payload)
+                            if res.status_code == 200 and res.json().get("status") == "SUCESSO":
+                                st.success("🎉 Cadastro realizado com sucesso!")
+                                st.session_state.update({"busca_realizada": False, "titulo_pesquisado": "", "eleitor_encontrado": None})
+                                st.rerun()
+                            else:
+                                st.warning("Erro ao salvar na planilha.")
+                        except Exception as ex:
+                            st.error(f"Erro ao salvar: {ex}")
