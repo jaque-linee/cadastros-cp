@@ -2142,7 +2142,21 @@ if menu == "📸 Envio de Documentos":
                                 existente_sup,
 
                             "_dados":
-                                dados.copy()
+                                dados.copy(),
+
+                            "_texto_ocr":
+                                texto,
+
+                            "_itens_ocr":
+                                [
+                                    {
+                                        "texto": str(item.get("texto", "")),
+                                        "confianca": round(float(item.get("confianca", 0)) * 100, 2),
+                                        "x": round(float(item.get("x", 0)), 1),
+                                        "y": round(float(item.get("y", 0)), 1)
+                                    }
+                                    for item in itens
+                                ]
                         }
                     )
 
@@ -2282,7 +2296,11 @@ if menu == "📸 Envio de Documentos":
                 item_visivel = {
                     chave: valor
                     for chave, valor in item.items()
-                    if chave != "_dados"
+                    if chave not in (
+                        "_dados",
+                        "_texto_ocr",
+                        "_itens_ocr"
+                    )
                 }
 
                 resultados_visiveis.append(
@@ -2384,6 +2402,61 @@ if menu == "📸 Envio de Documentos":
                 "Nenhum cadastro do lote foi gravado "
                 "automaticamente."
             )
+
+            # ====================================================
+            # DIAGNÓSTICO TEMPORÁRIO DO OCR
+            # ====================================================
+            st.markdown("---")
+            st.subheader("🛠️ Diagnóstico OCR")
+
+            st.caption(
+                "Área temporária para conferir exatamente o que "
+                "o OCR reconheceu. Não altera nem salva cadastros."
+            )
+
+            for indice_diag, item_diag in enumerate(resultados):
+                texto_diag = str(
+                    item_diag.get("_texto_ocr", "") or ""
+                ).strip()
+
+                itens_diag = item_diag.get(
+                    "_itens_ocr",
+                    []
+                )
+
+                with st.expander(
+                    f"🔎 {item_diag.get('Arquivo', 'Documento')}",
+                    expanded=False
+                ):
+                    st.markdown("**Texto reconhecido:**")
+
+                    if texto_diag:
+                        st.code(
+                            texto_diag,
+                            language=None
+                        )
+                    else:
+                        st.warning(
+                            "Nenhum texto bruto foi retornado."
+                        )
+
+                    st.markdown("**Blocos reconhecidos pelo OCR:**")
+
+                    if itens_diag:
+                        df_diag = pd.DataFrame(
+                            itens_diag
+                        )
+
+                        st.dataframe(
+                            df_diag,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info(
+                            "Este arquivo não possui blocos OCR. "
+                            "Se for PDF com texto digital, isso é esperado."
+                        )
 
 
 # ============================================================
