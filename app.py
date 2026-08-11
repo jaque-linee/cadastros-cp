@@ -1,12 +1,15 @@
+import os
+
+# Evita incompatibilidade do Paddle/oneDNN no Streamlit Cloud
+os.environ["FLAGS_use_mkldnn"] = "0"
+os.environ["FLAGS_enable_pir_api"] = "0"
+
 import streamlit as st
 import requests
 import re
 import io
 import json
 import numpy as np
-from PIL import Image
-from paddleocr import PaddleOCR
-import fitz
 
 
 # ============================================================
