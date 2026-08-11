@@ -753,14 +753,8 @@ def encontrar_mae_texto_digital(linhas):
 # ============================================================
 # 16. EXTRAIR DADOS DO PDF DIGITAL
 # ============================================================
-
-def extrair_dados_pdf_digital(
-    texto
-):
-    linhas = linhas_texto(
-        texto
-    )
-
+def extrair_dados_pdf_digital(texto):
+    linhas = linhas_texto(texto)
     dados = {
         "nome": "",
         "cpf": "",
@@ -774,256 +768,178 @@ def extrair_dados_pdf_digital(
     # ========================================================
     # NOME
     # ========================================================
-
-    for i, linha in enumerate(
-        linhas
-    ):
-        rotulo = normalizar_rotulo(
-            linha
-        )
-
-        if rotulo in [
-            "NOMEDOELEITOR",
-            "NOME",
-            "NOMECOMPLETO"
-        ]:
+    for i, linha in enumerate(linhas):
+        rotulo = normalizar_rotulo(linha)
+        if rotulo in ["NOMEDOELEITOR", "NOME", "NOMECOMPLETO", "NOME-"]:
             candidatos = []
-
-            if i > 0:
-                candidatos.append(
-                    linhas[i - 1]
-                )
-
+            
+            # Correção 1: Prioriza a linha de BAIXO, depois a de CIMA
             if i + 1 < len(linhas):
-                candidatos.append(
-                    linhas[i + 1]
-                )
+                candidatos.append(linhas[i + 1])
+            if i > 0:
+                candidatos.append(linhas[i - 1])
 
             for candidato in candidatos:
-                if parece_nome(
-                    candidato
-                ):
-                    dados["nome"] = (
-                        candidato.upper()
-                    )
+                if parece_nome(candidato):
+                    dados["nome"] = candidato.upper()
                     break
-
         if dados["nome"]:
             break
 
     # ========================================================
     # NASCIMENTO
     # ========================================================
-
-    for i, linha in enumerate(
-        linhas
-    ):
-        rotulo = normalizar_rotulo(
-            linha
-        )
-
-        if rotulo in [
-            "DATADENASCIMENTO",
-            "NASCIMENTO"
-        ]:
+    for i, linha in enumerate(linhas):
+        rotulo = normalizar_rotulo(linha)
+        if rotulo in ["DATADENASCIMENTO", "NASCIMENTO", "DATANASCIMENTO"]:
             candidatos = []
-
-            if i > 0:
-                candidatos.append(
-                    linhas[i - 1]
-                )
-
             if i + 1 < len(linhas):
-                candidatos.append(
-                    linhas[i + 1]
-                )
+                candidatos.append(linhas[i + 1])
+            if i > 0:
+                candidatos.append(linhas[i - 1])
 
             for candidato in candidatos:
-                if data_valida(
-                    candidato
-                ):
-                    dados[
-                        "data_nascimento"
-                    ] = (
-                        candidato
-                        .replace(".", "/")
-                        .replace("-", "/")
-                    )
+                if data_valida(candidato):
+                    dados["data_nascimento"] = candidato.replace(".", "/").replace("-", "/")
                     break
-
-        if dados[
-            "data_nascimento"
-        ]:
+        if dados["data_nascimento"]:
             break
+
+    # Fallback (Busca global) para Nascimento caso não ache perto do rótulo
+    if not dados["data_nascimento"]:
+        for linha in linhas:
+            match = re.search(r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b", linha)
+            if match:
+                valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+                if data_valida(valor):
+                    dados["data_nascimento"] = valor
+                    break
 
     # ========================================================
     # CPF
     # ========================================================
-
-    for i, linha in enumerate(
-        linhas
-    ):
-        if "CPF" in normalizar_texto(
-            linha
-        ):
-            numero = somente_numeros(
-                linha
-            )
-
+    for i, linha in enumerate(linhas):
+        if "CPF" in normalizar_texto(linha):
+            numero = somente_numeros(linha)
             if len(numero) == 11 and cpf_valido(numero):
-                dados["cpf"] = formatar_cpf(
-                    numero
-                )
+                dados["cpf"] = formatar_cpf(numero)
                 break
 
             candidatos = []
-
-            if i > 0:
-                candidatos.append(
-                    linhas[i - 1]
-                )
-
             if i + 1 < len(linhas):
-                candidatos.append(
-                    linhas[i + 1]
-                )
+                candidatos.append(linhas[i + 1])
+            if i > 0:
+                candidatos.append(linhas[i - 1])
 
             for candidato in candidatos:
-                numero = somente_numeros(
-                    candidato
-                )
-
+                numero = somente_numeros(candidato)
                 if len(numero) == 11 and cpf_valido(numero):
-                    dados["cpf"] = formatar_cpf(
-                        numero
-                    )
+                    dados["cpf"] = formatar_cpf(numero)
                     break
-
         if dados["cpf"]:
             break
+
+    # Fallback (Busca global) para CPF na CNH
+    if not dados["cpf"]:
+        for linha in linhas:
+            # Procura por padrões que se pareçam com CPF misturados na linha
+            palavras = linha.replace(".", " ").replace("-", " ").split()
+            numero_potencial = "".join([somente_numeros(p) for p in palavras])
+            
+            # Se achou uma sequência de 11 números válidos
+            matches = re.findall(r'\d{11}', numero_potencial)
+            for num in matches:
+                if cpf_valido(num):
+                    dados["cpf"] = formatar_cpf(num)
+                    break
+            
+            # Outra abordagem para CPFs já formatados na mesma linha de outros dados
+            match_formatado = re.search(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b", linha)
+            if match_formatado:
+                num = somente_numeros(match_formatado.group(0))
+                if cpf_valido(num):
+                    dados["cpf"] = formatar_cpf(num)
+                    break
+
+            if dados["cpf"]:
+                break
 
     # ========================================================
     # TÍTULO
     # ========================================================
-
-    for i, linha in enumerate(
-        linhas
-    ):
-        rotulo = normalizar_rotulo(
-            linha
-        )
-
-        if rotulo in [
-            "INSCRICAO",
-            "TITULO"
-        ]:
+    for i, linha in enumerate(linhas):
+        rotulo = normalizar_rotulo(linha)
+        if rotulo in ["INSCRICAO", "TITULO"]:
             candidatos = []
-
-            if i > 0:
-                candidatos.append(
-                    linhas[i - 1]
-                )
-
             if i + 1 < len(linhas):
-                candidatos.append(
-                    linhas[i + 1]
-                )
+                candidatos.append(linhas[i + 1])
+            if i > 0:
+                candidatos.append(linhas[i - 1])
 
             for candidato in candidatos:
-                numero = somente_numeros(
-                    candidato
-                )
-
+                numero = somente_numeros(candidato)
                 if len(numero) == 12:
                     dados["titulo"] = numero
                     break
-
         if dados["titulo"]:
             break
-
-    # Sem fallback global para título:
-    # um número de 12 dígitos só é aceito quando estiver associado
-    # ao rótulo INSCRIÇÃO/TÍTULO. Isso evita inventar título.
 
     # ========================================================
     # NOME DA MÃE
     # ========================================================
+    dados["nome_mae"] = encontrar_mae_texto_digital(linhas)
 
-    dados["nome_mae"] = (
-        encontrar_mae_texto_digital(
-            linhas
-        )
-    )
+    # Fallback simples para tentar capturar a mãe em CNH (que usa "FILIACAO")
+    if not dados["nome_mae"]:
+        for i, linha in enumerate(linhas):
+            if normalizar_rotulo(linha) == "FILIACAO":
+                # Geralmente a mãe é o último nome após FILIACAO
+                nomes_filiacao = []
+                for deslocamento in range(1, 5):
+                    if i + deslocamento < len(linhas):
+                        cand = linhas[i + deslocamento]
+                        if parece_nome(cand):
+                            nomes_filiacao.append(cand.upper())
+                if nomes_filiacao:
+                    # Pega o último nome encontrado (geralmente a mãe na CNH)
+                    dados["nome_mae"] = nomes_filiacao[-1]
+                break
 
     # ========================================================
     # ZONA
     # ========================================================
-
-    for i, linha in enumerate(
-        linhas
-    ):
-        if normalizar_rotulo(
-            linha
-        ) == "ZONA":
+    for i, linha in enumerate(linhas):
+        if normalizar_rotulo(linha) == "ZONA":
             candidatos = []
-
-            if i > 0:
-                candidatos.append(
-                    linhas[i - 1]
-                )
-
             if i + 1 < len(linhas):
-                candidatos.append(
-                    linhas[i + 1]
-                )
+                candidatos.append(linhas[i + 1])
+            if i > 0:
+                candidatos.append(linhas[i - 1])
 
             for candidato in candidatos:
-                numero = somente_numeros(
-                    candidato
-                )
-
+                numero = somente_numeros(candidato)
                 if 1 <= len(numero) <= 3:
-                    dados["zona"] = (
-                        numero.zfill(3)
-                    )
+                    dados["zona"] = numero.zfill(3)
                     break
-
         if dados["zona"]:
             break
 
     # ========================================================
     # SEÇÃO
     # ========================================================
-
-    for i, linha in enumerate(
-        linhas
-    ):
-        if normalizar_rotulo(
-            linha
-        ) == "SECAO":
+    for i, linha in enumerate(linhas):
+        if normalizar_rotulo(linha) == "SECAO":
             candidatos = []
-
-            if i > 0:
-                candidatos.append(
-                    linhas[i - 1]
-                )
-
             if i + 1 < len(linhas):
-                candidatos.append(
-                    linhas[i + 1]
-                )
+                candidatos.append(linhas[i + 1])
+            if i > 0:
+                candidatos.append(linhas[i - 1])
 
             for candidato in candidatos:
-                numero = somente_numeros(
-                    candidato
-                )
-
+                numero = somente_numeros(candidato)
                 if 1 <= len(numero) <= 4:
-                    dados["secao"] = (
-                        numero.zfill(4)
-                    )
+                    dados["secao"] = numero.zfill(4)
                     break
-
         if dados["secao"]:
             break
 
