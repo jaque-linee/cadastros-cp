@@ -358,7 +358,8 @@ def extrair_dados_tesseract(texto, imagem_original=None):
         "data_nascimento": "",
         "nome_mae": "",
         "zona": "",
-        "secao": ""
+        "secao": "",
+        "_candidatos_mae": []
     }
 
     texto_norm = remover_acentos(texto).upper()
@@ -641,6 +642,29 @@ def extrair_dados_tesseract(texto, imagem_original=None):
                         nomes_pos.append(
                             linha_pos
                         )
+
+                # Guarda nomes reconhecidos fisicamente como possíveis
+                # candidatos de filiação. Isso será usado apenas para
+                # conferência manual quando o OCR não conseguir distinguir
+                # automaticamente qual deles é a mãe.
+                candidatos_manuais = []
+
+                for linha_nome in nomes_pos:
+                    nome_candidato = (
+                        str(linha_nome.get("texto", ""))
+                        .strip()
+                        .upper()
+                    )
+
+                    if (
+                        nome_candidato
+                        and nome_candidato not in candidatos_manuais
+                    ):
+                        candidatos_manuais.append(
+                            nome_candidato
+                        )
+
+                dados["_candidatos_mae"] = candidatos_manuais
 
                 # Procura o titular conhecido pelo OCR principal/texto.
                 # Em CIN, os dois nomes imediatamente acima dele formam
@@ -2512,6 +2536,18 @@ if menu == "📸 Envio de Documentos":
                                 dados_tesseract
                             )
 
+                            candidatos_mae = (
+                                dados_tesseract.get(
+                                    "_candidatos_mae",
+                                    []
+                                )
+                            )
+
+                            if candidatos_mae:
+                                dados[
+                                    "_candidatos_mae"
+                                ] = candidatos_mae
+
                         del imagem_fallback
                         gc.collect()
 
@@ -2739,6 +2775,88 @@ if menu == "📸 Envio de Documentos":
                 conferir
             )
 
+            # ====================================================
+            # CONFERÊNCIA MANUAL DO NOME DA MÃE
+            # ====================================================
+
+            pendentes_mae = [
+                item
+                for item in resultados
+                if (
+                    item.get("_dados")
+                    and not item["_dados"].get("nome_mae")
+                    and item["_dados"].get("_candidatos_mae")
+                    and item.get("Resultado") != "⚠️ JÁ CADASTRADO"
+                )
+            ]
+
+            if pendentes_mae:
+                st.markdown("---")
+                st.subheader("👩 Conferir nome da mãe")
+                st.caption(
+                    "O OCR encontrou nomes no documento, mas não conseguiu "
+                    "determinar com segurança qual é o nome da mãe. "
+                    "Selecione somente nos documentos abaixo."
+                )
+
+                houve_correcao = False
+
+                for indice_mae, item in enumerate(pendentes_mae):
+                    dados_item = item["_dados"]
+
+                    candidatos = []
+
+                    for candidato in dados_item.get(
+                        "_candidatos_mae",
+                        []
+                    ):
+                        candidato = str(candidato or "").strip().upper()
+
+                        if (
+                            candidato
+                            and candidato != str(
+                                dados_item.get("nome", "")
+                            ).strip().upper()
+                            and candidato not in candidatos
+                        ):
+                            candidatos.append(candidato)
+
+                    if not candidatos:
+                        continue
+
+                    chave_base = (
+                        f"mae_{indice_mae}_"
+                        f"{item.get('Arquivo', '')}"
+                    )
+
+                    escolha = st.selectbox(
+                        f"{item.get('Arquivo', 'Documento')} — "
+                        f"{dados_item.get('nome', '')}",
+                        options=["— SELECIONE —"] + candidatos,
+                        key=chave_base
+                    )
+
+                    if escolha != "— SELECIONE —":
+                        dados_item["nome_mae"] = escolha
+                        item["Nome da mãe"] = escolha
+
+                        duplicado_atual, _ = verificar_duplicidade(
+                            dados_item,
+                            base
+                        )
+
+                        item["Resultado"] = classificar_resultado(
+                            dados_item,
+                            duplicado_atual
+                        )
+
+                        houve_correcao = True
+
+                if houve_correcao:
+                    st.session_state[
+                        "resultado_lote"
+                    ] = resultados
+
             resultados_visiveis = []
 
             for item in resultados:
@@ -2749,7 +2867,8 @@ if menu == "📸 Envio de Documentos":
                         "_dados",
                         "_texto_ocr",
                         "_texto_tesseract",
-                        "_itens_ocr"
+                        "_itens_ocr",
+                        "_candidatos_mae"
                     )
                 }
 
@@ -2802,7 +2921,14 @@ if menu == "📸 Envio de Documentos":
                     for indice_salvar, item in enumerate(
                         aptos_para_salvar
                     ):
-                        dados_salvar = item["_dados"]
+                        dados_salvar = dict(
+                            item["_dados"]
+                        )
+
+                        dados_salvar.pop(
+                            "_candidatos_mae",
+                            None
+                        )
 
                         retorno = sheets.salvar_cadastro(
                             WEBHOOK_URL,
