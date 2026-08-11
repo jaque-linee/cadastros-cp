@@ -1,0 +1,410 @@
+import re
+import requests
+
+
+def somente_numeros(valor):
+    return re.sub(r"\D", "", str(valor or ""))
+
+
+def normalizar_texto(valor):
+    return str(valor or "").strip()
+
+
+def normalizar_nome(valor):
+    return normalizar_texto(valor).upper()
+
+
+def normalizar_titulo(valor):
+    return somente_numeros(valor)
+
+
+def normalizar_cpf(valor):
+    return somente_numeros(valor)
+
+
+def carregar_base(webhook_url, timeout=15):
+    """
+    Carrega os registros existentes da aba TABELA
+    através do doGet do Google Apps Script.
+    """
+
+    try:
+        resposta = requests.get(
+            webhook_url,
+            timeout=timeout
+        )
+
+        resposta.raise_for_status()
+
+        dados = resposta.json()
+
+        if not isinstance(dados, list):
+            return {
+                "sucesso": False,
+                "dados": [],
+                "mensagem": "Resposta inválida recebida da planilha."
+            }
+
+        if (
+            len(dados) == 1
+            and isinstance(dados[0], dict)
+            and dados[0].get("error")
+        ):
+            return {
+                "sucesso": False,
+                "dados": [],
+                "mensagem": str(
+                    dados[0].get("error")
+                )
+            }
+
+        return {
+            "sucesso": True,
+            "dados": dados,
+            "mensagem": ""
+        }
+
+    except requests.exceptions.Timeout:
+        return {
+            "sucesso": False,
+            "dados": [],
+            "mensagem": "A consulta à planilha demorou demais."
+        }
+
+    except requests.exceptions.RequestException as erro:
+        return {
+            "sucesso": False,
+            "dados": [],
+            "mensagem": f"Erro de comunicação com a planilha: {erro}"
+        }
+
+    except ValueError:
+        return {
+            "sucesso": False,
+            "dados": [],
+            "mensagem": "A planilha retornou uma resposta que não é JSON."
+        }
+
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "dados": [],
+            "mensagem": f"Erro ao consultar a planilha: {erro}"
+        }
+
+
+def procurar_duplicidade(
+    dados_base,
+    cpf="",
+    titulo=""
+):
+    """
+    Procura cadastro existente por CPF OU Título.
+
+    Não considera nome como critério de duplicidade,
+    pois pessoas diferentes podem ter nomes iguais.
+    """
+
+    cpf_procurado = normalizar_cpf(cpf)
+    titulo_procurado = normalizar_titulo(titulo)
+
+    if not cpf_procurado and not titulo_procurado:
+        return None
+
+    for registro in dados_base:
+        cpf_existente = normalizar_cpf(
+            registro.get("cpf", "")
+        )
+
+        titulo_existente = normalizar_titulo(
+            registro.get("titulo", "")
+        )
+
+        encontrou_cpf = (
+            bool(cpf_procurado)
+            and bool(cpf_existente)
+            and cpf_procurado == cpf_existente
+        )
+
+        encontrou_titulo = (
+            bool(titulo_procurado)
+            and bool(titulo_existente)
+            and titulo_procurado == titulo_existente
+        )
+
+        if encontrou_cpf or encontrou_titulo:
+            return registro
+
+    return None
+
+
+def preparar_payload(
+    dados,
+    supervisor,
+    subsupervisor
+):
+    """
+    Prepara os dados que serão enviados ao Apps Script.
+
+    Nenhum dado é inventado aqui.
+    Campo ausente continua vazio.
+    """
+
+    payload = {
+        "supervisor": normalizar_nome(
+            supervisor
+        ),
+        "subsupervisor": normalizar_nome(
+            subsupervisor
+        ),
+        "nome": normalizar_nome(
+            dados.get("nome", "")
+        ),
+        "cpf": normalizar_cpf(
+            dados.get("cpf", "")
+        ),
+        "rg": normalizar_texto(
+            dados.get("rg", "")
+        ),
+        "data_nascimento": normalizar_texto(
+            dados.get("data_nascimento", "")
+        ),
+        "nome_mae": normalizar_nome(
+            dados.get("nome_mae", "")
+        ),
+        "endereco": normalizar_texto(
+            dados.get("endereco", "")
+        ),
+        "numero": normalizar_texto(
+            dados.get("numero", "")
+        ),
+        "bairro": normalizar_texto(
+            dados.get("bairro", "")
+        ),
+        "cidade": normalizar_nome(
+            dados.get("cidade", "")
+        ),
+        "titulo": normalizar_titulo(
+            dados.get("titulo", "")
+        ),
+        "zona": somente_numeros(
+            dados.get("zona", "")
+        ),
+        "secao": somente_numeros(
+            dados.get("secao", "")
+        ),
+        "comunidade": normalizar_texto(
+            dados.get("comunidade", "")
+        ),
+        "domicilio": normalizar_texto(
+            dados.get("domicilio", "")
+        ),
+        "telefone": normalizar_texto(
+            dados.get("telefone", "")
+        ),
+        "nis": somente_numeros(
+            dados.get("nis", "")
+        ),
+        "dap": normalizar_texto(
+            dados.get("dap", "")
+        ),
+        "sus": somente_numeros(
+            dados.get("sus", "")
+        )
+    }
+
+    return payload
+
+
+def validar_antes_de_salvar(dados):
+    """
+    Regra mínima do cadastro automático:
+
+    Nome
+    + Nascimento
+    + Nome da mãe
+    + CPF OU Título
+    """
+
+    faltando = []
+
+    nome = normalizar_texto(
+        dados.get("nome", "")
+    )
+
+    nascimento = normalizar_texto(
+        dados.get("data_nascimento", "")
+    )
+
+    nome_mae = normalizar_texto(
+        dados.get("nome_mae", "")
+    )
+
+    cpf = normalizar_cpf(
+        dados.get("cpf", "")
+    )
+
+    titulo = normalizar_titulo(
+        dados.get("titulo", "")
+    )
+
+    if not nome:
+        faltando.append("NOME")
+
+    if not nascimento:
+        faltando.append("NASCIMENTO")
+
+    if not nome_mae:
+        faltando.append("NOME DA MÃE")
+
+    if not cpf and not titulo:
+        faltando.append("CPF OU TÍTULO")
+
+    return {
+        "valido": len(faltando) == 0,
+        "faltando": faltando
+    }
+
+
+def salvar_cadastro(
+    webhook_url,
+    dados,
+    supervisor,
+    subsupervisor,
+    dados_base=None,
+    timeout=30
+):
+    """
+    Fluxo completo:
+
+    1. valida os campos obrigatórios;
+    2. consulta/verifica duplicidade;
+    3. envia o cadastro ao Apps Script;
+    4. devolve o resultado ao app.py.
+    """
+
+    validacao = validar_antes_de_salvar(
+        dados
+    )
+
+    if not validacao["valido"]:
+        return {
+            "status": "CONFERIR",
+            "mensagem": (
+                "Faltam dados obrigatórios: "
+                + ", ".join(
+                    validacao["faltando"]
+                )
+            ),
+            "registro": None
+        }
+
+    if dados_base is None:
+        consulta = carregar_base(
+            webhook_url
+        )
+
+        if not consulta["sucesso"]:
+            return {
+                "status": "ERRO",
+                "mensagem": consulta["mensagem"],
+                "registro": None
+            }
+
+        dados_base = consulta["dados"]
+
+    duplicado = procurar_duplicidade(
+        dados_base,
+        cpf=dados.get("cpf", ""),
+        titulo=dados.get("titulo", "")
+    )
+
+    if duplicado:
+        return {
+            "status": "DUPLICADO",
+            "mensagem": "Pessoa já cadastrada na TABELA.",
+            "registro": duplicado
+        }
+
+    payload = preparar_payload(
+        dados,
+        supervisor,
+        subsupervisor
+    )
+
+    try:
+        resposta = requests.post(
+            webhook_url,
+            json=payload,
+            timeout=timeout
+        )
+
+        resposta.raise_for_status()
+
+        retorno = resposta.json()
+
+        status = str(
+            retorno.get("status", "")
+        ).strip().upper()
+
+        mensagem = str(
+            retorno.get(
+                "mensagem",
+                ""
+            )
+        ).strip()
+
+        if status == "SUCESSO":
+            return {
+                "status": "SUCESSO",
+                "mensagem": (
+                    mensagem
+                    or "Cadastro salvo com sucesso."
+                ),
+                "registro": payload
+            }
+
+        return {
+            "status": "ERRO",
+            "mensagem": (
+                mensagem
+                or "O Apps Script recusou o cadastro."
+            ),
+            "registro": None
+        }
+
+    except requests.exceptions.Timeout:
+        return {
+            "status": "ERRO",
+            "mensagem": (
+                "O envio para a planilha demorou demais."
+            ),
+            "registro": None
+        }
+
+    except requests.exceptions.RequestException as erro:
+        return {
+            "status": "ERRO",
+            "mensagem": (
+                f"Erro de comunicação com a planilha: {erro}"
+            ),
+            "registro": None
+        }
+
+    except ValueError:
+        return {
+            "status": "ERRO",
+            "mensagem": (
+                "O Apps Script retornou uma resposta inválida."
+            ),
+            "registro": None
+        }
+
+    except Exception as erro:
+        return {
+            "status": "ERRO",
+            "mensagem": (
+                f"Erro ao salvar cadastro: {erro}"
+            ),
+            "registro": None
+        }
