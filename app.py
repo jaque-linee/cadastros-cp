@@ -363,83 +363,282 @@ def extrair_dados_tesseract(texto):
 
     texto_norm = remover_acentos(texto).upper()
 
+    # CPF
     for match in re.finditer(
         r"(?<!\d)(\d{3})[.\s-]?(\d{3})[.\s-]?(\d{3})[-.\s]?(\d{2})(?!\d)",
         texto
     ):
         numero = "".join(match.groups())
+
         if cpf_valido(numero):
             dados["cpf"] = formatar_cpf(numero)
             break
 
-    padrao_data = r"(?<!\d)(\d{2})[/.\-](\d{2})[/.\-](\d{4})(?!\d)"
+    # Data de nascimento
+    padrao_data = (
+        r"(?<!\d)(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})(?!\d)"
+    )
 
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
 
-        if "NASCIMENTO" in rotulo or "DATEOFBIRTH" in rotulo or rotulo == "BIRTH":
+        if (
+            "NASCIMENTO" in rotulo
+            or "DATEOFBIRTH" in rotulo
+            or rotulo == "BIRTH"
+        ):
             candidatos = [linha]
+
             for deslocamento in (1, 2, -1):
                 pos = i + deslocamento
+
                 if 0 <= pos < len(linhas):
-                    candidatos.append(linhas[pos])
+                    candidatos.append(
+                        linhas[pos]
+                    )
 
             for candidato in candidatos:
-                match = re.search(padrao_data, candidato)
+                match = re.search(
+                    padrao_data,
+                    candidato
+                )
+
                 if match:
-                    valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+                    valor = (
+                        f"{match.group(1)}/"
+                        f"{match.group(2)}/"
+                        f"{match.group(3)}"
+                    )
+
                     if data_valida(valor):
-                        dados["data_nascimento"] = valor
+                        dados[
+                            "data_nascimento"
+                        ] = valor
                         break
+
             if dados["data_nascimento"]:
                 break
 
     if not dados["data_nascimento"]:
         datas = []
-        for match in re.finditer(padrao_data, texto):
-            valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
-            if data_valida(valor) and valor not in datas:
-                datas.append(valor)
-        if len(datas) == 1:
-            dados["data_nascimento"] = datas[0]
 
+        for match in re.finditer(
+            padrao_data,
+            texto
+        ):
+            valor = (
+                f"{match.group(1)}/"
+                f"{match.group(2)}/"
+                f"{match.group(3)}"
+            )
+
+            if (
+                data_valida(valor)
+                and valor not in datas
+            ):
+                datas.append(valor)
+
+        if len(datas) == 1:
+            dados["data_nascimento"] = (
+                datas[0]
+            )
+
+    # Mãe com rótulo explícito
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
-        if rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE") or "NOMEDAMAE" in rotulo:
+
+        if (
+            rotulo in (
+                "MAE",
+                "NOMEDAMAE",
+                "NOMEMAE"
+            )
+            or "NOMEDAMAE" in rotulo
+        ):
             for deslocamento in (1, 2, 3):
                 pos = i + deslocamento
-                if pos < len(linhas) and parece_nome(linhas[pos]):
-                    dados["nome_mae"] = linhas[pos].strip().upper()
+
+                if (
+                    pos < len(linhas)
+                    and parece_nome(
+                        linhas[pos]
+                    )
+                ):
+                    dados["nome_mae"] = (
+                        linhas[pos]
+                        .strip()
+                        .upper()
+                    )
                     break
+
             if dados["nome_mae"]:
                 break
 
+    # Filiação quando o rótulo foi reconhecido
     if not dados["nome_mae"]:
         for i, linha in enumerate(linhas):
             rotulo = normalizar_rotulo(linha)
-            if "FILIACAO" in rotulo or "FILIATION" in rotulo:
-                for deslocamento in range(1, 6):
+
+            if (
+                "FILIACAO" in rotulo
+                or "FILIATION" in rotulo
+            ):
+                for deslocamento in range(
+                    1,
+                    7
+                ):
                     pos = i + deslocamento
+
                     if pos >= len(linhas):
                         break
-                    candidato = linhas[pos].strip()
-                    candidato_rotulo = normalizar_rotulo(candidato)
 
-                    if any(
-                        termo in candidato_rotulo
-                        for termo in (
-                            "ORGAOEXPEDIDOR", "CARDISSUER",
-                            "PLACEOFISSUE", "EMISSAO",
-                            "ISSUE", "ASSINATURA"
-                        )
-                    ):
-                        break
+                    candidato = (
+                        linhas[pos]
+                        .strip()
+                    )
 
                     if parece_nome(candidato):
-                        dados["nome_mae"] = candidato.upper()
+                        dados["nome_mae"] = (
+                            candidato.upper()
+                        )
                         break
+
                 if dados["nome_mae"]:
                     break
+
+    # CIN/RG moderno: fallback estrutural.
+    #
+    # Alguns documentos têm "FILIAÇÃO / FILIATION" impresso,
+    # mas o OCR perde completamente esse rótulo. Nesse caso,
+    # usamos somente a estrutura documental reconhecida:
+    #   - há sinais claros de documento de identidade;
+    #   - há CPF válido;
+    #   - há nascimento;
+    #   - selecionamos nomes completos antes do nome do titular;
+    #   - excluímos cabeçalhos, órgãos e rótulos.
+    #
+    # Não há lista de nomes próprios e nenhum nome é inventado.
+    if not dados["nome_mae"]:
+        eh_identidade = any(
+            marcador in texto_norm
+            for marcador in (
+                "REGISTRO GERAL",
+                "PERSONAL NUMBER",
+                "NOME SOCIAL",
+                "SOCIAL NAME",
+                "ORGAO EXPEDIDOR",
+                "CARD ISSUER",
+                "INSTITUTO DE IDENTIFICACAO",
+                "SECRETARIA DE SEGURANCA"
+            )
+        )
+
+        if (
+            eh_identidade
+            and dados["cpf"]
+            and dados["data_nascimento"]
+        ):
+            termos_excluir = (
+                "REPUBLICA",
+                "FEDERATIVA",
+                "BRASIL",
+                "GOVERNO",
+                "FEDERAL",
+                "ESTADO",
+                "SECRETARIA",
+                "SEGURANCA",
+                "PUBLICA",
+                "INSTITUTO",
+                "IDENTIFICACAO",
+                "DELEGADO",
+                "REGISTRO",
+                "GERAL",
+                "PERSONAL",
+                "NUMBER",
+                "NOME",
+                "SOCIAL",
+                "CARD",
+                "ISSUER",
+                "LOCAL",
+                "PLACE",
+                "ISSUE",
+                "EMISSAO",
+                "NASCIMENTO",
+                "BIRTH",
+                "NACIONALIDADE",
+                "NATIONALITY",
+                "NATURALIDADE",
+                "EXPIRY",
+                "VALIDADE",
+                "ASSINATURA",
+                "SIGNATURE",
+                "SUPERINTENDENTE"
+            )
+
+            candidatos = []
+
+            for indice, linha in enumerate(
+                linhas
+            ):
+                candidato = (
+                    linha.strip()
+                )
+
+                if not parece_nome(
+                    candidato
+                ):
+                    continue
+
+                normalizado = (
+                    remover_acentos(
+                        candidato
+                    ).upper()
+                )
+
+                if any(
+                    termo in normalizado
+                    for termo in termos_excluir
+                ):
+                    continue
+
+                palavras = candidato.split()
+
+                if not (
+                    3 <= len(palavras) <= 7
+                ):
+                    continue
+
+                candidatos.append(
+                    (
+                        indice,
+                        candidato.upper()
+                    )
+                )
+
+            # Remove repetições preservando a ordem.
+            nomes_unicos = []
+
+            for indice, candidato in candidatos:
+                if candidato not in [
+                    nome
+                    for _, nome
+                    in nomes_unicos
+                ]:
+                    nomes_unicos.append(
+                        (
+                            indice,
+                            candidato
+                        )
+                    )
+
+            # Em CIN/RG, quando o OCR perde o rótulo FILIAÇÃO,
+            # a mãe aparece no bloco de filiação antes do titular.
+            # Exigimos ao menos três nomes completos reconhecidos
+            # para não transformar um nome isolado em filiação.
+            if len(nomes_unicos) >= 3:
+                dados["nome_mae"] = (
+                    nomes_unicos[0][1]
+                )
 
     return dados
 
