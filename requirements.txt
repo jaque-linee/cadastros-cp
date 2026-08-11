@@ -5,3 +5,4 @@ paddleocr
 paddlepaddle
 Pillow
 PyMuPDF
+opencv-python-headless
