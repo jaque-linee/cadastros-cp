@@ -887,10 +887,9 @@ def extrair_dados_pdf_digital(texto):
     # ========================================================
     # NOME DA MÃE
     # ========================================================
-    # Tentativa 1: Usa a função original do seu código
     dados["nome_mae"] = encontrar_mae_texto_digital(linhas)
 
-    # Tentativa 2 (O 'for' entra aqui): Fallback aprimorado para CNH
+    # Fallback aprimorado para capturar nomes divididos em várias linhas (como na CNH)
     if not dados["nome_mae"]:
         for i, linha in enumerate(linhas):
             if normalizar_rotulo(linha) in ["FILIACAO", "FILIACAO:", "NOME DA MAE"]:
@@ -909,22 +908,23 @@ def extrair_dados_pdf_digital(texto):
                         if len(cand) > 2 and not re.search(r"\d{4}", cand):
                             blocos_filiacao.append(cand.upper())
                 
-                # Agrupa os pedaços do nome dependendo de quantas linhas a CNH usou
+                # Regra de ouro para separar pai e mãe baseado no tamanho das quebras de linha
                 if blocos_filiacao:
-                    if len(blocos_filiacao) == 2:
-                        if len(blocos_filiacao[1].split()) <= 2:
-                            dados["nome_mae"] = " ".join(blocos_filiacao)
-                        else:
-                            dados["nome_mae"] = blocos_filiacao[1]
-                    elif len(blocos_filiacao) == 3:
-                        dados["nome_mae"] = " ".join(blocos_filiacao[1:])
-                    elif len(blocos_filiacao) >= 4:
-                        meio = len(blocos_filiacao) // 2
-                        dados["nome_mae"] = " ".join(blocos_filiacao[meio:])
-                    else:
+                    if len(blocos_filiacao) == 1:
+                        dados["nome_mae"] = blocos_filiacao[0]
+                    elif len(blocos_filiacao) == 2:
                         dados["nome_mae"] = blocos_filiacao[-1]
+                    elif len(blocos_filiacao) == 3:
+                        # Se a última linha tiver 4 ou mais palavras, ela é o nome da mãe completo
+                        if len(blocos_filiacao[-1].split()) >= 4:
+                            dados["nome_mae"] = blocos_filiacao[-1]
+                        else:
+                            # Se for curta (ex: "DE AZEVEDO"), ela complementa a linha de cima
+                            dados["nome_mae"] = " ".join(blocos_filiacao[-2:])
+                    else:
+                        # 4 ou mais linhas (Padrão de 2 linhas pro pai e 2 pra mãe)
+                        dados["nome_mae"] = " ".join(blocos_filiacao[-2:])
                 break
-
     # ========================================================
     # ZONA
     # ========================================================
