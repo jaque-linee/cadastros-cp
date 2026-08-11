@@ -170,7 +170,6 @@ def data_valida(valor):
 
 # ============================================================
 # 5. OCR
-#
 # SÓ CARREGA SE REALMENTE PRECISAR
 # ============================================================
 
@@ -351,9 +350,6 @@ def extrair_texto_pdf(arquivo):
 
 # ============================================================
 # 9. VERIFICAR SE O TEXTO NATIVO É REALMENTE ÚTIL
-#
-# Não basta o PDF conter "algum texto".
-# Ele precisa conter elementos compatíveis com documento.
 # ============================================================
 
 def pdf_tem_texto_util(texto):
@@ -377,26 +373,14 @@ def pdf_tem_texto_util(texto):
 
     pontos = 0
 
-    # --------------------------------------------
-    # DATA
-    # --------------------------------------------
-
     if re.search(
         r"\b\d{2}[\/.\-]\d{2}[\/.\-]\d{4}\b",
         texto
     ):
         pontos += 1
 
-    # --------------------------------------------
-    # CPF
-    # --------------------------------------------
-
     if "CPF" in texto_normalizado:
         pontos += 1
-
-    # --------------------------------------------
-    # TÍTULO / INSCRIÇÃO
-    # --------------------------------------------
 
     if (
         "INSCRICAO" in texto_normalizado
@@ -404,16 +388,8 @@ def pdf_tem_texto_util(texto):
     ):
         pontos += 1
 
-    # --------------------------------------------
-    # NOME
-    # --------------------------------------------
-
     if "NOME" in texto_normalizado:
         pontos += 1
-
-    # --------------------------------------------
-    # FILIAÇÃO
-    # --------------------------------------------
 
     if (
         "FILIACAO" in texto_normalizado
@@ -422,10 +398,6 @@ def pdf_tem_texto_util(texto):
     ):
         pontos += 1
 
-    # --------------------------------------------
-    # CNH
-    # --------------------------------------------
-
     if (
         "CARTEIRA NACIONAL" in texto_normalizado
         or "HABILITACAO" in texto_normalizado
@@ -433,18 +405,12 @@ def pdf_tem_texto_util(texto):
     ):
         pontos += 1
 
-    # --------------------------------------------
-    # RG
-    # --------------------------------------------
-
     if (
         "IDENTIDADE" in texto_normalizado
         or "REGISTRO GERAL" in texto_normalizado
     ):
         pontos += 1
 
-    # Precisamos de pelo menos dois sinais reais
-    # de que o texto representa os dados do documento.
     return pontos >= 2
 
 
@@ -535,10 +501,6 @@ def ler_documento(arquivo):
             arquivo
         )
 
-        # --------------------------------------------
-        # PDF REALMENTE DIGITAL
-        # --------------------------------------------
-
         if pdf_tem_texto_util(
             texto_nativo
         ):
@@ -547,11 +509,6 @@ def ler_documento(arquivo):
                 [],
                 "PDF — texto digital"
             )
-
-        # --------------------------------------------
-        # PDF SEM TEXTO ÚTIL
-        # VAI PARA OCR
-        # --------------------------------------------
 
         texto, itens = executar_ocr_pdf(
             arquivo
@@ -562,10 +519,6 @@ def ler_documento(arquivo):
             itens,
             "PDF — OCR"
         )
-
-    # --------------------------------------------
-    # JPG / JPEG / PNG
-    # --------------------------------------------
 
     arquivo.seek(0)
 
@@ -729,25 +682,20 @@ def parece_nome(texto):
 # ============================================================
 
 def encontrar_mae_texto_digital(linhas):
-    """
-    Extrai nome da mãe somente quando houver rótulo explícito.
-    Não usa lista de nomes nem presume que o segundo nome de FILIAÇÃO é a mãe.
-    """
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
 
         if rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE"):
-            # Primeiro procura depois do rótulo.
             for deslocamento in (1, 2):
                 pos = i + deslocamento
                 if pos < len(linhas) and parece_nome(linhas[pos]):
                     return linhas[pos].upper()
 
-            # Alguns PDFs posicionam visualmente o valor antes do rótulo.
             if i > 0 and parece_nome(linhas[i - 1]):
                 return linhas[i - 1].upper()
 
     return ""
+
 
 # ============================================================
 # 16. EXTRAIR DADOS DO PDF DIGITAL
@@ -779,10 +727,7 @@ def extrair_dados_pdf_digital(texto):
         or "DENATRAN" in texto_norm
     )
 
-    # ========================================================
     # 1. NOME
-    # ========================================================
-
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
 
@@ -805,7 +750,6 @@ def extrair_dados_pdf_digital(texto):
                     dados["nome"] = candidato.upper()
                     break
 
-    # Fallback somente se não encontrou pelo rótulo
     if not dados["nome"]:
         for linha in linhas:
             if parece_nome(linha):
@@ -826,10 +770,7 @@ def extrair_dados_pdf_digital(texto):
                     dados["nome"] = linha.upper()
                     break
 
-    # ========================================================
     # 2. DATA DE NASCIMENTO
-    # ========================================================
-
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
 
@@ -840,7 +781,6 @@ def extrair_dados_pdf_digital(texto):
         ):
             candidatos = []
 
-            # Próximas linhas
             for deslocamento in (1, 2):
                 pos = i + deslocamento
 
@@ -860,7 +800,6 @@ def extrair_dados_pdf_digital(texto):
                         if data_valida(valor):
                             candidatos.append(valor)
 
-            # Linha anterior
             if i > 0:
                 match = re.search(
                     r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b",
@@ -881,7 +820,6 @@ def extrair_dados_pdf_digital(texto):
                 dados["data_nascimento"] = candidatos[0]
                 break
 
-    # Fallback
     if not dados["data_nascimento"]:
         for linha in linhas:
             match = re.search(
@@ -900,10 +838,7 @@ def extrair_dados_pdf_digital(texto):
                     dados["data_nascimento"] = valor
                     break
 
-    # ========================================================
     # 3. CPF
-    # ========================================================
-
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
 
@@ -926,7 +861,6 @@ def extrair_dados_pdf_digital(texto):
             if dados["cpf"]:
                 break
 
-    # Fallback: somente CPF matematicamente válido
     if not dados["cpf"]:
         for linha in linhas:
             numeros = somente_numeros(linha)
@@ -935,10 +869,7 @@ def extrair_dados_pdf_digital(texto):
                 dados["cpf"] = formatar_cpf(numeros)
                 break
 
-    # ========================================================
     # 4. TÍTULO ELEITORAL
-    # ========================================================
-
     if eh_titulo:
         for i, linha in enumerate(linhas):
             rotulo = normalizar_rotulo(linha)
@@ -948,9 +879,7 @@ def extrair_dados_pdf_digital(texto):
                 or rotulo == "TITULO"
                 or rotulo == "TITULODEELEITOR"
             ):
-                candidatos = []
-
-                candidatos.append(linha)
+                candidatos = [linha]
 
                 for deslocamento in (1, 2, -1):
                     pos = i + deslocamento
@@ -968,12 +897,8 @@ def extrair_dados_pdf_digital(texto):
                 if dados["titulo"]:
                     break
 
-        # ========================================================
     # 5. ZONA E SEÇÃO
-    # ========================================================
-
     if eh_titulo:
-
         def extrair_numero_associado_ao_rotulo(
             linhas,
             nome_rotulo,
@@ -985,15 +910,6 @@ def extrair_dados_pdf_digital(texto):
                 if rotulo != nome_rotulo:
                     continue
 
-                # O PDF digital pode entregar o valor ANTES
-                # do rótulo:
-                #
-                # 055
-                # ZONA
-                #
-                # 0277
-                # SEÇÃO
-
                 if i > 0:
                     candidato = linhas[i - 1].strip()
 
@@ -1004,12 +920,6 @@ def extrair_dados_pdf_digital(texto):
                         return candidato.zfill(
                             max_digitos
                         )
-
-                # Também aceita quando rótulo e valor
-                # aparecem na mesma linha:
-                #
-                # ZONA 055
-                # SEÇÃO 0277
 
                 linha_sem_acento = remover_acentos(
                     linha
@@ -1028,15 +938,6 @@ def extrair_dados_pdf_digital(texto):
                     return match.group(1).zfill(
                         max_digitos
                     )
-
-                # E aceita PDFs que entreguem o valor
-                # DEPOIS do rótulo:
-                #
-                # ZONA
-                # 055
-                #
-                # SEÇÃO
-                # 0277
 
                 if i + 1 < len(linhas):
                     candidato = linhas[i + 1].strip()
@@ -1072,15 +973,8 @@ def extrair_dados_pdf_digital(texto):
 
         if secao_encontrada:
             dados["secao"] = secao_encontrada
-            
-    # ========================================================
+
     # 6. NOME DA MÃE
-    # ========================================================
-
-    # --------------------------------------------------------
-    # CASO 1: documento possui rótulo explícito MÃE
-    # --------------------------------------------------------
-
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
 
@@ -1115,17 +1009,6 @@ def extrair_dados_pdf_digital(texto):
                 dados["nome_mae"] = " ".join(partes)
                 break
 
-    # --------------------------------------------------------
-    # CASO 2: TÍTULO ELEITORAL
-    #
-    # No título, FILIAÇÃO contém os dois genitores.
-    # Como o PDF pode retornar a caixa de filiação antes
-    # do nome do eleitor, pegamos os nomes próximos à
-    # FILIAÇÃO, mas nunca o nome do próprio eleitor.
-    #
-    # Não usa lista de nomes femininos.
-    # --------------------------------------------------------
-
     if eh_titulo and not dados["nome_mae"]:
         indice_filiacao = None
 
@@ -1145,7 +1028,6 @@ def extrair_dados_pdf_digital(texto):
                     continue
 
                 candidato = linhas[pos].strip()
-                rotulo = normalizar_rotulo(candidato)
 
                 if candidato.upper() == dados["nome"]:
                     continue
@@ -1164,27 +1046,14 @@ def extrair_dados_pdf_digital(texto):
                         )
                     )
 
-            # Remove repetições mantendo a ordem
             nomes_unicos = []
 
             for _, candidato in candidatos:
                 if candidato not in nomes_unicos:
                     nomes_unicos.append(candidato)
 
-            # No título eleitoral brasileiro, quando a extração
-            # apresenta os dois nomes completos da filiação,
-            # o primeiro nome da caixa de filiação corresponde
-            # ao nome da mãe.
             if nomes_unicos:
                 dados["nome_mae"] = nomes_unicos[0]
-
-    # --------------------------------------------------------
-    # CASO 3: CNH
-    #
-    # A filiação pode vir quebrada em várias linhas.
-    # Identificamos o bloco entre FILIAÇÃO e o próximo campo
-    # estrutural da CNH.
-    # --------------------------------------------------------
 
     if eh_cnh and not dados["nome_mae"]:
         indice_filiacao = None
@@ -1237,9 +1106,6 @@ def extrair_dados_pdf_digital(texto):
                     bloco_filiacao.append(candidato.upper())
                     continue
 
-                # OCR/PDF pode quebrar sobrenomes em linhas
-                # pequenas, então aceitamos trechos compostos
-                # apenas por letras dentro do bloco de filiação.
                 if re.fullmatch(
                     r"[A-Za-zÀ-ÿ\s]+",
                     candidato
@@ -1249,9 +1115,6 @@ def extrair_dados_pdf_digital(texto):
                     if palavras:
                         bloco_filiacao.append(candidato.upper())
 
-            # A filiação pode estar quebrada em várias linhas.
-            # Procuramos uma divisão equilibrada entre os dois
-            # nomes completos, sem analisar gênero ou nomes próprios.
             if len(bloco_filiacao) >= 2:
                 possibilidades = []
 
@@ -1298,17 +1161,13 @@ def extrair_dados_pdf_digital(texto):
                     )
 
     return dados
-    
-    
+
+
 # ============================================================
 # 17. EXTRAÇÃO OCR - TÍTULO
 # ============================================================
 
 def encontrar_titulo_ocr(itens):
-    """
-    Extrai título somente quando um número de 12 dígitos está espacialmente
-    associado a um rótulo INSCRIÇÃO/TÍTULO. Não usa qualquer número solto.
-    """
     rotulos = []
 
     for item in itens:
@@ -1322,7 +1181,6 @@ def encontrar_titulo_ocr(itens):
     for rotulo in rotulos:
         candidatos = []
 
-        # O próprio bloco pode conter rótulo + número.
         numero_no_rotulo = somente_numeros(rotulo["texto"])
         if len(numero_no_rotulo) == 12:
             candidatos.append((0, -rotulo["confianca"], numero_no_rotulo))
@@ -1338,7 +1196,6 @@ def encontrar_titulo_ocr(itens):
             dx = abs(item["x"] - rotulo["x"])
             dy = item["y"] - rotulo["y"]
 
-            # Aceita valor na mesma linha ou logo abaixo, sem varrer o documento.
             if -50 <= dy <= 180 and dx <= 550:
                 candidatos.append(
                     (abs(dy) + dx * 0.25, -item["confianca"], numero)
@@ -1356,10 +1213,6 @@ def encontrar_titulo_ocr(itens):
 # ============================================================
 
 def encontrar_nascimento_ocr(itens):
-    """
-    Procura data de nascimento perto do rótulo correspondente.
-    Não escolhe simplesmente a primeira data do documento.
-    """
     rotulos = []
 
     for item in itens:
@@ -1404,13 +1257,7 @@ def encontrar_nascimento_ocr(itens):
 # 19. EXTRAÇÃO OCR - CPF
 # ============================================================
 
-def encontrar_cpf_ocr(
-    itens
-):
-    # --------------------------------------------
-    # PRIMEIRO PROCURA PERTO DE "CPF"
-    # --------------------------------------------
-
+def encontrar_cpf_ocr(itens):
     for item_rotulo in itens:
         texto_rotulo = normalizar_texto(
             item_rotulo["texto"]
@@ -1458,11 +1305,6 @@ def encontrar_cpf_ocr(
                 candidatos[0][2]
             )
 
-    # --------------------------------------------
-    # FALLBACK:
-    # qualquer número de 11 dígitos
-    # --------------------------------------------
-
     for item in itens:
         numero = somente_numeros(
             item["texto"]
@@ -1480,13 +1322,7 @@ def encontrar_cpf_ocr(
 # 20. EXTRAÇÃO OCR - NOME
 # ============================================================
 
-def encontrar_nome_ocr(
-    itens
-):
-    # --------------------------------------------
-    # PRIMEIRO PROCURA RÓTULO
-    # --------------------------------------------
-
+def encontrar_nome_ocr(itens):
     for item_rotulo in itens:
         rotulo = normalizar_rotulo(
             item_rotulo["texto"]
@@ -1543,10 +1379,6 @@ def encontrar_nome_ocr(
                     .upper()
                 )
 
-    # --------------------------------------------
-    # FALLBACK
-    # --------------------------------------------
-
     candidatos = []
 
     for item in itens:
@@ -1588,11 +1420,6 @@ def encontrar_nome_ocr(
 # ============================================================
 
 def encontrar_mae_ocr(itens):
-    """
-    Extrai o nome da mãe somente com evidência estrutural:
-    rótulo MÃE/NOME DA MÃE ou rótulo equivalente.
-    FILIAÇÃO isolada não é suficiente para decidir qual nome é o da mãe.
-    """
     rotulos_mae = []
 
     for item in itens:
@@ -1631,7 +1458,6 @@ def encontrar_mae_ocr(itens):
             candidatos.sort()
             return candidatos[0][2]
 
-    # Não deduz mãe pelo sexo, primeiro nome ou posição arbitrária.
     return ""
 
 
@@ -1677,7 +1503,6 @@ def encontrar_zona_secao_ocr(
                 "texto"
             ]
 
-            # Não usar datas
             if re.search(
                 r"\d{2}[\/.\-]\d{2}[\/.\-]\d{4}",
                 texto
@@ -1909,11 +1734,6 @@ def verificar_duplicidade(
 
 # ============================================================
 # 27. REGRA DE DADOS MÍNIMOS
-#
-# Nome
-# + nascimento
-# + nome da mãe
-# + CPF OU título
 # ============================================================
 
 def verificar_dados_minimos(
@@ -2216,52 +2036,52 @@ if menu == "📸 Envio de Documentos":
                             )
                         )
 
-                                    resultados.append(
-                    {
-                        "Arquivo":
-                            arquivo.name,
+                    resultados.append(
+                        {
+                            "Arquivo":
+                                arquivo.name,
 
-                        "Nome":
-                            dados["nome"],
+                            "Nome":
+                                dados["nome"],
 
-                        "CPF":
-                            dados["cpf"],
+                            "CPF":
+                                dados["cpf"],
 
-                        "Título":
-                            dados["titulo"],
+                            "Título":
+                                dados["titulo"],
 
-                        "Nascimento":
-                            dados[
-                                "data_nascimento"
-                            ],
+                            "Nascimento":
+                                dados[
+                                    "data_nascimento"
+                                ],
 
-                        "Nome da mãe":
-                            dados[
-                                "nome_mae"
-                            ],
+                            "Nome da mãe":
+                                dados[
+                                    "nome_mae"
+                                ],
 
-                        "Zona":
-                            dados["zona"],
+                            "Zona":
+                                dados["zona"],
 
-                        "Seção":
-                            dados["secao"],
+                            "Seção":
+                                dados["secao"],
 
-                        "Leitura":
-                            tipo,
+                            "Leitura":
+                                tipo,
 
-                        "Resultado":
-                            resultado,
+                            "Resultado":
+                                resultado,
 
-                        "Já cadastrado como":
-                            existente_nome,
+                            "Já cadastrado como":
+                                existente_nome,
 
-                        "Supervisor atual":
-                            existente_sup,
+                            "Supervisor atual":
+                                existente_sup,
 
-                        "_dados":
-                            dados.copy()
-                    }
-                )
+                            "_dados":
+                                dados.copy()
+                        }
+                    )
 
                     del texto
                     del itens
@@ -2393,7 +2213,6 @@ if menu == "📸 Envio de Documentos":
                 conferir
             )
 
-                        # Cria a tabela visual sem exibir o campo interno "_dados"
             resultados_visiveis = []
 
             for item in resultados:
