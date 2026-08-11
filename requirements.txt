@@ -1,9 +1,8 @@
 streamlit
 requests
 python-dotenv
-paddleocr
-paddlepaddle
 Pillow
 PyMuPDF
-opencv-python-headless
 numpy
+easyocr
+opencv-python-headless
