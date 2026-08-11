@@ -2393,8 +2393,22 @@ if menu == "📸 Envio de Documentos":
                 conferir
             )
 
+                        # Cria a tabela visual sem exibir o campo interno "_dados"
+            resultados_visiveis = []
+
+            for item in resultados:
+                item_visivel = {
+                    chave: valor
+                    for chave, valor in item.items()
+                    if chave != "_dados"
+                }
+
+                resultados_visiveis.append(
+                    item_visivel
+                )
+
             df_resultados = pd.DataFrame(
-                resultados
+                resultados_visiveis
             )
 
             st.dataframe(
@@ -2402,6 +2416,84 @@ if menu == "📸 Envio de Documentos":
                 use_container_width=True,
                 hide_index=True
             )
+
+            # ====================================================
+            # SALVAR CADASTROS COMPLETOS NA TABELA
+            # ====================================================
+
+            aptos_para_salvar = [
+                item
+                for item in resultados
+                if (
+                    item.get("Resultado") == "✅ COMPLETO"
+                    and item.get("_dados")
+                )
+            ]
+
+            if aptos_para_salvar:
+
+                st.markdown("---")
+
+                st.info(
+                    f"📥 {len(aptos_para_salvar)} cadastro(s) "
+                    f"completo(s) pronto(s) para salvar."
+                )
+
+                if st.button(
+                    "💾 Salvar completos na TABELA",
+                    type="primary"
+                ):
+                    salvos = 0
+                    duplicados_salvar = 0
+                    erros_salvar = 0
+
+                    progresso_salvar = st.progress(0)
+
+                    for indice_salvar, item in enumerate(
+                        aptos_para_salvar
+                    ):
+                        dados_salvar = item["_dados"]
+
+                        retorno = sheets.salvar_cadastro(
+                            WEBHOOK_URL,
+                            dados_salvar,
+                            supervisor,
+                            sub,
+                            dados_base=base
+                        )
+
+                        status_salvar = retorno.get(
+                            "status",
+                            "ERRO"
+                        )
+
+                        if status_salvar == "SUCESSO":
+                            salvos += 1
+
+                        elif status_salvar == "DUPLICADO":
+                            duplicados_salvar += 1
+
+                        else:
+                            erros_salvar += 1
+
+                            st.error(
+                                f"{item['Arquivo']}: "
+                                f"{retorno.get('mensagem', 'Erro ao salvar.')}"
+                            )
+
+                        progresso_salvar.progress(
+                            (indice_salvar + 1)
+                            / len(aptos_para_salvar)
+                        )
+
+                    st.success(
+                        f"Salvamento concluído: "
+                        f"{salvos} salvo(s), "
+                        f"{duplicados_salvar} duplicado(s) "
+                        f"e {erros_salvar} erro(s)."
+                    )
+
+                    st.cache_data.clear()
 
             st.caption(
                 "ℹ️ Para ser considerado completo: "
