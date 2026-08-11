@@ -127,35 +127,44 @@ def formatar_cpf(cpf):
     )
 
 
+def cpf_valido(cpf):
+    """Valida CPF pelos dígitos verificadores. Não infere nem corrige números."""
+    cpf = somente_numeros(cpf)
+
+    if len(cpf) != 11 or cpf == cpf[0] * 11:
+        return False
+
+    for tamanho in (9, 10):
+        soma = sum(
+            int(cpf[i]) * (tamanho + 1 - i)
+            for i in range(tamanho)
+        )
+        digito = (soma * 10) % 11
+        if digito == 10:
+            digito = 0
+        if digito != int(cpf[tamanho]):
+            return False
+
+    return True
+
+
 def data_valida(valor):
-    match = re.fullmatch(
-        r"(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})",
-        str(valor or "").strip()
-    )
+    """Valida uma data real no formato DD/MM/AAAA, DD-MM-AAAA ou DD.MM.AAAA."""
+    from datetime import datetime
+
+    valor = str(valor or "").strip()
+    match = re.fullmatch(r"(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})", valor)
 
     if not match:
         return False
 
     try:
-        dia = int(
-            match.group(1)
+        datetime.strptime(
+            f"{match.group(1)}/{match.group(2)}/{match.group(3)}",
+            "%d/%m/%Y"
         )
-
-        mes = int(
-            match.group(2)
-        )
-
-        ano = int(
-            match.group(3)
-        )
-
-        return (
-            1 <= dia <= 31
-            and 1 <= mes <= 12
-            and 1900 <= ano <= 2026
-        )
-
-    except Exception:
+        return 1900 <= int(match.group(3)) <= datetime.now().year
+    except ValueError:
         return False
 
 
@@ -719,91 +728,24 @@ def parece_nome(texto):
 # 15. EXTRAIR NOME DA MÃE DE TEXTO DIGITAL
 # ============================================================
 
-def encontrar_mae_texto_digital(
-    linhas
-):
-    # --------------------------------------------
-    # PRIMEIRO:
-    # procura rótulo explícito "NOME DA MÃE" / "MÃE"
-    # --------------------------------------------
+def encontrar_mae_texto_digital(linhas):
+    """
+    Extrai nome da mãe somente quando houver rótulo explícito.
+    Não usa lista de nomes nem presume que o segundo nome de FILIAÇÃO é a mãe.
+    """
+    for i, linha in enumerate(linhas):
+        rotulo = normalizar_rotulo(linha)
 
-    for i, linha in enumerate(
-        linhas
-    ):
-        rotulo = normalizar_rotulo(
-            linha
-        )
+        if rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE"):
+            # Primeiro procura depois do rótulo.
+            for deslocamento in (1, 2):
+                pos = i + deslocamento
+                if pos < len(linhas) and parece_nome(linhas[pos]):
+                    return linhas[pos].upper()
 
-        if rotulo in [
-            "MAE",
-            "NOMEDAMAE"
-        ]:
-            candidatos = []
-
-            if i + 1 < len(linhas):
-                candidatos.append(
-                    linhas[i + 1]
-                )
-
-            if i > 0:
-                candidatos.append(
-                    linhas[i - 1]
-                )
-
-            for candidato in candidatos:
-                if parece_nome(
-                    candidato
-                ):
-                    return candidato.upper()
-
-    # --------------------------------------------
-    # SEGUNDO:
-    # FILIAÇÃO
-    #
-    # Em muitos documentos aparecem:
-    #
-    # FILIAÇÃO
-    # NOME DO PAI
-    # NOME DA MÃE
-    #
-    # ou os nomes diretamente.
-    # --------------------------------------------
-
-    for i, linha in enumerate(
-        linhas
-    ):
-        if normalizar_rotulo(
-            linha
-        ) == "FILIACAO":
-
-            candidatos = []
-
-            limite = min(
-                len(linhas),
-                i + 7
-            )
-
-            for j in range(
-                i + 1,
-                limite
-            ):
-                candidato = linhas[j]
-
-                if parece_nome(
-                    candidato
-                ):
-                    candidatos.append(
-                        candidato.upper()
-                    )
-
-            # Quando há dois nomes:
-            # normalmente pai e depois mãe.
-            if len(candidatos) >= 2:
-                return candidatos[1]
-
-            # Se só houver um nome na filiação,
-            # NÃO vamos adivinhar que seja a mãe.
-            return ""
+            # Alguns PDFs posicionam visualmente o valor antes do rótulo.
+            if i > 0 and parece_nome(linhas[i - 1]):
+                return linhas[i - 1].upper()
 
     return ""
 
@@ -928,7 +870,7 @@ def extrair_dados_pdf_digital(
                 linha
             )
 
-            if len(numero) == 11:
+            if len(numero) == 11 and cpf_valido(numero):
                 dados["cpf"] = formatar_cpf(
                     numero
                 )
@@ -951,7 +893,7 @@ def extrair_dados_pdf_digital(
                     candidato
                 )
 
-                if len(numero) == 11:
+                if len(numero) == 11 and cpf_valido(numero):
                     dados["cpf"] = formatar_cpf(
                         numero
                     )
@@ -999,16 +941,9 @@ def extrair_dados_pdf_digital(
         if dados["titulo"]:
             break
 
-    # Fallback para título
-    if not dados["titulo"]:
-        for linha in linhas:
-            numero = somente_numeros(
-                linha
-            )
-
-            if len(numero) == 12:
-                dados["titulo"] = numero
-                break
+    # Sem fallback global para título:
+    # um número de 12 dígitos só é aceito quando estiver associado
+    # ao rótulo INSCRIÇÃO/TÍTULO. Isso evita inventar título.
 
     # ========================================================
     # NOME DA MÃE
@@ -1099,30 +1034,49 @@ def extrair_dados_pdf_digital(
 # 17. EXTRAÇÃO OCR - TÍTULO
 # ============================================================
 
-def encontrar_titulo_ocr(
-    itens
-):
-    candidatos = []
+def encontrar_titulo_ocr(itens):
+    """
+    Extrai título somente quando um número de 12 dígitos está espacialmente
+    associado a um rótulo INSCRIÇÃO/TÍTULO. Não usa qualquer número solto.
+    """
+    rotulos = []
 
     for item in itens:
-        numeros = somente_numeros(
-            item["texto"]
-        )
+        rotulo = normalizar_rotulo(item["texto"])
+        if (
+            rotulo in ("INSCRICAO", "TITULO", "TITULODEELEITOR")
+            or "INSCRICAO" in rotulo
+        ):
+            rotulos.append(item)
 
-        if len(numeros) == 12:
-            candidatos.append(
-                (
-                    item["confianca"],
-                    numeros
+    for rotulo in rotulos:
+        candidatos = []
+
+        # O próprio bloco pode conter rótulo + número.
+        numero_no_rotulo = somente_numeros(rotulo["texto"])
+        if len(numero_no_rotulo) == 12:
+            candidatos.append((0, -rotulo["confianca"], numero_no_rotulo))
+
+        for item in itens:
+            if item is rotulo:
+                continue
+
+            numero = somente_numeros(item["texto"])
+            if len(numero) != 12:
+                continue
+
+            dx = abs(item["x"] - rotulo["x"])
+            dy = item["y"] - rotulo["y"]
+
+            # Aceita valor na mesma linha ou logo abaixo, sem varrer o documento.
+            if -50 <= dy <= 180 and dx <= 550:
+                candidatos.append(
+                    (abs(dy) + dx * 0.25, -item["confianca"], numero)
                 )
-            )
 
-    if candidatos:
-        candidatos.sort(
-            reverse=True
-        )
-
-        return candidatos[0][1]
+        if candidatos:
+            candidatos.sort()
+            return candidatos[0][2]
 
     return ""
 
@@ -1131,46 +1085,47 @@ def encontrar_titulo_ocr(
 # 18. EXTRAÇÃO OCR - NASCIMENTO
 # ============================================================
 
-def encontrar_nascimento_ocr(
-    itens
-):
-    datas = []
+def encontrar_nascimento_ocr(itens):
+    """
+    Procura data de nascimento perto do rótulo correspondente.
+    Não escolhe simplesmente a primeira data do documento.
+    """
+    rotulos = []
 
     for item in itens:
-        texto = item["texto"]
-
-        for match in re.finditer(
-            r"\b"
-            r"(\d{2})"
-            r"[\/.\-]"
-            r"(\d{2})"
-            r"[\/.\-]"
-            r"(\d{4})"
-            r"\b",
-            texto
+        rotulo = normalizar_rotulo(item["texto"])
+        if (
+            rotulo in ("DATADENASCIMENTO", "NASCIMENTO", "DTNASCIMENTO")
+            or "NASCIMENTO" in rotulo
         ):
-            valor = (
-                f"{match.group(1)}/"
-                f"{match.group(2)}/"
-                f"{match.group(3)}"
-            )
+            rotulos.append(item)
 
-            if data_valida(
-                valor
+    for rotulo in rotulos:
+        candidatos = []
+
+        for item in itens:
+            texto = str(item["texto"])
+
+            for match in re.finditer(
+                r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b",
+                texto
             ):
-                datas.append(
-                    (
-                        item["y"],
-                        valor
+                valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+
+                if not data_valida(valor):
+                    continue
+
+                dx = abs(item["x"] - rotulo["x"])
+                dy = item["y"] - rotulo["y"]
+
+                if -60 <= dy <= 220 and dx <= 650:
+                    candidatos.append(
+                        (abs(dy) + dx * 0.2, -item["confianca"], valor)
                     )
-                )
 
-    if datas:
-        datas.sort(
-            key=lambda x: x[0]
-        )
-
-        return datas[0][1]
+        if candidatos:
+            candidatos.sort()
+            return candidatos[0][2]
 
     return ""
 
@@ -1201,7 +1156,7 @@ def encontrar_cpf_ocr(
                 item["texto"]
             )
 
-            if len(numero) != 11:
+            if len(numero) != 11 or not cpf_valido(numero):
                 continue
 
             dx = abs(
@@ -1243,7 +1198,7 @@ def encontrar_cpf_ocr(
             item["texto"]
         )
 
-        if len(numero) == 11:
+        if len(numero) == 11 and cpf_valido(numero):
             return formatar_cpf(
                 numero
             )
@@ -1362,133 +1317,51 @@ def encontrar_nome_ocr(
 # 21. EXTRAÇÃO OCR - NOME DA MÃE
 # ============================================================
 
-def encontrar_mae_ocr(
-    itens
-):
-    # --------------------------------------------
-    # 1. PROCURA RÓTULO EXPLÍCITO
-    # --------------------------------------------
+def encontrar_mae_ocr(itens):
+    """
+    Extrai o nome da mãe somente com evidência estrutural:
+    rótulo MÃE/NOME DA MÃE ou rótulo equivalente.
+    FILIAÇÃO isolada não é suficiente para decidir qual nome é o da mãe.
+    """
+    rotulos_mae = []
 
-    for item_rotulo in itens:
-        rotulo = normalizar_rotulo(
-            item_rotulo["texto"]
-        )
+    for item in itens:
+        rotulo = normalizar_rotulo(item["texto"])
+        if (
+            rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE")
+            or "NOMEDAMAE" in rotulo
+        ):
+            rotulos_mae.append(item)
 
-        if rotulo in [
-            "MAE",
-            "NOMEDAMAE"
-        ]:
-            candidatos = []
-
-            for item in itens:
-                if item is item_rotulo:
-                    continue
-
-                candidato = item[
-                    "texto"
-                ].strip()
-
-                if not parece_nome(
-                    candidato
-                ):
-                    continue
-
-                dy = (
-                    item["y"]
-                    - item_rotulo["y"]
-                )
-
-                dx = abs(
-                    item["x"]
-                    - item_rotulo["x"]
-                )
-
-                if (
-                    -40 <= dy <= 220
-                    and dx <= 700
-                ):
-                    candidatos.append(
-                        (
-                            abs(dy)
-                            + dx * 0.2,
-                            -item["confianca"],
-                            candidato
-                        )
-                    )
-
-            if candidatos:
-                candidatos.sort()
-
-                return (
-                    candidatos[0][2]
-                    .strip()
-                    .upper()
-                )
-
-    # --------------------------------------------
-    # 2. PROCURA FILIAÇÃO
-    # --------------------------------------------
-
-    for item_rotulo in itens:
-        if normalizar_rotulo(
-            item_rotulo["texto"]
-        ) != "FILIACAO":
-            continue
-
+    for rotulo in rotulos_mae:
         candidatos = []
 
         for item in itens:
-            if item is item_rotulo:
+            if item is rotulo:
                 continue
 
-            candidato = item[
-                "texto"
-            ].strip()
+            candidato = str(item["texto"]).strip()
 
-            if not parece_nome(
-                candidato
-            ):
+            if not parece_nome(candidato):
                 continue
 
-            dy = (
-                item["y"]
-                - item_rotulo["y"]
-            )
+            dx = abs(item["x"] - rotulo["x"])
+            dy = item["y"] - rotulo["y"]
 
-            if not (
-                0 < dy <= 500
-            ):
-                continue
-
-            candidatos.append(
-                (
-                    item["y"],
-                    item["x"],
-                    candidato.upper()
+            if -50 <= dy <= 230 and dx <= 750:
+                candidatos.append(
+                    (
+                        abs(dy) + dx * 0.2,
+                        -item["confianca"],
+                        candidato.upper()
+                    )
                 )
-            )
 
-        candidatos.sort(
-            key=lambda x: (
-                x[0],
-                x[1]
-            )
-        )
+        if candidatos:
+            candidatos.sort()
+            return candidatos[0][2]
 
-        nomes = [
-            item[2]
-            for item in candidatos
-        ]
-
-        # Se houver pai e mãe,
-        # geralmente a mãe é o segundo nome.
-        if len(nomes) >= 2:
-            return nomes[1]
-
-        # Se houver apenas um,
-        # não adivinha.
-        return ""
-
+    # Não deduz mãe pelo sexo, primeiro nome ou posição arbitrária.
     return ""
 
 
