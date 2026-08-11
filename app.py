@@ -887,22 +887,42 @@ def extrair_dados_pdf_digital(texto):
     # ========================================================
     # NOME DA MÃE
     # ========================================================
+    # Tentativa 1: Usa a função original do seu código
     dados["nome_mae"] = encontrar_mae_texto_digital(linhas)
 
-    # Fallback simples para tentar capturar a mãe em CNH (que usa "FILIACAO")
+    # Tentativa 2 (O 'for' entra aqui): Fallback aprimorado para CNH
     if not dados["nome_mae"]:
         for i, linha in enumerate(linhas):
-            if normalizar_rotulo(linha) == "FILIACAO":
-                # Geralmente a mãe é o último nome após FILIACAO
-                nomes_filiacao = []
-                for deslocamento in range(1, 5):
+            if normalizar_rotulo(linha) in ["FILIACAO", "FILIACAO:", "NOME DA MAE"]:
+                blocos_filiacao = []
+                for deslocamento in range(1, 8):
                     if i + deslocamento < len(linhas):
-                        cand = linhas[i + deslocamento]
-                        if parece_nome(cand):
-                            nomes_filiacao.append(cand.upper())
-                if nomes_filiacao:
-                    # Pega o último nome encontrado (geralmente a mãe na CNH)
-                    dados["nome_mae"] = nomes_filiacao[-1]
+                        cand = linhas[i + deslocamento].strip()
+                        rotulo_cand = normalizar_rotulo(cand)
+                        
+                        # Parar a busca ao encontrar rótulos da próxima seção
+                        ignorar_rotulos = ["PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "DATA", "PROIBIDO"]
+                        if rotulo_cand in ignorar_rotulos or "ASSINATURA" in rotulo_cand or "VALIDADE" in rotulo_cand:
+                            break
+                        
+                        # Evita linhas vazias ou puramente numéricas
+                        if len(cand) > 2 and not re.search(r"\d{4}", cand):
+                            blocos_filiacao.append(cand.upper())
+                
+                # Agrupa os pedaços do nome dependendo de quantas linhas a CNH usou
+                if blocos_filiacao:
+                    if len(blocos_filiacao) == 2:
+                        if len(blocos_filiacao[1].split()) <= 2:
+                            dados["nome_mae"] = " ".join(blocos_filiacao)
+                        else:
+                            dados["nome_mae"] = blocos_filiacao[1]
+                    elif len(blocos_filiacao) == 3:
+                        dados["nome_mae"] = " ".join(blocos_filiacao[1:])
+                    elif len(blocos_filiacao) >= 4:
+                        meio = len(blocos_filiacao) // 2
+                        dados["nome_mae"] = " ".join(blocos_filiacao[meio:])
+                    else:
+                        dados["nome_mae"] = blocos_filiacao[-1]
                 break
 
     # ========================================================
