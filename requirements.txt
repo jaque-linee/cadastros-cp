@@ -1,4 +1,7 @@
 streamlit
-google-genai
 requests
 python-dotenv
+paddleocr
+paddlepaddle
+Pillow
+PyMuPDF
