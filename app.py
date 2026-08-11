@@ -1211,29 +1211,53 @@ def extrair_dados_pdf_digital(texto):
                     if palavras:
                         bloco_filiacao.append(candidato.upper())
 
-            # A CNH antiga pode quebrar pai e mãe em várias linhas.
-            # Procuramos a divisão mais plausível entre dois nomes
-            # completos, sem usar nomes pré-definidos.
+            # A filiação pode estar quebrada em várias linhas.
+            # Procuramos uma divisão equilibrada entre os dois
+            # nomes completos, sem analisar gênero ou nomes próprios.
             if len(bloco_filiacao) >= 2:
-                melhor_mae = ""
+                possibilidades = []
 
                 for corte in range(1, len(bloco_filiacao)):
-                    parte_pai = " ".join(
+                    parte_1 = " ".join(
                         bloco_filiacao[:corte]
                     ).strip()
 
-                    parte_mae = " ".join(
+                    parte_2 = " ".join(
                         bloco_filiacao[corte:]
                     ).strip()
 
-                    if (
-                        parece_nome(parte_pai)
-                        and parece_nome(parte_mae)
-                    ):
-                        melhor_mae = parte_mae
+                    if not parece_nome(parte_1):
+                        continue
 
-                if melhor_mae:
-                    dados["nome_mae"] = melhor_mae
+                    if not parece_nome(parte_2):
+                        continue
+
+                    palavras_1 = len(parte_1.split())
+                    palavras_2 = len(parte_2.split())
+
+                    diferenca = abs(
+                        palavras_1 - palavras_2
+                    )
+
+                    possibilidades.append(
+                        (
+                            diferenca,
+                            corte,
+                            parte_2
+                        )
+                    )
+
+                if possibilidades:
+                    possibilidades.sort(
+                        key=lambda item: (
+                            item[0],
+                            item[1]
+                        )
+                    )
+
+                    dados["nome_mae"] = (
+                        possibilidades[0][2]
+                    )
 
     return dados
     
