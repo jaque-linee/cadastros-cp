@@ -857,38 +857,46 @@ def extrair_dados_pdf_digital(texto):
                 break
 
     # ========================================================
-    # 5. ZONA E SEÇÃO
+    # 5. ZONA E SEÇÃO (Regra Específica para Título vs CNH)
     # ========================================================
-    for i, linha in enumerate(linhas):
-        r = normalizar_rotulo(linha)
-        if "ZONA" in r or "SECAO" in r or "ZONASECAO" in r:
-            bloco_texto = " ".join(linhas[i:i+3])
-            nums = re.findall(r'\b\d{1,4}\b', bloco_texto)
-            
-            candidatos_nums = []
-            for n in nums:
-                if 1900 <= int(n) <= 2100: 
-                    continue
-                if len(n) >= 11:
-                    continue
-                candidatos_nums.append(n)
-            
-            for n in candidatos_nums:
-                if len(n) <= 3 and not dados["zona"] and n != dados.get("titulo", "")[-3:]:
-                    dados["zona"] = n.zfill(3)
-                elif len(n) == 4 and not dados["secao"]:
-                    dados["secao"] = n.zfill(4)
-        if dados["zona"] and dados["secao"]:
-            break
+    if eh_titulo:
+        # No Título, Zona e Seção vêm estritamente logo após a palavra INSCRIÇÃO
+        for i, linha in enumerate(linhas):
+            if "INSCRICAO" in normalizar_rotulo(linha) or "INSCRICAO" in linha.upper():
+                for des in (1, 2):
+                    if i + des < len(linhas):
+                        nums = re.findall(r'\b\d{2,4}\b', linhas[i + des])
+                        if len(nums) >= 2:
+                            dados["zona"] = nums[0].zfill(3)
+                            dados["secao"] = nums[1].zfill(4)
+                            break
+                if dados["zona"]:
+                    break
+    
+    if not dados["zona"] or not dados["secao"]:
+        # Varredura padrão para outros documentos
+        for i, linha in enumerate(linhas):
+            r = normalizar_rotulo(linha)
+            if "ZONA" in r or "SECAO" in r or "ZONASECAO" in r:
+                bloco_texto = " ".join(linhas[i:i+3])
+                nums = re.findall(r'\b\d{1,4}\b', bloco_texto)
+                for n in nums:
+                    if 1900 <= int(n) <= 2100 or len(n) >= 11: continue
+                    if len(n) <= 3 and not dados["zona"] and n != dados.get("titulo", "")[-3:]:
+                        dados["zona"] = n.zfill(3)
+                    elif len(n) == 4 and not dados["secao"]:
+                        dados["secao"] = n.zfill(4)
+            if dados["zona"] and dados["secao"]:
+                break
 
     # ========================================================
-    # 6. NOME DA MÃE
+    # 6. NOME DA MÃE (Tratamento Isolado Título vs CNH)
     # ========================================================
     for i, linha in enumerate(linhas):
         r = normalizar_rotulo(linha)
         if r in ["FILIACAO", "FILIACAO:", "NOMEDAMAE", "MAE", "NOME DA MAE"]:
             linhas_filiacao = []
-            for des in range(1, 8):
+            for des in range(1, 6):
                 if i + des < len(linhas):
                     cand = linhas[i + des].strip()
                     rcand = normalizar_rotulo(cand)
@@ -900,21 +908,21 @@ def extrair_dados_pdf_digital(texto):
                     if not cand or re.search(r"\d{4}", cand):
                         continue
                         
-                    if cand.upper() == dados["nome"]:
+                    if cand.upper() == dados["nome"] or "NOME" in rcand:
                         continue
                         
                     linhas_filiacao.append(cand.upper())
             
             if linhas_filiacao:
                 if eh_titulo:
-                    # No Título, a mãe é estritamente a primeira linha logo após a filiação[cite: 7]
+                    # No Título, a mãe é estritamente o primeiro nome logo após a filiação[cite: 7]
                     dados["nome_mae"] = linhas_filiacao[0]
                 else:
-                    # Na CNH, as 2 primeiras linhas são do pai e as 2 últimas da mãe
+                    # Na CNH, o pai ocupa as 2 primeiras linhas e a mãe as 2 últimas[cite: 2]
                     if len(linhas_filiacao) >= 4:
                         dados["nome_mae"] = " ".join(linhas_filiacao[2:])
                     elif len(linhas_filiacao) == 3:
-                        dados["nome_mae"] = " ".join(linhas_filiacao[1:])
+                        dados["nome_mae"] = linhas_filiacao[2]
                     elif len(linhas_filiacao) == 2:
                         dados["nome_mae"] = linhas_filiacao[1]
                     else:
@@ -922,6 +930,7 @@ def extrair_dados_pdf_digital(texto):
             break
 
     return dados
+    
 # ============================================================
 # 17. EXTRAÇÃO OCR - TÍTULO
 # ============================================================
