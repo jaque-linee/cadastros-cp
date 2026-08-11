@@ -348,7 +348,7 @@ def executar_tesseract_imagem(imagem):
         gc.collect()
 
 
-def extrair_dados_tesseract(texto):
+def extrair_dados_tesseract(texto, imagem_original=None):
     linhas = linhas_texto(texto)
 
     dados = {
@@ -369,276 +369,344 @@ def extrair_dados_tesseract(texto):
         texto
     ):
         numero = "".join(match.groups())
-
         if cpf_valido(numero):
             dados["cpf"] = formatar_cpf(numero)
             break
 
-    # Data de nascimento
-    padrao_data = (
-        r"(?<!\d)(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})(?!\d)"
-    )
+    # Nascimento
+    padrao_data = r"(?<!\d)(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})(?!\d)"
 
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
-
         if (
             "NASCIMENTO" in rotulo
             or "DATEOFBIRTH" in rotulo
             or rotulo == "BIRTH"
         ):
             candidatos = [linha]
-
             for deslocamento in (1, 2, -1):
                 pos = i + deslocamento
-
                 if 0 <= pos < len(linhas):
-                    candidatos.append(
-                        linhas[pos]
-                    )
+                    candidatos.append(linhas[pos])
 
             for candidato in candidatos:
-                match = re.search(
-                    padrao_data,
-                    candidato
-                )
-
+                match = re.search(padrao_data, candidato)
                 if match:
                     valor = (
                         f"{match.group(1)}/"
                         f"{match.group(2)}/"
                         f"{match.group(3)}"
                     )
-
                     if data_valida(valor):
-                        dados[
-                            "data_nascimento"
-                        ] = valor
+                        dados["data_nascimento"] = valor
                         break
-
             if dados["data_nascimento"]:
                 break
 
     if not dados["data_nascimento"]:
         datas = []
-
-        for match in re.finditer(
-            padrao_data,
-            texto
-        ):
+        for match in re.finditer(padrao_data, texto):
             valor = (
                 f"{match.group(1)}/"
                 f"{match.group(2)}/"
                 f"{match.group(3)}"
             )
-
-            if (
-                data_valida(valor)
-                and valor not in datas
-            ):
+            if data_valida(valor) and valor not in datas:
                 datas.append(valor)
 
+        # Em identidade podem existir emissão e validade.
+        # Só usa fallback global quando houver uma única data.
         if len(datas) == 1:
-            dados["data_nascimento"] = (
-                datas[0]
-            )
+            dados["data_nascimento"] = datas[0]
 
-    # Mãe com rótulo explícito
+    # Mãe com rótulo explícito no texto linear
     for i, linha in enumerate(linhas):
         rotulo = normalizar_rotulo(linha)
-
         if (
-            rotulo in (
-                "MAE",
-                "NOMEDAMAE",
-                "NOMEMAE"
-            )
+            rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE")
             or "NOMEDAMAE" in rotulo
         ):
             for deslocamento in (1, 2, 3):
                 pos = i + deslocamento
-
-                if (
-                    pos < len(linhas)
-                    and parece_nome(
-                        linhas[pos]
-                    )
-                ):
-                    dados["nome_mae"] = (
-                        linhas[pos]
-                        .strip()
-                        .upper()
-                    )
+                if pos < len(linhas) and parece_nome(linhas[pos]):
+                    dados["nome_mae"] = linhas[pos].strip().upper()
                     break
-
             if dados["nome_mae"]:
                 break
 
-    # Filiação quando o rótulo foi reconhecido
-    if not dados["nome_mae"]:
-        for i, linha in enumerate(linhas):
-            rotulo = normalizar_rotulo(linha)
+    # Se FILIAÇÃO foi reconhecida no texto linear, usa os nomes próximos,
+    # mas não assume automaticamente que o primeiro é a mãe.
+    # A identificação segura é feita abaixo pelo OCR posicional.
+    #
+    # Para CIN/RG, usa pytesseract.image_to_data para recuperar caixas e linhas.
+    # Isso evita depender da ordem embaralhada do texto corrido.
+    if (
+        not dados["nome_mae"]
+        and imagem_original is not None
+    ):
+        try:
+            imagem_pos = ImageOps.exif_transpose(
+                imagem_original
+            ).convert("RGB")
 
-            if (
-                "FILIACAO" in rotulo
-                or "FILIATION" in rotulo
-            ):
-                for deslocamento in range(
-                    1,
-                    7
-                ):
-                    pos = i + deslocamento
+            largura, altura = imagem_pos.size
 
-                    if pos >= len(linhas):
-                        break
+            if largura < 1800:
+                escala = 1800 / largura
+                imagem_pos = imagem_pos.resize(
+                    (
+                        1800,
+                        int(altura * escala)
+                    ),
+                    Image.Resampling.LANCZOS
+                )
 
-                    candidato = (
-                        linhas[pos]
-                        .strip()
+            dados_pos = pytesseract.image_to_data(
+                imagem_pos,
+                lang="por+eng",
+                config="--oem 3 --psm 11",
+                output_type=pytesseract.Output.DICT
+            )
+
+            palavras = []
+
+            for idx, palavra in enumerate(dados_pos.get("text", [])):
+                palavra = str(palavra or "").strip()
+
+                if not palavra:
+                    continue
+
+                try:
+                    conf = float(dados_pos["conf"][idx])
+                except Exception:
+                    conf = -1
+
+                if conf < 15:
+                    continue
+
+                palavras.append({
+                    "texto": palavra,
+                    "left": int(dados_pos["left"][idx]),
+                    "top": int(dados_pos["top"][idx]),
+                    "width": int(dados_pos["width"][idx]),
+                    "height": int(dados_pos["height"][idx]),
+                    "block": int(dados_pos["block_num"][idx]),
+                    "par": int(dados_pos["par_num"][idx]),
+                    "line": int(dados_pos["line_num"][idx])
+                })
+
+            # Reconstrói linhas físicas do documento.
+            grupos = {}
+
+            for p in palavras:
+                chave = (
+                    p["block"],
+                    p["par"],
+                    p["line"]
+                )
+                grupos.setdefault(chave, []).append(p)
+
+            linhas_pos = []
+
+            for grupo in grupos.values():
+                grupo = sorted(
+                    grupo,
+                    key=lambda x: x["left"]
+                )
+
+                texto_linha = " ".join(
+                    p["texto"]
+                    for p in grupo
+                ).strip()
+
+                if not texto_linha:
+                    continue
+
+                linhas_pos.append({
+                    "texto": texto_linha,
+                    "norm": remover_acentos(
+                        texto_linha
+                    ).upper(),
+                    "top": min(
+                        p["top"]
+                        for p in grupo
+                    ),
+                    "bottom": max(
+                        p["top"] + p["height"]
+                        for p in grupo
+                    ),
+                    "left": min(
+                        p["left"]
+                        for p in grupo
                     )
+                })
 
-                    if parece_nome(candidato):
-                        dados["nome_mae"] = (
-                            candidato.upper()
-                        )
-                        break
+            linhas_pos.sort(
+                key=lambda x: (
+                    x["top"],
+                    x["left"]
+                )
+            )
 
-                if dados["nome_mae"]:
+            # Primeiro tenta localizar FILIAÇÃO/FILIATION fisicamente.
+            indice_filiacao = None
+
+            for idx, linha_pos in enumerate(linhas_pos):
+                norm = normalizar_rotulo(
+                    linha_pos["texto"]
+                )
+
+                if (
+                    "FILIACAO" in norm
+                    or "FILIATION" in norm
+                ):
+                    indice_filiacao = idx
                     break
 
-    # CIN/RG moderno: fallback estrutural.
-    #
-    # Alguns documentos têm "FILIAÇÃO / FILIATION" impresso,
-    # mas o OCR perde completamente esse rótulo. Nesse caso,
-    # usamos somente a estrutura documental reconhecida:
-    #   - há sinais claros de documento de identidade;
-    #   - há CPF válido;
-    #   - há nascimento;
-    #   - selecionamos nomes completos antes do nome do titular;
-    #   - excluímos cabeçalhos, órgãos e rótulos.
-    #
-    # Não há lista de nomes próprios e nenhum nome é inventado.
-    if not dados["nome_mae"]:
-        eh_identidade = any(
-            marcador in texto_norm
-            for marcador in (
-                "REGISTRO GERAL",
-                "PERSONAL NUMBER",
-                "NOME SOCIAL",
-                "SOCIAL NAME",
-                "ORGAO EXPEDIDOR",
-                "CARD ISSUER",
-                "INSTITUTO DE IDENTIFICACAO",
-                "SECRETARIA DE SEGURANCA"
-            )
-        )
+            candidatos_filiacao = []
 
-        if (
-            eh_identidade
-            and dados["cpf"]
-            and dados["data_nascimento"]
-        ):
-            termos_excluir = (
-                "REPUBLICA",
-                "FEDERATIVA",
-                "BRASIL",
-                "GOVERNO",
-                "FEDERAL",
-                "ESTADO",
-                "SECRETARIA",
-                "SEGURANCA",
-                "PUBLICA",
-                "INSTITUTO",
-                "IDENTIFICACAO",
-                "DELEGADO",
-                "REGISTRO",
-                "GERAL",
-                "PERSONAL",
-                "NUMBER",
-                "NOME",
-                "SOCIAL",
-                "CARD",
-                "ISSUER",
-                "LOCAL",
-                "PLACE",
-                "ISSUE",
-                "EMISSAO",
-                "NASCIMENTO",
-                "BIRTH",
-                "NACIONALIDADE",
-                "NATIONALITY",
-                "NATURALIDADE",
-                "EXPIRY",
-                "VALIDADE",
-                "ASSINATURA",
-                "SIGNATURE",
-                "SUPERINTENDENTE"
-            )
+            if indice_filiacao is not None:
+                topo_rotulo = linhas_pos[
+                    indice_filiacao
+                ]["top"]
 
-            candidatos = []
-
-            for indice, linha in enumerate(
-                linhas
-            ):
-                candidato = (
-                    linha.strip()
+                # Examina somente uma faixa abaixo do rótulo.
+                limite = topo_rotulo + int(
+                    imagem_pos.size[1] * 0.20
                 )
 
-                if not parece_nome(
-                    candidato
-                ):
-                    continue
+                for linha_pos in linhas_pos[
+                    indice_filiacao + 1:
+                ]:
+                    if linha_pos["top"] > limite:
+                        break
 
-                normalizado = (
-                    remover_acentos(
+                    candidato = linha_pos[
+                        "texto"
+                    ].strip()
+
+                    if parece_nome(candidato):
+                        candidatos_filiacao.append(
+                            candidato.upper()
+                        )
+
+            # Caso o rótulo FILIAÇÃO não tenha sido reconhecido,
+            # usa a geometria do CIN: nomes da filiação aparecem
+            # acima da linha do titular e antes dos campos de emissão.
+            if not candidatos_filiacao:
+                nomes_pos = []
+
+                termos_excluir = (
+                    "REPUBLICA", "FEDERATIVA",
+                    "BRASIL", "GOVERNO",
+                    "FEDERAL", "ESTADO",
+                    "SECRETARIA", "SEGURANCA",
+                    "PUBLICA", "INSTITUTO",
+                    "IDENTIFICACAO", "DELEGADO",
+                    "REGISTRO", "GERAL",
+                    "PERSONAL", "NUMBER",
+                    "NOME SOCIAL", "SOCIAL NAME",
+                    "CARD ISSUER", "LOCAL",
+                    "PLACE", "ISSUE", "EMISSAO",
+                    "NASCIMENTO", "BIRTH",
+                    "NACIONALIDADE", "NATIONALITY",
+                    "NATURALIDADE", "VALIDADE",
+                    "EXPIRY", "ASSINATURA",
+                    "SIGNATURE", "SUPERINTENDENTE"
+                )
+
+                for linha_pos in linhas_pos:
+                    candidato = linha_pos[
+                        "texto"
+                    ].strip()
+
+                    norm = remover_acentos(
                         candidato
                     ).upper()
-                )
 
-                if any(
-                    termo in normalizado
-                    for termo in termos_excluir
-                ):
-                    continue
+                    if not parece_nome(candidato):
+                        continue
 
-                palavras = candidato.split()
+                    if any(
+                        termo in norm
+                        for termo in termos_excluir
+                    ):
+                        continue
 
-                if not (
-                    3 <= len(palavras) <= 7
-                ):
-                    continue
-
-                candidatos.append(
-                    (
-                        indice,
-                        candidato.upper()
+                    quantidade = len(
+                        candidato.split()
                     )
-                )
 
-            # Remove repetições preservando a ordem.
-            nomes_unicos = []
-
-            for indice, candidato in candidatos:
-                if candidato not in [
-                    nome
-                    for _, nome
-                    in nomes_unicos
-                ]:
-                    nomes_unicos.append(
-                        (
-                            indice,
-                            candidato
+                    if 3 <= quantidade <= 7:
+                        nomes_pos.append(
+                            linha_pos
                         )
-                    )
 
-            # Em CIN/RG, quando o OCR perde o rótulo FILIAÇÃO,
-            # a mãe aparece no bloco de filiação antes do titular.
-            # Exigimos ao menos três nomes completos reconhecidos
-            # para não transformar um nome isolado em filiação.
-            if len(nomes_unicos) >= 3:
+                # Procura o titular conhecido pelo OCR principal/texto.
+                # Em CIN, os dois nomes imediatamente acima dele formam
+                # o bloco de filiação. A linha mais próxima do titular
+                # costuma ser a mãe no layout vertical; se a geometria
+                # não for clara, não preenche.
+                titular_idx = None
+
+                for idx, linha_pos in enumerate(
+                    nomes_pos
+                ):
+                    norm_nome = remover_acentos(
+                        linha_pos["texto"]
+                    ).upper()
+
+                    # Nome do titular tende a aparecer depois dos dois pais
+                    # e próximo dos rótulos Nome/Nome Social.
+                    proximos = [
+                        l["norm"]
+                        for l in linhas_pos
+                        if (
+                            l["top"]
+                            <= linha_pos["top"]
+                            <= l["bottom"] + 10
+                        )
+                    ]
+
+                    if any(
+                        "NOME" in p
+                        for p in proximos
+                    ):
+                        titular_idx = idx
+                        break
+
+                # Se a linha do titular não foi localizada pelo rótulo,
+                # usa três nomes completos consecutivos no topo da área
+                # de dados, mas só quando a separação vertical confirma
+                # que os dois primeiros pertencem ao mesmo bloco.
+                if (
+                    titular_idx is not None
+                    and titular_idx >= 2
+                ):
+                    pais = nomes_pos[
+                        titular_idx - 2:
+                        titular_idx
+                    ]
+
+                    if len(pais) == 2:
+                        # No CIN brasileiro o campo Filiação não identifica
+                        # sexo do genitor no texto OCR. Sem o rótulo individual,
+                        # não é seguro decidir qual dos dois é a mãe.
+                        # Portanto não inventa.
+                        candidatos_filiacao = []
+
+            # Só preenche automaticamente quando há um único candidato
+            # inequivocamente associado ao campo Mãe.
+            if len(candidatos_filiacao) == 1:
                 dados["nome_mae"] = (
-                    nomes_unicos[0][1]
+                    candidatos_filiacao[0]
                 )
+
+            del imagem_pos
+            gc.collect()
+
+        except Exception:
+            pass
 
     return dados
 
@@ -2433,18 +2501,22 @@ if menu == "📸 Envio de Documentos":
                             imagem_fallback
                         )
 
-                        del imagem_fallback
-                        gc.collect()
-
                         if texto_tesseract:
                             dados_tesseract = extrair_dados_tesseract(
-                                texto_tesseract
+                                texto_tesseract,
+                                imagem_original=imagem_fallback
                             )
+
                             dados = combinar_dados_ocr(
                                 dados,
                                 dados_tesseract
                             )
 
+                        del imagem_fallback
+                        gc.collect()
+
+                        if False:
+                            dados_tesseract = {}
                     duplicado, existente = verificar_duplicidade(
                         dados,
                         base
