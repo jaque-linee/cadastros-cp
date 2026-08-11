@@ -766,7 +766,8 @@ def extrair_dados_pdf_digital(texto):
     }
     
     texto_norm = normalizar_texto(texto)
-    eh_titulo = "JUSTICA ELEITORAL" in texto_norm or "TITULO ELEITORAL" in texto_norm
+    eh_titulo = "TITULO ELEITORAL" in texto_norm or "JUSTICA ELEITORAL" in texto_norm
+    eh_cnh = "HABILITACAO" in texto_norm or "CARTEIRA NACIONAL" in texto_norm
 
     # ========================================================
     # 1. NOME
@@ -857,27 +858,27 @@ def extrair_dados_pdf_digital(texto):
                 break
 
     # ========================================================
-    # 5. ZONA E SEÇÃO (Blindado para Título Eleitoral)
+    # 5. ZONA E SEÇÃO (Regra Exata Título vs Outros)
     # ========================================================
     if eh_titulo:
+        # No Título, o layout padrão coloca a Inscrição e logo abaixo Zona e Seção na mesma linha (ex: "030111141759 055" e na linha seguinte "0277")
         for i, linha in enumerate(linhas):
-            if "INSCRICAO" in normalizar_rotulo(linha) or "ZONA" in normalizar_rotulo(linha):
-                # Olha a linha atual e a logo abaixo para capturar os números corretos da zona e seção
-                bloco = " ".join(linhas[i:i+3])
-                nums = re.findall(r'\b\d{2,4}\b', bloco)
-                candidatos_validos = [n for n in nums if not (1900 <= int(n) <= 2100) and n != dados.get("titulo", "")[-4:]]
+            if "INSCRICAO" in normalizar_rotulo(linha) or "INSCRIÇÃO" in linha.upper():
+                # Procura nas 2 linhas seguintes por números de zona e seção
+                todos_nums = []
+                for des in (1, 2):
+                    if i + des < len(linhas):
+                        ns = re.findall(r'\b\d{2,4}\b', linhas[i + des])
+                        todos_nums.extend(ns)
                 
-                if len(candidatos_validos) >= 2:
-                    # No título, o primeiro número costuma ser a zona (ex: 055) e o seguinte a seção (ex: 0277)[cite: 3]
-                    for n in candidatos_validos:
-                        if len(n) <= 3 and not dados["zona"]:
-                            dados["zona"] = n.zfill(3)
-                        elif len(n) == 4 and not dados["secao"]:
-                            dados["secao"] = n.zfill(4)
-            if dados["zona"] and dados["secao"]:
+                # Filtra anos ou números longos
+                validos = [n for n in todos_nums if not (1900 <= int(n) <= 2100) and len(n) <= 4 and n != dados.get("titulo", "")[-4:]]
+                if len(validos) >= 2:
+                    dados["zona"] = validos[0].zfill(3)
+                    dados["secao"] = validos[1].zfill(4)
                 break
-    else:
-        # Extração de Zona/Seção para outros documentos se houver
+    
+    if not dados["zona"] or not dados["secao"]:
         for i, linha in enumerate(linhas):
             if "ZONA" in normalizar_rotulo(linha):
                 if i + 1 < len(linhas):
@@ -889,44 +890,43 @@ def extrair_dados_pdf_digital(texto):
                     if nums: dados["secao"] = nums[-1].zfill(4)
 
     # ========================================================
-    # 6. NOME DA MÃE (Regra Direta Título vs CNH)
+    # 6. NOME DA MÃE (Regra Exata Título vs CNH)
     # ========================================================
     for i, linha in enumerate(linhas):
         r = normalizar_rotulo(linha)
         if r in ["FILIACAO", "FILIACAO:", "NOMEDAMAE", "MAE", "NOME DA MAE"]:
-            candidatos_validados = []
-            for des in range(1, 6):
+            candidatos = []
+            for des in range(1, 5):
                 if i + des < len(linhas):
                     cand = linhas[i + des].strip()
                     rcand = normalizar_rotulo(cand)
                     
-                    parar = ["PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "PROIBIDO", "ORIENTACOES", "MUNICIPIO", "ZONA", "SECAO", "CODIGO", "AUTENTICIDADE", "VALIDACAO", "TITULO", "ELEITORAL", "IMPRESSO", "DATADENASCIMENTO"]
+                    parar = ["PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "PROIBIDO", "ORIENTACOES", "MUNICIPIO", "ZONA", "SECAO", "CODIGO", "AUTENTICIDADE", "VALIDACAO", "TITULO", "ELEITORAL", "IMPRESSO", "CÓDIGO"]
                     if any(p in rcand for p in parar):
                         break
                     
                     if not cand or len(cand) < 3 or re.search(r"\d{4}", cand):
                         continue
                         
-                    if cand.upper() == dados["nome"] or "NOME" in rcand or "DATA" in rcand:
+                    if cand.upper() == dados["nome"] or "NOME" in rcand:
                         continue
                         
-                    candidatos_validados.append(cand.upper())
+                    candidatos.append(cand.upper())
             
-            if candidatos_validados:
+            if candidatos:
                 if eh_titulo:
-                    # No Título, a mãe é estritamente o primeiro nome logo abaixo de filiação[cite: 3]
-                    dados["nome_mae"] = candidatos_validados[0]
+                    # No Título, a mãe é sempre o primeiro nome logo abaixo de filiação (ex: Valdivia)
+                    dados["nome_mae"] = candidatos[0]
                 else:
-                    # Na CNH, o pai ocupa as primeiras linhas e a mãe as últimas[cite: 2]
-                    if len(candidatos_validados) >= 3:
-                        dados["nome_mae"] = " ".join(candidatos_validados[1:])
-                    elif len(candidatos_validados) == 2:
-                        dados["nome_mae"] = candidatos_validados[1]
+                    # Na CNH, o pai fica nas primeiras linhas e a mãe nas últimas (ex: Maria Lucia)[cite: 2]
+                    if len(candidatos) >= 2:
+                        dados["nome_mae"] = candidatos[-1]
                     else:
-                        dados["nome_mae"] = candidatos_validados[0]
+                        dados["nome_mae"] = candidatos[0]
             break
 
     return dados
+    
     
 # ============================================================
 # 17. EXTRAÇÃO OCR - TÍTULO
