@@ -749,12 +749,13 @@ def encontrar_mae_texto_digital(linhas):
 
     return ""
 
-
 # ============================================================
 # 16. EXTRAIR DADOS DO PDF DIGITAL
 # ============================================================
+
 def extrair_dados_pdf_digital(texto):
     linhas = linhas_texto(texto)
+
     dados = {
         "nome": "",
         "cpf": "",
@@ -764,166 +765,475 @@ def extrair_dados_pdf_digital(texto):
         "zona": "",
         "secao": ""
     }
-    
-    texto_norm = normalizar_texto(texto)
-    eh_titulo = "TITULO ELEITORAL" in texto_norm or "JUSTICA ELEITORAL" in texto_norm
-    eh_cnh = "HABILITACAO" in texto_norm or "CARTEIRA NACIONAL" in texto_norm
+
+    texto_norm = remover_acentos(texto).upper()
+
+    eh_titulo = (
+        "JUSTICA ELEITORAL" in texto_norm
+        or "TITULO ELEITORAL" in texto_norm
+    )
+
+    eh_cnh = (
+        "CARTEIRA NACIONAL" in texto_norm
+        or "HABILITACAO" in texto_norm
+        or "DENATRAN" in texto_norm
+    )
 
     # ========================================================
     # 1. NOME
     # ========================================================
+
     for i, linha in enumerate(linhas):
-        r = normalizar_rotulo(linha)
-        if r in ["NOMEDOELEITOR", "NOME", "NOMECOMPLETO", "NOME-"]:
-            if i + 1 < len(linhas) and parece_nome(linhas[i + 1]):
-                dados["nome"] = linhas[i + 1].upper()
-                break
-            elif i > 0 and parece_nome(linhas[i - 1]):
-                dados["nome"] = linhas[i - 1].upper()
-                break
+        rotulo = normalizar_rotulo(linha)
+
+        if rotulo in (
+            "NOMEDOELEITOR",
+            "NOME",
+            "NOMECOMPLETO"
+        ):
+            if i + 1 < len(linhas):
+                candidato = linhas[i + 1].strip()
+
+                if parece_nome(candidato):
+                    dados["nome"] = candidato.upper()
+                    break
+
+            if i > 0:
+                candidato = linhas[i - 1].strip()
+
+                if parece_nome(candidato):
+                    dados["nome"] = candidato.upper()
+                    break
+
+    # Fallback somente se não encontrou pelo rótulo
     if not dados["nome"]:
         for linha in linhas:
-            if parece_nome(linha) and "REPUBLICA" not in normalizar_rotulo(linha):
-                dados["nome"] = linha.upper()
-                break
+            if parece_nome(linha):
+                rotulo = normalizar_rotulo(linha)
+
+                if not any(
+                    termo in rotulo
+                    for termo in (
+                        "REPUBLICA",
+                        "FEDERATIVA",
+                        "JUSTICA",
+                        "ELEITORAL",
+                        "CARTEIRA",
+                        "NACIONAL",
+                        "HABILITACAO"
+                    )
+                ):
+                    dados["nome"] = linha.upper()
+                    break
 
     # ========================================================
-    # 2. NASCIMENTO
+    # 2. DATA DE NASCIMENTO
     # ========================================================
+
     for i, linha in enumerate(linhas):
-        r = normalizar_rotulo(linha)
-        if r in ["DATADENASCIMENTO", "NASCIMENTO", "DATANASCIMENTO"]:
-            for des in (1, -1):
-                if 0 <= i + des < len(linhas) and data_valida(linhas[i + des]):
-                    dados["data_nascimento"] = linhas[i + des].replace(".", "/").replace("-", "/")
-                    break
-        if dados["data_nascimento"]:
-            break
+        rotulo = normalizar_rotulo(linha)
+
+        if (
+            "DATADENASCIMENTO" in rotulo
+            or rotulo == "NASCIMENTO"
+            or rotulo == "DATANASCIMENTO"
+        ):
+            candidatos = []
+
+            # Próximas linhas
+            for deslocamento in (1, 2):
+                pos = i + deslocamento
+
+                if pos < len(linhas):
+                    match = re.search(
+                        r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b",
+                        linhas[pos]
+                    )
+
+                    if match:
+                        valor = (
+                            f"{match.group(1)}/"
+                            f"{match.group(2)}/"
+                            f"{match.group(3)}"
+                        )
+
+                        if data_valida(valor):
+                            candidatos.append(valor)
+
+            # Linha anterior
+            if i > 0:
+                match = re.search(
+                    r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b",
+                    linhas[i - 1]
+                )
+
+                if match:
+                    valor = (
+                        f"{match.group(1)}/"
+                        f"{match.group(2)}/"
+                        f"{match.group(3)}"
+                    )
+
+                    if data_valida(valor):
+                        candidatos.append(valor)
+
+            if candidatos:
+                dados["data_nascimento"] = candidatos[0]
+                break
+
+    # Fallback
     if not dados["data_nascimento"]:
         for linha in linhas:
-            m = re.search(r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b", linha)
-            if m and data_valida(f"{m.group(1)}/{m.group(2)}/{m.group(3)}"):
-                dados["data_nascimento"] = f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
-                break
+            match = re.search(
+                r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b",
+                linha
+            )
+
+            if match:
+                valor = (
+                    f"{match.group(1)}/"
+                    f"{match.group(2)}/"
+                    f"{match.group(3)}"
+                )
+
+                if data_valida(valor):
+                    dados["data_nascimento"] = valor
+                    break
 
     # ========================================================
     # 3. CPF
     # ========================================================
+
     for i, linha in enumerate(linhas):
-        if "CPF" in normalizar_texto(linha):
-            num = somente_numeros(linha)
-            if len(num) == 11 and cpf_valido(num):
-                dados["cpf"] = formatar_cpf(num)
-                break
+        rotulo = normalizar_rotulo(linha)
+
+        if "CPF" in rotulo:
+            candidatos = [linha]
+
             if i + 1 < len(linhas):
-                num_abaixo = somente_numeros(linhas[i + 1])
-                if len(num_abaixo) == 11 and cpf_valido(num_abaixo):
-                    dados["cpf"] = formatar_cpf(num_abaixo)
+                candidatos.append(linhas[i + 1])
+
+            if i + 2 < len(linhas):
+                candidatos.append(linhas[i + 2])
+
+            for candidato in candidatos:
+                numeros = somente_numeros(candidato)
+
+                if len(numeros) == 11 and cpf_valido(numeros):
+                    dados["cpf"] = formatar_cpf(numeros)
                     break
-        if dados["cpf"]:
-            break
-    if not dados["cpf"]:
-        for linha in linhas:
-            matches = re.findall(r'\d{11}', somente_numeros(linha))
-            for num in matches:
-                if cpf_valido(num):
-                    dados["cpf"] = formatar_cpf(num)
-                    break
+
             if dados["cpf"]:
                 break
 
-    # ========================================================
-    # 4. TÍTULO
-    # ========================================================
-    for i, linha in enumerate(linhas):
-        r = normalizar_rotulo(linha)
-        if "INSCRICAO" in r or "TITULO" in r:
-            num = somente_numeros(linha)
-            if len(num) >= 12:
-                dados["titulo"] = num[:12]
-                break
-            for des in (1, 2, -1):
-                if 0 <= i + des < len(linhas):
-                    num_abaixo = somente_numeros(linhas[i + des])
-                    if len(num_abaixo) >= 12:
-                        dados["titulo"] = num_abaixo[:12]
-                        break
-        if dados["titulo"]:
-            break
-    if not dados["titulo"] and eh_titulo:
+    # Fallback: somente CPF matematicamente válido
+    if not dados["cpf"]:
         for linha in linhas:
-            num = somente_numeros(linha)
-            if len(num) >= 12 and num[:11] != somente_numeros(dados.get("cpf", "")):
-                dados["titulo"] = num[:12]
+            numeros = somente_numeros(linha)
+
+            if len(numeros) == 11 and cpf_valido(numeros):
+                dados["cpf"] = formatar_cpf(numeros)
                 break
 
     # ========================================================
-    # 5. ZONA E SEÇÃO (Regra Exata Título vs Outros)
+    # 4. TÍTULO ELEITORAL
     # ========================================================
+
     if eh_titulo:
-        # No Título, o layout padrão coloca a Inscrição e logo abaixo Zona e Seção na mesma linha (ex: "030111141759 055" e na linha seguinte "0277")
         for i, linha in enumerate(linhas):
-            if "INSCRICAO" in normalizar_rotulo(linha) or "INSCRIÇÃO" in linha.upper():
-                # Procura nas 2 linhas seguintes por números de zona e seção
-                todos_nums = []
-                for des in (1, 2):
-                    if i + des < len(linhas):
-                        ns = re.findall(r'\b\d{2,4}\b', linhas[i + des])
-                        todos_nums.extend(ns)
-                
-                # Filtra anos ou números longos
-                validos = [n for n in todos_nums if not (1900 <= int(n) <= 2100) and len(n) <= 4 and n != dados.get("titulo", "")[-4:]]
-                if len(validos) >= 2:
-                    dados["zona"] = validos[0].zfill(3)
-                    dados["secao"] = validos[1].zfill(4)
-                break
-    
-    if not dados["zona"] or not dados["secao"]:
-        for i, linha in enumerate(linhas):
-            if "ZONA" in normalizar_rotulo(linha):
-                if i + 1 < len(linhas):
-                    nums = re.findall(r'\b\d{1,4}\b', linhas[i+1])
-                    if nums: dados["zona"] = nums[0].zfill(3)
-            if "SECAO" in normalizar_rotulo(linha):
-                if i + 1 < len(linhas):
-                    nums = re.findall(r'\b\d{1,4}\b', linhas[i+1])
-                    if nums: dados["secao"] = nums[-1].zfill(4)
+            rotulo = normalizar_rotulo(linha)
+
+            if (
+                "INSCRICAO" in rotulo
+                or rotulo == "TITULO"
+                or rotulo == "TITULODEELEITOR"
+            ):
+                candidatos = []
+
+                candidatos.append(linha)
+
+                for deslocamento in (1, 2, -1):
+                    pos = i + deslocamento
+
+                    if 0 <= pos < len(linhas):
+                        candidatos.append(linhas[pos])
+
+                for candidato in candidatos:
+                    numero = somente_numeros(candidato)
+
+                    if len(numero) == 12:
+                        dados["titulo"] = numero
+                        break
+
+                if dados["titulo"]:
+                    break
 
     # ========================================================
-    # 6. NOME DA MÃE (Regra Exata Título vs CNH)
+    # 5. ZONA E SEÇÃO
+    #
+    # Lê cada campo pelo seu próprio rótulo.
+    # Não tenta deduzir pela ordem de números do documento.
     # ========================================================
+
+    if eh_titulo:
+
+        # -------------------------
+        # ZONA
+        # -------------------------
+
+        for i, linha in enumerate(linhas):
+            rotulo = normalizar_rotulo(linha)
+
+            if rotulo == "ZONA":
+                candidatos = []
+
+                # Pode estar na própria linha
+                numero_propria = somente_numeros(linha)
+
+                if numero_propria and len(numero_propria) <= 3:
+                    candidatos.append(numero_propria)
+
+                # Ou imediatamente depois
+                for deslocamento in (1, 2):
+                    pos = i + deslocamento
+
+                    if pos < len(linhas):
+                        numero = somente_numeros(linhas[pos])
+
+                        if 1 <= len(numero) <= 3:
+                            candidatos.append(numero)
+
+                if candidatos:
+                    dados["zona"] = candidatos[0].zfill(3)
+                    break
+
+        # -------------------------
+        # SEÇÃO
+        # -------------------------
+
+        for i, linha in enumerate(linhas):
+            rotulo = normalizar_rotulo(linha)
+
+            if rotulo == "SECAO":
+                candidatos = []
+
+                numero_propria = somente_numeros(linha)
+
+                if numero_propria and len(numero_propria) <= 4:
+                    candidatos.append(numero_propria)
+
+                for deslocamento in (1, 2):
+                    pos = i + deslocamento
+
+                    if pos < len(linhas):
+                        numero = somente_numeros(linhas[pos])
+
+                        if 1 <= len(numero) <= 4:
+                            candidatos.append(numero)
+
+                if candidatos:
+                    dados["secao"] = candidatos[0].zfill(4)
+                    break
+
+    # ========================================================
+    # 6. NOME DA MÃE
+    # ========================================================
+
+    # --------------------------------------------------------
+    # CASO 1: documento possui rótulo explícito MÃE
+    # --------------------------------------------------------
+
     for i, linha in enumerate(linhas):
-        r = normalizar_rotulo(linha)
-        if r in ["FILIACAO", "FILIACAO:", "NOMEDAMAE", "MAE", "NOME DA MAE"]:
+        rotulo = normalizar_rotulo(linha)
+
+        if rotulo in (
+            "MAE",
+            "NOMEDAMAE",
+            "NOMEMAE"
+        ):
+            partes = []
+
+            for deslocamento in range(1, 5):
+                pos = i + deslocamento
+
+                if pos >= len(linhas):
+                    break
+
+                candidato = linhas[pos].strip()
+                candidato_rotulo = normalizar_rotulo(candidato)
+
+                if eh_rotulo_documento(candidato):
+                    break
+
+                if re.search(r"\d", candidato):
+                    break
+
+                if parece_nome(candidato):
+                    partes.append(candidato.upper())
+                elif partes:
+                    break
+
+            if partes:
+                dados["nome_mae"] = " ".join(partes)
+                break
+
+    # --------------------------------------------------------
+    # CASO 2: TÍTULO ELEITORAL
+    #
+    # No título, FILIAÇÃO contém os dois genitores.
+    # Como o PDF pode retornar a caixa de filiação antes
+    # do nome do eleitor, pegamos os nomes próximos à
+    # FILIAÇÃO, mas nunca o nome do próprio eleitor.
+    #
+    # Não usa lista de nomes femininos.
+    # --------------------------------------------------------
+
+    if eh_titulo and not dados["nome_mae"]:
+        indice_filiacao = None
+
+        for i, linha in enumerate(linhas):
+            if normalizar_rotulo(linha) == "FILIACAO":
+                indice_filiacao = i
+                break
+
+        if indice_filiacao is not None:
             candidatos = []
-            for des in range(1, 5):
-                if i + des < len(linhas):
-                    cand = linhas[i + des].strip()
-                    rcand = normalizar_rotulo(cand)
-                    
-                    parar = ["PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "PROIBIDO", "ORIENTACOES", "MUNICIPIO", "ZONA", "SECAO", "CODIGO", "AUTENTICIDADE", "VALIDACAO", "TITULO", "ELEITORAL", "IMPRESSO", "CÓDIGO"]
-                    if any(p in rcand for p in parar):
-                        break
-                    
-                    if not cand or len(cand) < 3 or re.search(r"\d{4}", cand):
-                        continue
-                        
-                    if cand.upper() == dados["nome"] or "NOME" in rcand:
-                        continue
-                        
-                    candidatos.append(cand.upper())
-            
-            if candidatos:
-                if eh_titulo:
-                    # No Título, a mãe é sempre o primeiro nome logo abaixo de filiação (ex: Valdivia)
-                    dados["nome_mae"] = candidatos[0]
-                else:
-                    # Na CNH, o pai fica nas primeiras linhas e a mãe nas últimas (ex: Maria Lucia)[cite: 2]
-                    if len(candidatos) >= 2:
-                        dados["nome_mae"] = candidatos[-1]
-                    else:
-                        dados["nome_mae"] = candidatos[0]
-            break
+
+            inicio = max(0, indice_filiacao - 3)
+            fim = min(len(linhas), indice_filiacao + 5)
+
+            for pos in range(inicio, fim):
+                if pos == indice_filiacao:
+                    continue
+
+                candidato = linhas[pos].strip()
+                rotulo = normalizar_rotulo(candidato)
+
+                if candidato.upper() == dados["nome"]:
+                    continue
+
+                if eh_rotulo_documento(candidato):
+                    continue
+
+                if re.search(r"\d", candidato):
+                    continue
+
+                if parece_nome(candidato):
+                    candidatos.append(
+                        (
+                            pos,
+                            candidato.upper()
+                        )
+                    )
+
+            # Remove repetições mantendo a ordem
+            nomes_unicos = []
+
+            for _, candidato in candidatos:
+                if candidato not in nomes_unicos:
+                    nomes_unicos.append(candidato)
+
+            # No título eleitoral brasileiro, quando a extração
+            # apresenta os dois nomes completos da filiação,
+            # o primeiro nome da caixa de filiação corresponde
+            # ao nome da mãe.
+            if nomes_unicos:
+                dados["nome_mae"] = nomes_unicos[0]
+
+    # --------------------------------------------------------
+    # CASO 3: CNH
+    #
+    # A filiação pode vir quebrada em várias linhas.
+    # Identificamos o bloco entre FILIAÇÃO e o próximo campo
+    # estrutural da CNH.
+    # --------------------------------------------------------
+
+    if eh_cnh and not dados["nome_mae"]:
+        indice_filiacao = None
+
+        for i, linha in enumerate(linhas):
+            if normalizar_rotulo(linha) == "FILIACAO":
+                indice_filiacao = i
+                break
+
+        if indice_filiacao is not None:
+            bloco_filiacao = []
+
+            rotulos_fim = (
+                "PERMISSAO",
+                "ACC",
+                "CATHAB",
+                "CATEGORIA",
+                "REGISTRO",
+                "VALIDADE",
+                "HABILITACAO",
+                "OBSERVACOES",
+                "LOCAL",
+                "DATAEMISSAO",
+                "ASSINATURA"
+            )
+
+            for pos in range(
+                indice_filiacao + 1,
+                min(len(linhas), indice_filiacao + 10)
+            ):
+                candidato = linhas[pos].strip()
+                rotulo = normalizar_rotulo(candidato)
+
+                if any(
+                    rotulo.startswith(fim)
+                    for fim in rotulos_fim
+                ):
+                    break
+
+                if not candidato:
+                    continue
+
+                if re.search(r"\d", candidato):
+                    continue
+
+                if candidato.upper() == dados["nome"]:
+                    continue
+
+                if parece_nome(candidato):
+                    bloco_filiacao.append(candidato.upper())
+                    continue
+
+                # OCR/PDF pode quebrar sobrenomes em linhas
+                # pequenas, então aceitamos trechos compostos
+                # apenas por letras dentro do bloco de filiação.
+                if re.fullmatch(
+                    r"[A-Za-zÀ-ÿ\s]+",
+                    candidato
+                ):
+                    palavras = candidato.split()
+
+                    if palavras:
+                        bloco_filiacao.append(candidato.upper())
+
+            # A CNH antiga pode quebrar pai e mãe em várias linhas.
+            # Procuramos a divisão mais plausível entre dois nomes
+            # completos, sem usar nomes pré-definidos.
+            if len(bloco_filiacao) >= 2:
+                melhor_mae = ""
+
+                for corte in range(1, len(bloco_filiacao)):
+                    parte_pai = " ".join(
+                        bloco_filiacao[:corte]
+                    ).strip()
+
+                    parte_mae = " ".join(
+                        bloco_filiacao[corte:]
+                    ).strip()
+
+                    if (
+                        parece_nome(parte_pai)
+                        and parece_nome(parte_mae)
+                    ):
+                        melhor_mae = parte_mae
+
+                if melhor_mae:
+                    dados["nome_mae"] = melhor_mae
 
     return dados
     
