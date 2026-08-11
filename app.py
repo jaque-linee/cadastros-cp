@@ -170,6 +170,84 @@ def data_valida(valor):
 
 
 # ============================================================
+# 4A. TELEFONE
+# ============================================================
+
+def normalizar_telefone(valor):
+    numero = somente_numeros(valor)
+
+    if len(numero) == 13 and numero.startswith("55"):
+        numero = numero[2:]
+
+    if len(numero) in (10, 11):
+        return numero
+
+    return ""
+
+
+def encontrar_telefone_em_texto(texto):
+    texto = str(texto or "")
+
+    padroes = [
+        r"(?<!\d)(?:\+?55[\s.\-]?)?\(?\d{2}\)?[\s.\-]?\d{4,5}[\s.\-]?\d{4}(?!\d)",
+        r"(?<!\d)\d{10,11}(?!\d)"
+    ]
+
+    candidatos = []
+
+    for padrao in padroes:
+        for match in re.finditer(padrao, texto):
+            telefone = normalizar_telefone(match.group(0))
+
+            if not telefone:
+                continue
+
+            # Evita classificar CPF válido como telefone.
+            if len(telefone) == 11 and cpf_valido(telefone):
+                continue
+
+            if telefone not in candidatos:
+                candidatos.append(telefone)
+
+    # Se houver mais de um número plausível, não adivinha.
+    if len(candidatos) == 1:
+        return candidatos[0]
+
+    return ""
+
+
+def encontrar_telefone_documento(texto, itens):
+    telefone = encontrar_telefone_em_texto(texto)
+
+    if telefone:
+        return telefone
+
+    candidatos = []
+
+    for item in itens or []:
+        telefone = encontrar_telefone_em_texto(
+            item.get("texto", "")
+        )
+
+        if telefone and telefone not in candidatos:
+            candidatos.append(telefone)
+
+    if len(candidatos) == 1:
+        return candidatos[0]
+
+    return ""
+
+
+def encontrar_telefone_nome_arquivo(nome_arquivo):
+    nome = str(nome_arquivo or "")
+
+    if "." in nome:
+        nome = nome.rsplit(".", 1)[0]
+
+    return encontrar_telefone_em_texto(nome)
+
+
+# ============================================================
 # 5. OCR
 # SÓ CARREGA SE REALMENTE PRECISAR
 # ============================================================
@@ -359,6 +437,7 @@ def extrair_dados_tesseract(texto, imagem_original=None):
         "nome_mae": "",
         "zona": "",
         "secao": "",
+        "telefone": "",
         "_candidatos_mae": []
     }
 
@@ -732,6 +811,11 @@ def extrair_dados_tesseract(texto, imagem_original=None):
         except Exception:
             pass
 
+    if not dados["telefone"]:
+        dados["telefone"] = encontrar_telefone_em_texto(
+            texto
+        )
+
     return dados
 
 
@@ -740,7 +824,7 @@ def combinar_dados_ocr(principal, fallback):
 
     for campo in (
         "nome", "cpf", "titulo", "data_nascimento",
-        "nome_mae", "zona", "secao"
+        "nome_mae", "zona", "secao", "telefone"
     ):
         if not resultado.get(campo) and fallback.get(campo):
             resultado[campo] = fallback[campo]
@@ -1144,7 +1228,8 @@ def extrair_dados_pdf_digital(texto):
         "data_nascimento": "",
         "nome_mae": "",
         "zona": "",
-        "secao": ""
+        "secao": "",
+        "telefone": ""
     }
 
     texto_norm = remover_acentos(texto).upper()
@@ -1592,6 +1677,10 @@ def extrair_dados_pdf_digital(texto):
                     dados["nome_mae"] = (
                         possibilidades[0][2]
                     )
+
+    dados["telefone"] = encontrar_telefone_em_texto(
+        texto
+    )
 
     return dados
 
@@ -2116,7 +2205,11 @@ def extrair_dados_ocr(
         "data_nascimento": nascimento,
         "nome_mae": nome_mae,
         "zona": zona,
-        "secao": secao
+        "secao": secao,
+        "telefone": encontrar_telefone_documento(
+            texto,
+            itens
+        )
     }
 
 
@@ -2553,6 +2646,13 @@ if menu == "📸 Envio de Documentos":
 
                         if False:
                             dados_tesseract = {}
+                    # Telefone: tenta o conteúdo do documento primeiro.
+                    # O nome do arquivo é apenas fallback.
+                    if not dados.get("telefone"):
+                        dados["telefone"] = encontrar_telefone_nome_arquivo(
+                            arquivo.name
+                        )
+
                     duplicado, existente = verificar_duplicidade(
                         dados,
                         base
@@ -2604,6 +2704,12 @@ if menu == "📸 Envio de Documentos":
                                 dados[
                                     "nome_mae"
                                 ],
+
+                            "Telefone":
+                                dados.get(
+                                    "telefone",
+                                    ""
+                                ),
 
                             "Zona":
                                 dados["zona"],
@@ -2669,6 +2775,9 @@ if menu == "📸 Envio de Documentos":
                                 "",
 
                             "Nome da mãe":
+                                "",
+
+                            "Telefone":
                                 "",
 
                             "Zona":
@@ -2774,6 +2883,58 @@ if menu == "📸 Envio de Documentos":
                 "Conferir",
                 conferir
             )
+
+            # ====================================================
+            # CONFERÊNCIA / EDIÇÃO DO TELEFONE
+            # ====================================================
+
+            st.markdown("---")
+            st.subheader("📞 Conferir / editar telefone")
+            st.caption(
+                "O telefone é opcional. Se o app encontrar no documento "
+                "ou no nome do arquivo, ele já aparece preenchido. "
+                "Você pode corrigir, digitar ou deixar vazio."
+            )
+
+            for indice_tel, item in enumerate(resultados):
+                dados_item = item.get("_dados")
+
+                if not dados_item:
+                    continue
+
+                if item.get("Resultado") == "⚠️ JÁ CADASTRADO":
+                    continue
+
+                chave_tel = (
+                    f"telefone_{indice_tel}_"
+                    f"{item.get('Arquivo', '')}"
+                )
+
+                telefone_atual = str(
+                    dados_item.get("telefone", "") or ""
+                )
+
+                telefone_editado = st.text_input(
+                    f"{item.get('Arquivo', 'Documento')} — "
+                    f"{dados_item.get('nome', '')}",
+                    value=telefone_atual,
+                    key=chave_tel,
+                    placeholder="Ex.: 82999999999"
+                )
+
+                if str(telefone_editado).strip():
+                    telefone_limpo = normalizar_telefone(
+                        telefone_editado
+                    )
+                else:
+                    telefone_limpo = ""
+
+                dados_item["telefone"] = telefone_limpo
+                item["Telefone"] = telefone_limpo
+
+            st.session_state[
+                "resultado_lote"
+            ] = resultados
 
             # ====================================================
             # CONFERÊNCIA MANUAL DO NOME DA MÃE
