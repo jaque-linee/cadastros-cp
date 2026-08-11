@@ -766,46 +766,48 @@ def extrair_dados_pdf_digital(texto):
     }
     
     texto_norm = normalizar_texto(texto)
-    eh_titulo = "TITULO" in texto_norm or "ELEITOR" in texto_norm or "ZONA" in texto_norm
+    eh_titulo = "TITULO" in texto_norm or "ELEITOR" in texto_norm or "JUSTICA ELEITORAL" in texto_norm
+    eh_cnh = "HABILITACAO" in texto_norm or "CARTEIRA NACIONAL" in texto_norm
 
     # ========================================================
-    # NOME
+    # 1. NOME
     # ========================================================
     for i, linha in enumerate(linhas):
-        rotulo = normalizar_rotulo(linha)
-        if rotulo in ["NOMEDOELEITOR", "NOME", "NOMECOMPLETO", "NOME-"]:
-            for des in (1, 2, -1):
-                if 0 <= i + des < len(linhas):
-                    cand = linhas[i + des].strip()
-                    if parece_nome(cand):
-                        dados["nome"] = cand.upper()
-                        break
-        if dados["nome"]:
-            break
-
-    # ========================================================
-    # NASCIMENTO
-    # ========================================================
-    for i, linha in enumerate(linhas):
-        rotulo = normalizar_rotulo(linha)
-        if rotulo in ["DATADENASCIMENTO", "NASCIMENTO", "DATANASCIMENTO"]:
-            for des in (1, 2, -1):
-                if 0 <= i + des < len(linhas):
-                    if data_valida(linhas[i + des]):
-                        dados["data_nascimento"] = linhas[i + des].replace(".", "/").replace("-", "/")
-                        break
-        if dados["data_nascimento"]:
-            break
-            
-    if not dados["data_nascimento"]:
+        r = normalizar_rotulo(linha)
+        if r in ["NOMEDOELEITOR", "NOME", "NOMECOMPLETO", "NOME-"]:
+            if i + 1 < len(linhas) and parece_nome(linhas[i + 1]):
+                dados["nome"] = linhas[i + 1].upper()
+                break
+            elif i > 0 and parece_nome(linhas[i - 1]):
+                dados["nome"] = linhas[i - 1].upper()
+                break
+    if not dados["nome"]:
         for linha in linhas:
-            match = re.search(r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b", linha)
-            if match and data_valida(f"{match.group(1)}/{match.group(2)}/{match.group(3)}"):
-                dados["data_nascimento"] = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+            if parece_nome(linha) and "REPUBLICA" not in normalizar_rotulo(linha):
+                dados["nome"] = linha.upper()
                 break
 
     # ========================================================
-    # CPF
+    # 2. NASCIMENTO
+    # ========================================================
+    for i, linha in enumerate(linhas):
+        r = normalizar_rotulo(linha)
+        if r in ["DATADENASCIMENTO", "NASCIMENTO", "DATANASCIMENTO"]:
+            for des in (1, -1):
+                if 0 <= i + des < len(linhas) and data_valida(linhas[i + des]):
+                    dados["data_nascimento"] = linhas[i + des].replace(".", "/").replace("-", "/")
+                    break
+        if dados["data_nascimento"]:
+            break
+    if not dados["data_nascimento"]:
+        for linha in linhas:
+            m = re.search(r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b", linha)
+            if m and data_valida(f"{m.group(1)}/{m.group(2)}/{m.group(3)}"):
+                dados["data_nascimento"] = f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+                break
+
+    # ========================================================
+    # 3. CPF
     # ========================================================
     for i, linha in enumerate(linhas):
         if "CPF" in normalizar_texto(linha):
@@ -813,19 +815,16 @@ def extrair_dados_pdf_digital(texto):
             if len(num) == 11 and cpf_valido(num):
                 dados["cpf"] = formatar_cpf(num)
                 break
-            for des in (1, 2, -1):
-                if 0 <= i + des < len(linhas):
-                    num_cand = somente_numeros(linhas[i + des])
-                    if len(num_cand) == 11 and cpf_valido(num_cand):
-                        dados["cpf"] = formatar_cpf(num_cand)
-                        break
+            if i + 1 < len(linhas):
+                num_abaixo = somente_numeros(linhas[i + 1])
+                if len(num_abaixo) == 11 and cpf_valido(num_abaixo):
+                    dados["cpf"] = formatar_cpf(num_abaixo)
+                    break
         if dados["cpf"]:
             break
-
     if not dados["cpf"]:
         for linha in linhas:
-            num_potencial = somente_numeros(linha)
-            matches = re.findall(r'\d{11}', num_potencial)
+            matches = re.findall(r'\d{11}', somente_numeros(linha))
             for num in matches:
                 if cpf_valido(num):
                     dados["cpf"] = formatar_cpf(num)
@@ -834,24 +833,22 @@ def extrair_dados_pdf_digital(texto):
                 break
 
     # ========================================================
-    # TÍTULO 
+    # 4. TÍTULO
     # ========================================================
     for i, linha in enumerate(linhas):
-        rotulo = normalizar_rotulo(linha)
-        if "INSCRICAO" in rotulo or "TITULO" in rotulo:
+        r = normalizar_rotulo(linha)
+        if "INSCRICAO" in r or "TITULO" in r:
             num = somente_numeros(linha)
             if len(num) >= 12:
                 dados["titulo"] = num[:12]
                 break
-            for des in (1, 2, -1):
-                if 0 <= i + des < len(linhas):
-                    num_cand = somente_numeros(linhas[i + des])
-                    if len(num_cand) >= 12:
-                        dados["titulo"] = num_cand[:12]
-                        break
+            if i + 1 < len(linhas):
+                num_abaixo = somente_numeros(linhas[i + 1])
+                if len(num_abaixo) >= 12:
+                    dados["titulo"] = num_abaixo[:12]
+                    break
         if dados["titulo"]:
             break
-            
     if not dados["titulo"] and eh_titulo:
         for linha in linhas:
             num = somente_numeros(linha)
@@ -860,48 +857,56 @@ def extrair_dados_pdf_digital(texto):
                 break
 
     # ========================================================
-    # ZONA E SEÇÃO (Específico para Título de Eleitor)
+    # 5. ZONA E SEÇÃO
     # ========================================================
     for i, linha in enumerate(linhas):
-        rotulo = normalizar_rotulo(linha)
-        if "INSCRIÇÃO" in linha.upper() or "ZONA" in rotulo or "SEÇÃO" in rotulo:
-            # Procura linhas que tenham números logo abaixo da inscrição/zona
-            for des in (1, 2):
-                if i + des < len(linhas):
-                    l_prox = linhas[i + des]
-                    nums = re.findall(r'\b\d{2,4}\b', l_prox)
-                    if len(nums) >= 2:
-                        if not dados["zona"]: dados["zona"] = nums[0].zfill(3)
-                        if not dados["secao"]: dados["secao"] = nums[1].zfill(4)
-                        break
+        r = normalizar_rotulo(linha)
+        if "ZONA" in r or "SECAO" in r or "ZONASECAO" in r:
+            alvos = [linha]
+            if i + 1 < len(linhas): alvos.append(linhas[i + 1])
+            if i + 2 < len(linhas): alvos.append(linhas[i + 2])
+            
+            for alv in alvos:
+                nums = re.findall(r'\b\d{1,4}\b', alv)
+                for n in nums:
+                    if 1900 <= int(n) <= 2100: 
+                        continue
+                    if len(n) <= 3 and not dados["zona"] and n != dados["titulo"][-3:]:
+                        dados["zona"] = n.zfill(3)
+                    elif len(n) == 4 and not dados["secao"]:
+                        dados["secao"] = n.zfill(4)
         if dados["zona"] and dados["secao"]:
             break
 
     # ========================================================
-    # NOME DA MÃE
+    # 6. NOME DA MÃE
     # ========================================================
     for i, linha in enumerate(linhas):
         r = normalizar_rotulo(linha)
         if r in ["FILIACAO", "FILIACAO:", "NOMEDAMAE", "MAE", "NOME DA MAE"]:
-            # Pega diretamente as duas primeiras linhas válidas abaixo de filiação
-            candidatos_mae = []
-            for des in range(1, 4):
+            candidatos = []
+            for des in range(1, 5):
                 if i + des < len(linhas):
                     cand = linhas[i + des].strip()
                     rcand = normalizar_rotulo(cand)
+                    ignorar = ["CODIGO", "AUTENTICIDADE", "VALIDACAO", "DE", "EMISSAO", "PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "PROIBIDO", "ORIENTACOES", "MUNICIPIO", "ZONA", "SECAO"]
                     
-                    ignorar = ["CODIGO", "AUTENTICIDADE", "VALIDACAO", "TRES", "DUAS", "DE", "EMISSAO"]
-                    if any(ig in rcand for ig in ignorar) or len(cand) < 3:
+                    if any(ig == rcand for ig in ignorar) or len(cand) < 3:
                         continue
-                        
-                    candidatos_mae.append(cand.upper())
+                    
+                    if parece_nome(cand) and cand.upper() != dados["nome"]:
+                        candidatos.append(cand.upper())
             
-            if candidatos_mae:
+            if candidatos:
                 if eh_titulo:
-                    # No Título, a mãe é sempre o primeiro nome logo após a filiação
-                    dados["nome_mae"] = candidatos_mae[0]
+                    # No Título de Eleitor, a mãe é estritamente o primeiro nome logo após FILIAÇÃO[cite: 7]
+                    dados["nome_mae"] = candidatos[0]
                 else:
-                    dados["nome_mae"] = candidatos_mae[-1]
+                    # Na CNH, pega o último ou junta as últimas linhas
+                    if len(candidatos) == 1:
+                        dados["nome_mae"] = candidatos[0]
+                    else:
+                        dados["nome_mae"] = candidatos[-1]
             break
 
     return dados
