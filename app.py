@@ -1,3 +1,270 @@
+ChatGPT Plus
+
+
+
+
+862d591c-0d97-4596-8bbb-cac449acef54.png
+ta dando erro agora 
+
+e73e45d5-4e91-4c76-832a-ff0dbdcef494.png
+
+045b1b4a-a92c-4fe7-b00a-302c4faf0ca5.png
+
+4390a58c-b1c1-4bdf-8c9e-282e15c503bb.png
+
+13898baf-4655-42f6-8388-d4ce1ea4c9c9.png
+83cff026-dad2-4d4b-ad93-f2ecbc84ca9d.png
+AO MENOS ESSE JPEG NAO LEU
+
+d43cf412-58c5-45b1-922e-78fa2b4d5859.png
+EU NEM FIZ AS MUDANÇAS AINDA, FUI ATUALIZAR PRA TESTAR UM PDF E DEU ESSE ERRO AGORA
+
+aaa34926-a093-4948-be86-084f2f8cb9dc.png
+TESTO O PDF AGORA?
+
+ac0a5aa3-3ca6-43ed-a24b-f2d9d1cd5efc.png
+SALVOU O NOME  NAO
+
+75d3e4ca-d0dc-4c3b-9059-df1ced660738.png
+a5c634bf-4bfc-4829-b93b-b9fe72a212e3.png
+ACHO QUE O PROBLEMA É PDF MESMO...E OUTRA A SEÇÃO ELE INVENTOU
+
+
+TITULO.pdf
+PDF
+E VEJA O PDF QUE SUBI NAO FOI ESCANEADO NAO
+FOI O MEU PRA TESTE
+
+Ah, agora sim dá para cravar: esse PDF não é escaneado. E isso muda o diagnóstico.
+
+O arquivo tem texto nativo perfeitamente extraível. Eu consigo ler diretamente dele:
+
+Nome: JAQUELINE MARIA DA SILVA
+Nascimento: 28/07/1981
+Título: 030111141759
+Zona: 055
+Seção: 0277
+Município: ARAPIRACA / AL 
+
+
+Então o nosso código cometeu dois erros:
+
+Ele conseguiu extrair o texto nativo, mas nossa função de interpretação escolheu "A AUTENTICIDADE DESTE DOCUMENTO..." como nome.
+
+Pior: estamos carregando o EasyOCR antes de saber se o PDF precisa dele. Mesmo esse PDF tendo texto nativo e não precisando de OCR, o código executa carregar_ocr() antes de começar o lote. Isso explica por que continuamos gastando memória à toa e o app acaba caindo.
+
+Ou seja, para esse PDF, o EasyOCR não deveria sequer ser inicializado.
+
+Como deve ficar
+O fluxo correto é:
+
+PDF → tenta texto nativo → achou texto → extrai os campos → acabou.
+
+Só se for:
+
+PDF sem texto → aí sim chama EasyOCR.
+
+E para JPG/PNG:
+
+Imagem → chama EasyOCR.
+
+Isso é muito melhor para lote também. Se você enviar 30 PDFs digitais como esse, nenhum deles precisa carregar o EasyOCR.
+
+Além disso, nesse PDF há uma vantagem enorme: os rótulos e valores estão todos presentes no próprio texto (NOME DO ELEITOR, INSCRIÇÃO, ZONA, SEÇÃO etc.). 
+
+ Portanto, para PDF digital, podemos fazer uma extração específica e muito mais segura em vez daquela heurística que tenta adivinhar o nome.
+
+Então não teste mais essa versão. A próxima correção é justamente tirar o carregamento antecipado do EasyOCR e separar de verdade PDF digital de imagem/PDF escaneado. Isso deve também resolver o nome desse seu PDF.
+
+
+9a21938c-24ce-4d40-92bb-9eee42af67d3.png
+deu certo eu acho
+agora se for pdf nao digital? for escaneado? arrumo um pra testar?
+
+7765ea2e-220d-4f95-bb63-1b5fd4a5ed4d.png
+deu certo e ate detectou que ja ta cadastrado...agora vou testar um pdf nao digitavel com uma cnh pra ver se ele pega os dados que a tabela exige...ou o codigo nao permite? nome da mãe, data de nascimento etc
+
+6b22daad-3640-455d-a6ec-fb8017bc7116.png
+é leu foi nada
+
+98347295-8060-49c1-9ff7-05b64a8adc61.png
+676a58fa-e8f4-4dcc-b165-923b136f8301.png
+
+teste1.pdf
+PDF
+veio nao completo...o nome da mae tb nao puxou completo
+
+Sim — e agora dá para ver exatamente o que aconteceu, porque você mandou o próprio PDF.
+
+O documento tem claramente os dados que precisamos:
+
+Nome: EDILSA KEITE DE AZEVEDO
+
+CPF: 356.682.448-81
+
+Nascimento: 23/12/1985
+
+Filiação: ERNESTO FERREIRA DE AZEVEDO / MARIA LUCIA BELARMINO DE AZEVEDO 
+
+
+Então a informação existe e está sendo extraída do PDF. O problema agora é nossa lógica, não a qualidade do documento.
+
+Ela está errando três coisas:
+
+1. Nome: pegou CARTEIRA NACIONAL... em vez de EDILSA KEITE DE AZEVEDO.
+
+2. CPF e nascimento: estão na mesma linha do texto extraído (356.682.448-81 23/12/1985), e nossa função atual espera encontrá-los de outra forma. 
+
+
+3. Nome da mãe: o PDF quebrou o nome em duas linhas:
+MARIA LUCIA BELARMINO
+DE AZEVEDO
+e nosso código guardou apenas a primeira. 
+
+
+E tem outra coisa importante: não precisamos mandar esse PDF para OCR. A coluna PDF — texto digital está correta neste caso. O PDF possui uma camada textual suficientemente boa; precisamos é melhorar o parser para entender o layout da CNH.
+
+Próxima correção
+Não vou mexer no OCR que já acertou o título de eleitor. Vamos alterar somente extrair_dados_pdf_digital() para reconhecer CNH e lidar com campos lado a lado e nomes quebrados em várias linhas.
+
+Com essa CNH específica, o resultado esperado depois da correção será:
+
+EDILSA KEITE DE AZEVEDO | 356.682.448-81 | 23/12/1985 | MARIA LUCIA BELARMINO DE AZEVEDO | ✅ COMPLETO
+
+Título, Zona e Seção ficam vazios, o que está certo para CNH.
+
+Se quiser, já mando só a função completa para substituir, sem reenviar aquelas 700 linhas do app.py.
+
+
+
+Texto colado(20260811-161012).txt
+Documento
+
+d39170c3-7be6-48e3-91ce-a597f59e02b9.png
+nada, mesmo erro
+
+
+Texto colado(20260811-161507).txt
+Documento
+mandar esse completo com as alterações?
+
+5379673c-e3de-4233-b4f7-1f533412a0eb.png
+
+teste1(1).pdf
+PDF
+
+TITULO(1).pdf
+PDF
+
+Texto colado(20260811-171302).txt
+Documento
+me ajuda so nessa parte que o nome da mae ta saindo tudo e da jaqueline nao sai nome da mae nem a zona secao correta
+
+pode mandar o bloco que precisa substituir...mas com indentação correta, pq quando colo dauqi pra la fica errado
+
+Sim. Pelos dois documentos dá para ver exatamente o erro:
+
+CNH da Edilsa: a filiação está quebrada em várias linhas; o código juntou parte do nome do pai com o da mãe. O correto é MARIA LUCIA BELARMINO DE AZEVEDO. 
+
+
+Título da Jaqueline: o próprio PDF traz VALDIVIA MARIA DA SILVA e JOSE ANTONIO DA SILVA na filiação, e os dados corretos são Zona 055 / Seção 0277. 
+
+
+E já achei onde isso está acontecendo no seu código: é dentro de extrair_dados_pdf_digital, principalmente nos blocos 5. ZONA E SEÇÃO e 6. NOME DA MÃE. 
+
+
+Como você pediu para não correr risco com indentação, em vez de te mandar pedaços soltos para encaixar, vou te passar um único bloco completo, começando em def extrair_dados_pdf_digital(texto): e terminando no return dados. Você apaga essa função inteira e cola a nova no lugar. Assim não tem encaixe no meio de if/for.
+
+
+c555a2c3-83cc-4fbb-8b28-9c2367706f7b.png
+veio incompleto nome da mae da cnh. e jaqueline ok nome da mae mas nao veio zona e seção
+
+257690dc-aaaa-4b7d-9b19-4e2f06fa3cf9.png
+nada de zona e seção ainda
+
+4ac41191-a380-41ab-885d-db084c88fb4b.png
+
+app(1).py
+Python
+sabia, ta dando erro de indentação. por isso odeio seu metodo de colar por cima de bloco
+
+80ed84c8-d1b3-40b5-b07f-1e293a0afd02.png
+dc88d2f3-a950-4346-b8d7-c48b67c8134a.png
+PQ SERA QUE ESSE NAO PEGOU? 
+
+Dá para ver o motivo pela própria tela. O OCR leu o documento, porque acertou:
+
+Nome: BIANCA STÉFFANIE OLIVEIRA SOUZA ✅
+
+CPF: 112.743.804-21 ✅
+
+O que falhou foi a extração dos outros campos a partir do texto reconhecido, não a leitura da imagem.
+
+Na identidade, os dados estão apresentados de um jeito diferente dos documentos que ajustamos antes:
+
+Nascimento: 14/05/1997
+
+Filiação: BENEIDE CARVALHO OLIVEIRA SOUZA / SEVERINO SALUSTIANO DE SOUZA
+
+O documento usa “Filiação / Filiation”, e a data aparece abaixo de “Data de Nascimento / Date of Birth”.
+
+Nosso extrator genérico ainda não está interpretando corretamente esse layout de RG/CIN. Por isso ele achou nome e CPF, mas deixou nascimento e mãe vazios; consequentemente marcou CONFERIR.
+
+A parte boa é que não precisamos mexer no OCR, porque ele claramente conseguiu ler a imagem. Precisamos ampliar apenas a interpretação do texto para RG/CIN.
+
+E eu não quero voltar a fazer você colar bloco no meio do app.py. 😅 Me manda o app.py atual e eu devolvo o arquivo completo acrescentando suporte a esse tipo de identidade, sem alterar as regras que já acertamos para título e CNH.
+
+
+
+Texto colado(20260811-175838).txt
+Documento
+
+Pensou por 6s
+Recebi o app.py atual. E achei exatamente onde está a limitação: no OCR, a função de mãe só procura rótulos explícitos como MÃE/NOME DA MÃE; ela não trata FILIAÇÃO, que é justamente como essa identidade apresenta os pais. 
+
+
+Além disso, nascimento já tem uma rotina baseada na posição do rótulo, mas podemos deixá-la compatível com Data de Nascimento / Date of Birth sem prejudicar título e CNH. 
+
+
+Então agora vou fazer do jeito mais seguro: não mexer em título, zona/seção, salvamento nem no que já está funcionando. Vamos alterar somente a interpretação OCR de RG/CIN.
+
+E como você me mandou o arquivo inteiro justamente para evitar a novela de indentação, não vou mandar bloco para você encaixar no meio. Vou preparar o app.py completo já alterado para você substituir o atual.
+
+
+MANDA
+
+Pensou por 28s
+Pronto. Peguei o seu app.py inteiro, alterei somente a leitura OCR para melhorar:
+
+Data de nascimento em RG/CIN;
+
+Filiação / Filiação-Filiation para capturar o nome da mãe;
+
+sem lista de nomes;
+
+sem mexer no que já estava funcionando para título eleitoral;
+
+arquivo validado sem erro de sintaxe/indentação.
+
+No seu código anterior, a mãe via OCR só era procurada quando existia literalmente MÃE/NOME DA MÃE, por isso essa nova identidade com o campo Filiação / Filiation ficava vazia. 
+
+
+Substitua o app.py inteiro por este:
+
+📥 Baixar app_corrigido.py
+
+Depois renomeie para app.py, envie ao GitHub e teste essa mesma identidade primeiro.
+
+
+app_corrigido.py
+Código
+
+
+Biblioteca
+/
+app_corrigido.py
+
+
 import streamlit as st
 import requests
 import re
@@ -1218,21 +1485,28 @@ def encontrar_nascimento_ocr(itens):
     for item in itens:
         rotulo = normalizar_rotulo(item["texto"])
         if (
-            rotulo in ("DATADENASCIMENTO", "NASCIMENTO", "DTNASCIMENTO")
-            or "NASCIMENTO" in rotulo
+            "NASCIMENTO" in rotulo
+            or "DATEOFBIRTH" in rotulo
+            or "BIRTH" in rotulo
         ):
             rotulos.append(item)
+
+    padrao_data = r"(?<!\d)(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})(?!\d)"
 
     for rotulo in rotulos:
         candidatos = []
 
-        for item in itens:
-            texto = str(item["texto"])
+        # A data pode ter sido reconhecida no mesmo bloco do rótulo.
+        for match in re.finditer(padrao_data, str(rotulo["texto"])):
+            valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+            if data_valida(valor):
+                candidatos.append((0, -rotulo["confianca"], valor))
 
-            for match in re.finditer(
-                r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b",
-                texto
-            ):
+        # Ou em um bloco próximo, normalmente abaixo ou ao lado do rótulo.
+        for item in itens:
+            texto_item = str(item["texto"])
+
+            for match in re.finditer(padrao_data, texto_item):
                 valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
 
                 if not data_valida(valor):
@@ -1241,14 +1515,27 @@ def encontrar_nascimento_ocr(itens):
                 dx = abs(item["x"] - rotulo["x"])
                 dy = item["y"] - rotulo["y"]
 
-                if -60 <= dy <= 220 and dx <= 650:
+                if -80 <= dy <= 260 and dx <= 800:
                     candidatos.append(
-                        (abs(dy) + dx * 0.2, -item["confianca"], valor)
+                        (abs(dy) + dx * 0.15, -item["confianca"], valor)
                     )
 
         if candidatos:
             candidatos.sort()
             return candidatos[0][2]
+
+    # Fallback conservador: se só houver uma data válida no documento,
+    # ela pode ser usada como nascimento. Com várias datas, não adivinha.
+    datas = []
+
+    for item in itens:
+        for match in re.finditer(padrao_data, str(item["texto"])):
+            valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+            if data_valida(valor) and valor not in datas:
+                datas.append(valor)
+
+    if len(datas) == 1:
+        return datas[0]
 
     return ""
 
@@ -1420,6 +1707,7 @@ def encontrar_nome_ocr(itens):
 # ============================================================
 
 def encontrar_mae_ocr(itens):
+    # 1. Prioridade máxima: documento que identifica explicitamente a mãe.
     rotulos_mae = []
 
     for item in itens:
@@ -1427,6 +1715,7 @@ def encontrar_mae_ocr(itens):
         if (
             rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE")
             or "NOMEDAMAE" in rotulo
+            or rotulo.startswith("MAE")
         ):
             rotulos_mae.append(item)
 
@@ -1445,10 +1734,10 @@ def encontrar_mae_ocr(itens):
             dx = abs(item["x"] - rotulo["x"])
             dy = item["y"] - rotulo["y"]
 
-            if -50 <= dy <= 230 and dx <= 750:
+            if -60 <= dy <= 260 and dx <= 800:
                 candidatos.append(
                     (
-                        abs(dy) + dx * 0.2,
+                        abs(dy) + dx * 0.15,
                         -item["confianca"],
                         candidato.upper()
                     )
@@ -1457,6 +1746,47 @@ def encontrar_mae_ocr(itens):
         if candidatos:
             candidatos.sort()
             return candidatos[0][2]
+
+    # 2. RG/CIN e outros documentos podem trazer apenas FILIAÇÃO/FILIATION.
+    # Nesses documentos, captura o primeiro nome completo associado ao campo,
+    # sem usar lista de nomes próprios nem inventar conteúdo.
+    rotulos_filiacao = []
+
+    for item in itens:
+        rotulo = normalizar_rotulo(item["texto"])
+        if "FILIACAO" in rotulo or "FILIATION" in rotulo:
+            rotulos_filiacao.append(item)
+
+    for rotulo in rotulos_filiacao:
+        candidatos = []
+
+        for item in itens:
+            if item is rotulo:
+                continue
+
+            candidato = str(item["texto"]).strip()
+
+            if not parece_nome(candidato):
+                continue
+
+            dx = abs(item["x"] - rotulo["x"])
+            dy = item["y"] - rotulo["y"]
+
+            # Campo de filiação costuma ficar imediatamente abaixo do rótulo.
+            if -30 <= dy <= 300 and dx <= 850:
+                candidatos.append(
+                    (
+                        max(dy, 0) * 2 + dx * 0.10,
+                        item["y"],
+                        item["x"],
+                        -item["confianca"],
+                        candidato.upper()
+                    )
+                )
+
+        if candidatos:
+            candidatos.sort()
+            return candidatos[0][4]
 
     return ""
 
