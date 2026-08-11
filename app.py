@@ -862,19 +862,22 @@ def extrair_dados_pdf_digital(texto):
     for i, linha in enumerate(linhas):
         r = normalizar_rotulo(linha)
         if "ZONA" in r or "SECAO" in r or "ZONASECAO" in r:
-            alvos = [linha]
-            if i + 1 < len(linhas): alvos.append(linhas[i + 1])
-            if i + 2 < len(linhas): alvos.append(linhas[i + 2])
+            bloco_texto = " ".join(linhas[i:i+3])
+            nums = re.findall(r'\b\d{1,4}\b', bloco_texto)
             
-            for alv in alvos:
-                nums = re.findall(r'\b\d{1,4}\b', alv)
-                for n in nums:
-                    if 1900 <= int(n) <= 2100: 
-                        continue
-                    if len(n) <= 3 and not dados["zona"] and n != dados["titulo"][-3:]:
-                        dados["zona"] = n.zfill(3)
-                    elif len(n) == 4 and not dados["secao"]:
-                        dados["secao"] = n.zfill(4)
+            candidatos_nums = []
+            for n in nums:
+                if 1900 <= int(n) <= 2100: 
+                    continue
+                if len(n) >= 11:
+                    continue
+                candidatos_nums.append(n)
+            
+            for n in candidatos_nums:
+                if len(n) <= 3 and not dados["zona"] and n != dados.get("titulo", "")[-3:]:
+                    dados["zona"] = n.zfill(3)
+                elif len(n) == 4 and not dados["secao"]:
+                    dados["secao"] = n.zfill(4)
         if dados["zona"] and dados["secao"]:
             break
 
@@ -884,33 +887,41 @@ def extrair_dados_pdf_digital(texto):
     for i, linha in enumerate(linhas):
         r = normalizar_rotulo(linha)
         if r in ["FILIACAO", "FILIACAO:", "NOMEDAMAE", "MAE", "NOME DA MAE"]:
-            candidatos = []
-            for des in range(1, 5):
+            linhas_filiacao = []
+            for des in range(1, 8):
                 if i + des < len(linhas):
                     cand = linhas[i + des].strip()
                     rcand = normalizar_rotulo(cand)
-                    ignorar = ["CODIGO", "AUTENTICIDADE", "VALIDACAO", "DE", "EMISSAO", "PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "PROIBIDO", "ORIENTACOES", "MUNICIPIO", "ZONA", "SECAO"]
                     
-                    if any(ig == rcand for ig in ignorar) or len(cand) < 3:
+                    parar_em = ["PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "PROIBIDO", "ORIENTACOES", "MUNICIPIO", "ZONA", "SECAO", "CODIGO", "AUTENTICIDADE", "VALIDACAO", "TITULO", "ELEITORAL", "IMPRESSO"]
+                    if any(p in rcand for p in parar_em):
+                        break
+                    
+                    if not cand or re.search(r"\d{4}", cand):
                         continue
-                    
-                    if parece_nome(cand) and cand.upper() != dados["nome"]:
-                        candidatos.append(cand.upper())
+                        
+                    if cand.upper() == dados["nome"]:
+                        continue
+                        
+                    linhas_filiacao.append(cand.upper())
             
-            if candidatos:
+            if linhas_filiacao:
                 if eh_titulo:
-                    # No Título de Eleitor, a mãe é estritamente o primeiro nome logo após FILIAÇÃO[cite: 7]
-                    dados["nome_mae"] = candidatos[0]
+                    # No Título, a mãe é estritamente a primeira linha logo após a filiação[cite: 7]
+                    dados["nome_mae"] = linhas_filiacao[0]
                 else:
-                    # Na CNH, pega o último ou junta as últimas linhas
-                    if len(candidatos) == 1:
-                        dados["nome_mae"] = candidatos[0]
+                    # Na CNH, as 2 primeiras linhas são do pai e as 2 últimas da mãe
+                    if len(linhas_filiacao) >= 4:
+                        dados["nome_mae"] = " ".join(linhas_filiacao[2:])
+                    elif len(linhas_filiacao) == 3:
+                        dados["nome_mae"] = " ".join(linhas_filiacao[1:])
+                    elif len(linhas_filiacao) == 2:
+                        dados["nome_mae"] = linhas_filiacao[1]
                     else:
-                        dados["nome_mae"] = candidatos[-1]
+                        dados["nome_mae"] = linhas_filiacao[0]
             break
 
     return dados
-
 # ============================================================
 # 17. EXTRAÇÃO OCR - TÍTULO
 # ============================================================
