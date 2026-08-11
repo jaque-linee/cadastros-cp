@@ -2216,49 +2216,52 @@ if menu == "📸 Envio de Documentos":
                             )
                         )
 
-                    resultados.append(
-                        {
-                            "Arquivo":
-                                arquivo.name,
+                                    resultados.append(
+                    {
+                        "Arquivo":
+                            arquivo.name,
 
-                            "Nome":
-                                dados["nome"],
+                        "Nome":
+                            dados["nome"],
 
-                            "CPF":
-                                dados["cpf"],
+                        "CPF":
+                            dados["cpf"],
 
-                            "Título":
-                                dados["titulo"],
+                        "Título":
+                            dados["titulo"],
 
-                            "Nascimento":
-                                dados[
-                                    "data_nascimento"
-                                ],
+                        "Nascimento":
+                            dados[
+                                "data_nascimento"
+                            ],
 
-                            "Nome da mãe":
-                                dados[
-                                    "nome_mae"
-                                ],
+                        "Nome da mãe":
+                            dados[
+                                "nome_mae"
+                            ],
 
-                            "Zona":
-                                dados["zona"],
+                        "Zona":
+                            dados["zona"],
 
-                            "Seção":
-                                dados["secao"],
+                        "Seção":
+                            dados["secao"],
 
-                            "Leitura":
-                                tipo,
+                        "Leitura":
+                            tipo,
 
-                            "Resultado":
-                                resultado,
+                        "Resultado":
+                            resultado,
 
-                            "Já cadastrado como":
-                                existente_nome,
+                        "Já cadastrado como":
+                            existente_nome,
 
-                            "Supervisor atual":
-                                existente_sup
-                        }
-                    )
+                        "Supervisor atual":
+                            existente_sup,
+
+                        "_dados":
+                            dados.copy()
+                    }
+                )
 
                     del texto
                     del itens
