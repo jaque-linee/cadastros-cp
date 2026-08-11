@@ -74,23 +74,45 @@ if menu == "📸 Envio de Documentos":
     
     arquivos = st.file_uploader("Arraste ou escolha as fotos/PDFs", accept_multiple_files=True, type=['pdf', 'jpg', 'png'])
     
-    if arquivos and st.button("🚀 Processar e Cadastrar Lote"):
-        barra = st.progress(0)
-        total = len(arquivos)
-        sucessos = 0
-        
-        for i, arquivo in enumerate(arquivos):
-            try:
-                files = {'file': (arquivo.name, arquivo.getvalue())}
-                data = {'supervisor': supervisor, 'subsupervisor': sub}
-                res = requests.post(WEBHOOK_URL, files=files, data=data)
-                if res.status_code == 200:
-                    sucessos += 1
-            except Exception as ex:
-                st.error(f"Erro no arquivo {arquivo.name}: {ex}")
-            barra.progress((i + 1) / total)
+if arquivos and st.button("🚀 Processar e Cadastrar Lote"):
+    barra = st.progress(0)
+    total = len(arquivos)
+    sucessos = 0
+    duplicados = 0
+    
+    for i, arquivo in enumerate(arquivos):
+        try:
+            files = {'file': (arquivo.name, arquivo.getvalue())}
+            data = {'supervisor': supervisor, 'subsupervisor': sub}
+            res = requests.post(WEBHOOK_URL, files=files, data=data)
             
-        st.success(f"✨ Processamento concluído! **{sucessos}** arquivo(s) enviado(s) com sucesso.")
+            if res.status_code == 200:
+                # Tenta ler a resposta em JSON que o Apps Script mandou de volta
+                try:
+                    res_json = res.json()
+                    status = res_json.get("status")
+                    mensagem = res_json.get("mensagem", "")
+                    
+                    if status == "SUCESSO":
+                        sucessos += 1
+                        st.success(f"✅ {arquivo.name}: {mensagem}")
+                    elif status == "ERRO" or "já cadastrado" in mensagem.lower():
+                        duplicados += 1
+                        st.warning(f"⚠️ {arquivo.name}: {mensagem}")
+                    else:
+                        st.info(f"ℹ️ {arquivo.name}: {mensagem}")
+                except:
+                    sucessos += 1
+                    st.success(f"✨ {arquivo.name} enviado com sucesso!")
+            else:
+                st.error(f"Erro ao enviar {arquivo.name}")
+        except Exception as ex:
+            st.error(f"Erro no arquivo {arquivo.name}: {ex}")
+        
+        barra.progress((i + 1) / total)
+        
+    st.markdown(f"---")
+    st.markdown(f"**Resumo do Lote:** 🟢 **{sucessos}** salvos | 🟡 **{duplicados}** ignorados por duplicidade.")
 
 elif menu == "✍️ Formulário Manual":
     st.subheader(f"✍️ Consulta & Cadastro Manual - Sup: {supervisor} / Sub: {sub}")
