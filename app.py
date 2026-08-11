@@ -6,7 +6,8 @@ import gc
 import unicodedata
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageEnhance, ImageFilter
+import pytesseract
 import fitz
 import sheets
 
@@ -313,6 +314,147 @@ def executar_ocr_imagem(imagem):
     gc.collect()
 
     return texto, itens
+
+
+
+# ============================================================
+# 7A. OCR TESSERACT - FALLBACK
+# ============================================================
+
+def executar_tesseract_imagem(imagem):
+    imagem = ImageOps.exif_transpose(imagem).convert("RGB")
+    largura, altura = imagem.size
+
+    if largura < 1800:
+        escala = 1800 / largura
+        imagem = imagem.resize(
+            (1800, int(altura * escala)),
+            Image.Resampling.LANCZOS
+        )
+
+    imagem = ImageOps.grayscale(imagem)
+    imagem = ImageOps.autocontrast(imagem)
+    imagem = ImageEnhance.Contrast(imagem).enhance(1.35)
+    imagem = imagem.filter(ImageFilter.SHARPEN)
+
+    try:
+        return pytesseract.image_to_string(
+            imagem,
+            lang="por+eng",
+            config="--oem 3 --psm 6"
+        ).strip()
+    finally:
+        del imagem
+        gc.collect()
+
+
+def extrair_dados_tesseract(texto):
+    linhas = linhas_texto(texto)
+
+    dados = {
+        "nome": "",
+        "cpf": "",
+        "titulo": "",
+        "data_nascimento": "",
+        "nome_mae": "",
+        "zona": "",
+        "secao": ""
+    }
+
+    texto_norm = remover_acentos(texto).upper()
+
+    for match in re.finditer(
+        r"(?<!\d)(\d{3})[.\s-]?(\d{3})[.\s-]?(\d{3})[-.\s]?(\d{2})(?!\d)",
+        texto
+    ):
+        numero = "".join(match.groups())
+        if cpf_valido(numero):
+            dados["cpf"] = formatar_cpf(numero)
+            break
+
+    padrao_data = r"(?<!\d)(\d{2})[/.\-](\d{2})[/.\-](\d{4})(?!\d)"
+
+    for i, linha in enumerate(linhas):
+        rotulo = normalizar_rotulo(linha)
+
+        if "NASCIMENTO" in rotulo or "DATEOFBIRTH" in rotulo or rotulo == "BIRTH":
+            candidatos = [linha]
+            for deslocamento in (1, 2, -1):
+                pos = i + deslocamento
+                if 0 <= pos < len(linhas):
+                    candidatos.append(linhas[pos])
+
+            for candidato in candidatos:
+                match = re.search(padrao_data, candidato)
+                if match:
+                    valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+                    if data_valida(valor):
+                        dados["data_nascimento"] = valor
+                        break
+            if dados["data_nascimento"]:
+                break
+
+    if not dados["data_nascimento"]:
+        datas = []
+        for match in re.finditer(padrao_data, texto):
+            valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+            if data_valida(valor) and valor not in datas:
+                datas.append(valor)
+        if len(datas) == 1:
+            dados["data_nascimento"] = datas[0]
+
+    for i, linha in enumerate(linhas):
+        rotulo = normalizar_rotulo(linha)
+        if rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE") or "NOMEDAMAE" in rotulo:
+            for deslocamento in (1, 2, 3):
+                pos = i + deslocamento
+                if pos < len(linhas) and parece_nome(linhas[pos]):
+                    dados["nome_mae"] = linhas[pos].strip().upper()
+                    break
+            if dados["nome_mae"]:
+                break
+
+    if not dados["nome_mae"]:
+        for i, linha in enumerate(linhas):
+            rotulo = normalizar_rotulo(linha)
+            if "FILIACAO" in rotulo or "FILIATION" in rotulo:
+                for deslocamento in range(1, 6):
+                    pos = i + deslocamento
+                    if pos >= len(linhas):
+                        break
+                    candidato = linhas[pos].strip()
+                    candidato_rotulo = normalizar_rotulo(candidato)
+
+                    if any(
+                        termo in candidato_rotulo
+                        for termo in (
+                            "ORGAOEXPEDIDOR", "CARDISSUER",
+                            "PLACEOFISSUE", "EMISSAO",
+                            "ISSUE", "ASSINATURA"
+                        )
+                    ):
+                        break
+
+                    if parece_nome(candidato):
+                        dados["nome_mae"] = candidato.upper()
+                        break
+                if dados["nome_mae"]:
+                    break
+
+    return dados
+
+
+def combinar_dados_ocr(principal, fallback):
+    resultado = dict(principal)
+
+    for campo in (
+        "nome", "cpf", "titulo", "data_nascimento",
+        "nome_mae", "zona", "secao"
+    ):
+        if not resultado.get(campo) and fallback.get(campo):
+            resultado[campo] = fallback[campo]
+
+    return resultado
 
 
 # ============================================================
@@ -2071,6 +2213,39 @@ if menu == "📸 Envio de Documentos":
                         tipo
                     )
 
+                    texto_tesseract = ""
+
+                    if (
+                        tipo == "Imagem — OCR"
+                        and (
+                            not dados.get("data_nascimento")
+                            or not dados.get("nome_mae")
+                            or not dados.get("nome")
+                            or (
+                                not dados.get("cpf")
+                                and not dados.get("titulo")
+                            )
+                        )
+                    ):
+                        arquivo.seek(0)
+                        imagem_fallback = Image.open(arquivo).convert("RGB")
+
+                        texto_tesseract = executar_tesseract_imagem(
+                            imagem_fallback
+                        )
+
+                        del imagem_fallback
+                        gc.collect()
+
+                        if texto_tesseract:
+                            dados_tesseract = extrair_dados_tesseract(
+                                texto_tesseract
+                            )
+                            dados = combinar_dados_ocr(
+                                dados,
+                                dados_tesseract
+                            )
+
                     duplicado, existente = verificar_duplicidade(
                         dados,
                         base
@@ -2146,6 +2321,9 @@ if menu == "📸 Envio de Documentos":
 
                             "_texto_ocr":
                                 texto,
+
+                            "_texto_tesseract":
+                                texto_tesseract,
 
                             "_itens_ocr":
                                 [
@@ -2299,6 +2477,7 @@ if menu == "📸 Envio de Documentos":
                     if chave not in (
                         "_dados",
                         "_texto_ocr",
+                        "_texto_tesseract",
                         "_itens_ocr"
                     )
                 }
@@ -2438,6 +2617,19 @@ if menu == "📸 Envio de Documentos":
                     else:
                         st.warning(
                             "Nenhum texto bruto foi retornado."
+                        )
+
+                    texto_tess_diag = str(
+                        item_diag.get("_texto_tesseract", "") or ""
+                    ).strip()
+
+                    if texto_tess_diag:
+                        st.markdown(
+                            "**Texto reconhecido pelo Tesseract (fallback):**"
+                        )
+                        st.code(
+                            texto_tess_diag,
+                            language=None
                         )
 
                     st.markdown("**Blocos reconhecidos pelo OCR:**")
