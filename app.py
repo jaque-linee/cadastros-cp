@@ -1,19 +1,11 @@
-import os
-
-# Evita incompatibilidade do Paddle/oneDNN no Streamlit Cloud
-os.environ["FLAGS_use_mkldnn"] = "0"
-os.environ["FLAGS_enable_pir_api"] = "0"
-
 import streamlit as st
 import requests
 import re
 import io
-import json
 import numpy as np
-
-from PIL import Image
-from paddleocr import PaddleOCR
+from PIL import Image, ImageOps
 import fitz
+import easyocr
 
 
 # ============================================================
@@ -63,24 +55,23 @@ except Exception:
 
 
 # ============================================================
-# 4. CARREGAR OCR
+# 4. CARREGAR EASYOCR
 # ============================================================
 
 @st.cache_resource
 def carregar_ocr():
-    return PaddleOCR(
-        lang="pt",
-        use_doc_orientation_classify=False,
-        use_doc_unwarping=False,
-        use_textline_orientation=False
+    return easyocr.Reader(
+        ["pt", "en"],
+        gpu=False
     )
 
 
 # ============================================================
-# 5. CONVERTER PDF PARA IMAGENS
+# 5. PDF PARA IMAGENS
 # ============================================================
 
 def pdf_para_imagens(arquivo):
+
     imagens = []
 
     bytes_pdf = arquivo.getvalue()
@@ -91,13 +82,16 @@ def pdf_para_imagens(arquivo):
     )
 
     for pagina in documento:
+
         pix = pagina.get_pixmap(
-            matrix=fitz.Matrix(2, 2),
+            matrix=fitz.Matrix(2.5, 2.5),
             alpha=False
         )
 
         imagem = Image.open(
-            io.BytesIO(pix.tobytes("png"))
+            io.BytesIO(
+                pix.tobytes("png")
+            )
         ).convert("RGB")
 
         imagens.append(imagem)
@@ -108,137 +102,113 @@ def pdf_para_imagens(arquivo):
 
 
 # ============================================================
-# 6. EXECUTAR OCR
+# 6. PREPARAR IMAGEM
+# ============================================================
+
+def preparar_imagem(imagem):
+
+    imagem = ImageOps.exif_transpose(imagem)
+
+    imagem = imagem.convert("RGB")
+
+    largura, altura = imagem.size
+
+    # Amplia documentos pequenos para melhorar a leitura
+    if largura < 1600:
+
+        proporcao = 1600 / largura
+
+        nova_largura = int(
+            largura * proporcao
+        )
+
+        nova_altura = int(
+            altura * proporcao
+        )
+
+        imagem = imagem.resize(
+            (
+                nova_largura,
+                nova_altura
+            ),
+            Image.Resampling.LANCZOS
+        )
+
+    return imagem
+
+
+# ============================================================
+# 7. EXECUTAR OCR
 # ============================================================
 
 def executar_ocr_imagem(imagem):
-    ocr = carregar_ocr()
 
-    # Converte a imagem PIL para array NumPy
-    imagem_np = np.array(imagem)
+    leitor = carregar_ocr()
 
-    resultado = ocr.predict(imagem_np)
+    imagem = preparar_imagem(
+        imagem
+    )
 
-    textos = []
+    imagem_np = np.array(
+        imagem
+    )
+
+    resultado = leitor.readtext(
+        imagem_np,
+        detail=1,
+        paragraph=False,
+        decoder="greedy"
+    )
+
+    linhas = []
+
     diagnostico = []
 
-    for pagina in resultado:
-
-        # ----------------------------------------------------
-        # TENTA OBTER O RESULTADO COMO DICIONÁRIO
-        # ----------------------------------------------------
-
-        dados = None
+    for item in resultado:
 
         try:
-            dados = pagina.json
 
-            if callable(dados):
-                dados = dados()
+            caixa = item[0]
+            texto = str(
+                item[1]
+            ).strip()
+
+            confianca = float(
+                item[2]
+            )
+
+            if texto:
+
+                linhas.append(
+                    texto
+                )
+
+                diagnostico.append(
+                    f"{confianca:.2%} | {texto}"
+                )
 
         except Exception as erro:
-            diagnostico.append(
-                f"Erro ao acessar pagina.json: {erro}"
-            )
-
-
-        # ----------------------------------------------------
-        # SE VEIO COMO STRING JSON
-        # ----------------------------------------------------
-
-        if isinstance(dados, str):
-            try:
-                dados = json.loads(dados)
-            except Exception as erro:
-                diagnostico.append(
-                    f"Erro ao converter JSON: {erro}"
-                )
-
-
-        # ----------------------------------------------------
-        # GUARDA INFORMAÇÃO PARA DIAGNÓSTICO
-        # ----------------------------------------------------
-
-        try:
-            diagnostico.append(
-                "TIPO DA RESPOSTA: "
-                + str(type(pagina))
-            )
 
             diagnostico.append(
-                "DADOS JSON: "
-                + str(dados)
+                f"Erro ao interpretar linha: {erro}"
             )
 
-        except Exception:
-            pass
+    texto_final = "\n".join(
+        linhas
+    )
 
-
-        # ----------------------------------------------------
-        # FORMATO PADDLEOCR 3.X
-        # ----------------------------------------------------
-
-        if isinstance(dados, dict):
-
-            res = dados.get("res", dados)
-
-            if isinstance(res, dict):
-
-                rec_texts = res.get(
-                    "rec_texts",
-                    []
-                )
-
-                if rec_texts:
-
-                    for texto in rec_texts:
-                        texto = str(texto).strip()
-
-                        if texto:
-                            textos.append(texto)
-
-
-        # ----------------------------------------------------
-        # SEGUNDA TENTATIVA:
-        # ACESSAR O OBJETO DIRETAMENTE
-        # ----------------------------------------------------
-
-        if not textos:
-
-            try:
-                if hasattr(pagina, "get"):
-
-                    rec_texts = pagina.get(
-                        "rec_texts",
-                        []
-                    )
-
-                    for texto in rec_texts:
-
-                        texto = str(texto).strip()
-
-                        if texto:
-                            textos.append(texto)
-
-            except Exception as erro:
-
-                diagnostico.append(
-                    "Erro na leitura direta: "
-                    + str(erro)
-                )
-
-
-    texto_final = "\n".join(textos)
-
-    diagnostico_final = "\n\n".join(
+    diagnostico_final = "\n".join(
         diagnostico
     )
 
-    return texto_final, diagnostico_final
+    return (
+        texto_final,
+        diagnostico_final
+    )
 
 
 # ============================================================
-# 7. LER DOCUMENTO
+# 8. LER DOCUMENTO
 # ============================================================
 
 def ler_documento(arquivo):
@@ -246,38 +216,37 @@ def ler_documento(arquivo):
     nome = arquivo.name.lower()
 
     textos = []
+
     diagnosticos = []
 
 
-    # --------------------------------------------------------
-    # PDF
-    # --------------------------------------------------------
-
     if nome.endswith(".pdf"):
 
-        imagens = pdf_para_imagens(arquivo)
+        imagens = pdf_para_imagens(
+            arquivo
+        )
 
         for numero_pagina, imagem in enumerate(
             imagens,
             start=1
         ):
 
-            texto, diagnostico = executar_ocr_imagem(
-                imagem
+            texto, diagnostico = (
+                executar_ocr_imagem(
+                    imagem
+                )
             )
 
             if texto:
-                textos.append(texto)
+                textos.append(
+                    texto
+                )
 
             diagnosticos.append(
                 f"===== PÁGINA {numero_pagina} =====\n"
-                + diagnostico
+                f"{diagnostico}"
             )
 
-
-    # --------------------------------------------------------
-    # FOTO
-    # --------------------------------------------------------
 
     else:
 
@@ -285,14 +254,18 @@ def ler_documento(arquivo):
 
         imagem = Image.open(
             arquivo
-        ).convert("RGB")
+        )
 
-        texto, diagnostico = executar_ocr_imagem(
-            imagem
+        texto, diagnostico = (
+            executar_ocr_imagem(
+                imagem
+            )
         )
 
         if texto:
-            textos.append(texto)
+            textos.append(
+                texto
+            )
 
         diagnosticos.append(
             diagnostico
@@ -306,10 +279,11 @@ def ler_documento(arquivo):
 
 
 # ============================================================
-# 8. FUNÇÕES AUXILIARES
+# 9. FUNÇÕES AUXILIARES
 # ============================================================
 
 def somente_numeros(valor):
+
     return re.sub(
         r"\D",
         "",
@@ -317,8 +291,34 @@ def somente_numeros(valor):
     )
 
 
+def formatar_cpf(cpf):
+
+    cpf = somente_numeros(
+        cpf
+    )
+
+    if len(cpf) != 11:
+        return cpf
+
+    return (
+        f"{cpf[0:3]}."
+        f"{cpf[3:6]}."
+        f"{cpf[6:9]}-"
+        f"{cpf[9:11]}"
+    )
+
+
+def formatar_titulo(titulo):
+
+    titulo = somente_numeros(
+        titulo
+    )
+
+    return titulo
+
+
 # ============================================================
-# 9. EXTRAIR CAMPOS DO TEXTO
+# 10. EXTRAIR DADOS DO TEXTO
 # ============================================================
 
 def extrair_dados(texto):
@@ -339,19 +339,43 @@ def extrair_dados(texto):
     # CPF
     # --------------------------------------------------------
 
-    cpf_match = re.search(
-        r"\b\d{3}[.\s]?\d{3}[.\s]?\d{3}[-\s]?\d{2}\b",
-        texto
-    )
+    padroes_cpf = [
 
-    if cpf_match:
+        r"\b\d{3}\s*[.\-]?\s*\d{3}\s*[.\-]?\s*\d{3}\s*[-.]?\s*\d{2}\b",
 
-        cpf = somente_numeros(
-            cpf_match.group()
+        r"(?:CPF)[^\d]{0,20}(\d[\d\s.\-]{8,16}\d)"
+    ]
+
+
+    for padrao in padroes_cpf:
+
+        match = re.search(
+            padrao,
+            texto,
+            flags=re.IGNORECASE
         )
 
-        if len(cpf) == 11:
-            dados["cpf"] = cpf
+        if match:
+
+            valor = (
+                match.group(1)
+                if match.lastindex
+                else match.group(0)
+            )
+
+            cpf = somente_numeros(
+                valor
+            )
+
+            if len(cpf) == 11:
+
+                dados["cpf"] = (
+                    formatar_cpf(
+                        cpf
+                    )
+                )
+
+                break
 
 
     # --------------------------------------------------------
@@ -359,9 +383,12 @@ def extrair_dados(texto):
     # --------------------------------------------------------
 
     padroes_titulo = [
+
         r"(?:INSCRIÇÃO|INSCRICAO)[^\d]{0,30}(\d[\d\s.\-]{9,18}\d)",
+
         r"(?:TÍTULO|TITULO)[^\d]{0,30}(\d[\d\s.\-]{9,18}\d)"
     ]
+
 
     for padrao in padroes_titulo:
 
@@ -378,7 +405,13 @@ def extrair_dados(texto):
             )
 
             if len(numero) == 12:
-                dados["titulo"] = numero
+
+                dados["titulo"] = (
+                    formatar_titulo(
+                        numero
+                    )
+                )
+
                 break
 
 
@@ -387,9 +420,12 @@ def extrair_dados(texto):
     # --------------------------------------------------------
 
     padroes_nascimento = [
-        r"(?:DATA DE NASCIMENTO|NASCIMENTO|NASC)[^\d]{0,30}(\d{2}[\/.\-]\d{2}[\/.\-]\d{4})",
-        r"\b(\d{2}[\/.\-]\d{2}[\/.\-]\d{4})\b"
+
+        r"(?:DATA\s+DE\s+NASCIMENTO|NASCIMENTO|NASC)[^\d]{0,30}(\d{2}\s*[\/.\-]\s*\d{2}\s*[\/.\-]\s*\d{4})",
+
+        r"\b(\d{2}\s*[\/.\-]\s*\d{2}\s*[\/.\-]\s*\d{4})\b"
     ]
+
 
     for padrao in padroes_nascimento:
 
@@ -401,8 +437,14 @@ def extrair_dados(texto):
 
         if match:
 
-            dados["data_nascimento"] = (
+            valor = re.sub(
+                r"\s",
+                "",
                 match.group(1)
+            )
+
+            dados["data_nascimento"] = (
+                valor
                 .replace(".", "/")
                 .replace("-", "/")
             )
@@ -415,13 +457,16 @@ def extrair_dados(texto):
     # --------------------------------------------------------
 
     zona_match = re.search(
-        r"\bZONA\b[^\d]{0,15}(\d{1,3})",
+        r"\bZONA\b[^\d]{0,20}(\d{1,3})",
         texto,
         flags=re.IGNORECASE
     )
 
     if zona_match:
-        dados["zona"] = zona_match.group(1)
+
+        dados["zona"] = (
+            zona_match.group(1)
+        )
 
 
     # --------------------------------------------------------
@@ -429,13 +474,16 @@ def extrair_dados(texto):
     # --------------------------------------------------------
 
     secao_match = re.search(
-        r"\bSE[ÇC][ÃA]O\b[^\d]{0,15}(\d{1,4})",
+        r"\bSE[ÇC][ÃA]O\b[^\d]{0,20}(\d{1,4})",
         texto,
         flags=re.IGNORECASE
     )
 
     if secao_match:
-        dados["secao"] = secao_match.group(1)
+
+        dados["secao"] = (
+            secao_match.group(1)
+        )
 
 
     # --------------------------------------------------------
@@ -448,20 +496,47 @@ def extrair_dados(texto):
         if linha.strip()
     ]
 
-    for i, linha in enumerate(linhas):
 
-        linha_upper = linha.upper()
+    palavras_ignorar = [
+        "REPÚBLICA",
+        "REPUBLICA",
+        "BRASIL",
+        "JUSTIÇA",
+        "JUSTICA",
+        "ELEITORAL",
+        "TÍTULO",
+        "TITULO",
+        "CPF",
+        "NASCIMENTO",
+        "ZONA",
+        "SEÇÃO",
+        "SECAO",
+        "INSCRIÇÃO",
+        "INSCRICAO"
+    ]
+
+
+    # Primeiro procura indicação explícita de nome
+    for i, linha in enumerate(
+        linhas
+    ):
+
+        linha_upper = (
+            linha.upper()
+        )
 
         if (
-            "NOME DO ELEITOR" in linha_upper
+            "NOME DO ELEITOR"
+            in linha_upper
             or linha_upper == "NOME"
         ):
 
             if i + 1 < len(linhas):
 
-                candidato = linhas[
-                    i + 1
-                ].strip()
+                candidato = (
+                    linhas[i + 1]
+                    .strip()
+                )
 
                 if len(candidato) >= 5:
 
@@ -472,11 +547,72 @@ def extrair_dados(texto):
                     break
 
 
+    # Segunda tentativa:
+    # procura linha que pareça nome completo
+    if not dados["nome"]:
+
+        candidatos = []
+
+        for linha in linhas:
+
+            linha_limpa = (
+                linha.strip()
+            )
+
+            linha_upper = (
+                linha_limpa.upper()
+            )
+
+            if any(
+                palavra in linha_upper
+                for palavra
+                in palavras_ignorar
+            ):
+                continue
+
+            if re.search(
+                r"\d",
+                linha_limpa
+            ):
+                continue
+
+            palavras = (
+                linha_limpa.split()
+            )
+
+            if (
+                2 <= len(palavras) <= 7
+                and len(linha_limpa) >= 8
+            ):
+
+                letras = re.sub(
+                    r"[^A-Za-zÀ-ÿ]",
+                    "",
+                    linha_limpa
+                )
+
+                if len(letras) >= 7:
+
+                    candidatos.append(
+                        linha_limpa
+                    )
+
+
+        if candidatos:
+
+            dados["nome"] = (
+                max(
+                    candidatos,
+                    key=len
+                ).upper()
+            )
+
+
     return dados
 
 
 # ============================================================
-# 10. CARREGAR SUPERVISORES
+# 11. CARREGAR SUPERVISORES
 # ============================================================
 
 @st.cache_data(ttl=60)
@@ -487,6 +623,7 @@ def carregar_supervisores_rapido():
     subs_encontrados = [
         "SEM SUBSUPERVISOR"
     ]
+
 
     try:
 
@@ -499,7 +636,10 @@ def carregar_supervisores_rapido():
 
             dados = response.json()
 
-            if isinstance(dados, list):
+            if isinstance(
+                dados,
+                list
+            ):
 
                 for item in dados:
 
@@ -517,35 +657,45 @@ def carregar_supervisores_rapido():
                         )
                     ).strip().upper()
 
+
                     if (
                         sup
                         and sup
                         not in supervisores_encontrados
                     ):
+
                         supervisores_encontrados.append(
                             sup
                         )
+
 
                     if (
                         sub
                         and sub
                         not in subs_encontrados
                     ):
+
                         subs_encontrados.append(
                             sub
                         )
 
+
     except Exception:
         pass
 
+
     return (
-        sorted(supervisores_encontrados),
-        sorted(subs_encontrados)
+        sorted(
+            supervisores_encontrados
+        ),
+        sorted(
+            subs_encontrados
+        )
     )
 
 
 # ============================================================
-# 11. CABEÇALHO
+# 12. CABEÇALHO
 # ============================================================
 
 st.title(
@@ -556,7 +706,7 @@ st.markdown("---")
 
 
 # ============================================================
-# 12. SIDEBAR
+# 13. SIDEBAR
 # ============================================================
 
 lista_sup, lista_sub = (
@@ -585,9 +735,11 @@ with st.sidebar:
         == "➕ Cadastrar Novo Supervisor"
     ):
 
-        supervisor = st.text_input(
-            "Novo Supervisor"
-        ).upper()
+        supervisor = (
+            st.text_input(
+                "Novo Supervisor"
+            ).upper()
+        )
 
     else:
 
@@ -608,9 +760,11 @@ with st.sidebar:
         == "➕ Cadastrar Novo Sub"
     ):
 
-        sub = st.text_input(
-            "Novo Sub"
-        ).upper()
+        sub = (
+            st.text_input(
+                "Novo Sub"
+            ).upper()
+        )
 
     else:
 
@@ -630,7 +784,7 @@ with st.sidebar:
 
 
 # ============================================================
-# 13. ENVIO DE DOCUMENTOS
+# 14. ENVIO DE DOCUMENTOS
 # ============================================================
 
 if menu == "📸 Envio de Documentos":
@@ -643,7 +797,7 @@ if menu == "📸 Envio de Documentos":
 
 
     st.info(
-        "💡 Teste de OCR. "
+        "💡 Teste de leitura com EasyOCR. "
         "Nesta etapa nada será cadastrado "
         "no Sheets."
     )
@@ -667,9 +821,13 @@ if menu == "📸 Envio de Documentos":
             "🔎 Ler Documentos"
         ):
 
-            total = len(arquivos)
+            total = len(
+                arquivos
+            )
 
-            barra = st.progress(0)
+            barra = st.progress(
+                0
+            )
 
 
             for i, arquivo in enumerate(
@@ -683,9 +841,9 @@ if menu == "📸 Envio de Documentos":
                 )
 
 
-                # --------------------------------------------
-                # MOSTRAR A FOTO ENVIADA
-                # --------------------------------------------
+                # ============================================
+                # PREVIEW
+                # ============================================
 
                 if not arquivo.name.lower().endswith(
                     ".pdf"
@@ -701,9 +859,15 @@ if menu == "📸 Envio de Documentos":
                             )
                         )
 
+                        imagem_preview = (
+                            ImageOps.exif_transpose(
+                                imagem_preview
+                            )
+                        )
+
                         st.image(
                             imagem_preview,
-                            caption="Imagem recebida pelo sistema",
+                            caption="Documento enviado",
                             width=500
                         )
 
@@ -725,14 +889,16 @@ if menu == "📸 Envio de Documentos":
                             )
                         )
 
-                        dados = extrair_dados(
-                            texto
+                        dados = (
+                            extrair_dados(
+                                texto
+                            )
                         )
 
 
-                    # ----------------------------------------
-                    # TEXTO RECONHECIDO
-                    # ----------------------------------------
+                    # ========================================
+                    # TEXTO OCR
+                    # ========================================
 
                     st.markdown(
                         "### 📝 Texto reconhecido"
@@ -742,11 +908,11 @@ if menu == "📸 Envio de Documentos":
                     if texto:
 
                         st.success(
-                            "O OCR encontrou texto."
+                            "Texto encontrado no documento."
                         )
 
                         st.text_area(
-                            "Resultado do OCR",
+                            "Resultado da leitura",
                             texto,
                             height=300,
                             key=f"ocr_{i}"
@@ -755,14 +921,13 @@ if menu == "📸 Envio de Documentos":
                     else:
 
                         st.warning(
-                            "Nenhum texto foi "
-                            "reconhecido pelo OCR."
+                            "Nenhum texto foi reconhecido."
                         )
 
 
-                    # ----------------------------------------
-                    # CAMPOS IDENTIFICADOS
-                    # ----------------------------------------
+                    # ========================================
+                    # DADOS
+                    # ========================================
 
                     st.markdown(
                         "### 🔍 Dados identificados"
@@ -818,12 +983,12 @@ if menu == "📸 Envio de Documentos":
                         )
 
 
-                    # ----------------------------------------
+                    # ========================================
                     # DIAGNÓSTICO
-                    # ----------------------------------------
+                    # ========================================
 
                     with st.expander(
-                        "🛠️ Diagnóstico técnico do OCR"
+                        "🛠️ Diagnóstico da leitura"
                     ):
 
                         if diagnostico:
@@ -835,19 +1000,21 @@ if menu == "📸 Envio de Documentos":
                         else:
 
                             st.write(
-                                "Sem informações "
-                                "de diagnóstico."
+                                "Nenhuma linha "
+                                "reconhecida."
                             )
 
 
                 except Exception as ex:
 
                     st.error(
-                        "Erro ao processar "
+                        f"Erro ao processar "
                         f"{arquivo.name}: {ex}"
                     )
 
-                    st.exception(ex)
+                    st.exception(
+                        ex
+                    )
 
 
                 barra.progress(
@@ -856,7 +1023,7 @@ if menu == "📸 Envio de Documentos":
 
 
 # ============================================================
-# 14. FORMULÁRIO MANUAL
+# 15. FORMULÁRIO MANUAL
 # ============================================================
 
 elif menu == "✍️ Formulário Manual":
@@ -914,25 +1081,23 @@ elif menu == "✍️ Formulário Manual":
             ).lstrip("0")
 
 
-            st.session_state.encontrado = (
-                next(
-                    (
-                        r
-                        for r in dados_base
-                        if re.sub(
-                            r"\D",
-                            "",
-                            str(
-                                r.get(
-                                    "titulo",
-                                    ""
-                                )
+            st.session_state.encontrado = next(
+                (
+                    r
+                    for r in dados_base
+                    if re.sub(
+                        r"\D",
+                        "",
+                        str(
+                            r.get(
+                                "titulo",
+                                ""
                             )
-                        ).lstrip("0")
-                        == titulo_pesquisado
-                    ),
-                    None
-                )
+                        )
+                    ).lstrip("0")
+                    == titulo_pesquisado
+                ),
+                None
             )
 
 
@@ -954,8 +1119,7 @@ elif menu == "✍️ Formulário Manual":
             st.error(
                 f"⚠️ Já cadastrado: "
                 f"{e.get('nome')} | "
-                f"Sup: "
-                f"{e.get('supervisor')}"
+                f"Sup: {e.get('supervisor')}"
             )
 
 
@@ -1063,6 +1227,5 @@ elif menu == "✍️ Formulário Manual":
                         except Exception as ex:
 
                             st.error(
-                                "Erro ao salvar: "
-                                f"{ex}"
+                                f"Erro ao salvar: {ex}"
                             )
