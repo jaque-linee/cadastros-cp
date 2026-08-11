@@ -766,8 +766,7 @@ def extrair_dados_pdf_digital(texto):
     }
     
     texto_norm = normalizar_texto(texto)
-    eh_titulo = "TITULO" in texto_norm or "ELEITOR" in texto_norm or "JUSTICA ELEITORAL" in texto_norm
-    eh_cnh = "HABILITACAO" in texto_norm or "CARTEIRA NACIONAL" in texto_norm
+    eh_titulo = "JUSTICA ELEITORAL" in texto_norm or "TITULO ELEITORAL" in texto_norm
 
     # ========================================================
     # 1. NOME
@@ -842,11 +841,12 @@ def extrair_dados_pdf_digital(texto):
             if len(num) >= 12:
                 dados["titulo"] = num[:12]
                 break
-            if i + 1 < len(linhas):
-                num_abaixo = somente_numeros(linhas[i + 1])
-                if len(num_abaixo) >= 12:
-                    dados["titulo"] = num_abaixo[:12]
-                    break
+            for des in (1, 2, -1):
+                if 0 <= i + des < len(linhas):
+                    num_abaixo = somente_numeros(linhas[i + des])
+                    if len(num_abaixo) >= 12:
+                        dados["titulo"] = num_abaixo[:12]
+                        break
         if dados["titulo"]:
             break
     if not dados["titulo"] and eh_titulo:
@@ -857,76 +857,73 @@ def extrair_dados_pdf_digital(texto):
                 break
 
     # ========================================================
-    # 5. ZONA E SEÇÃO (Regra Específica para Título vs CNH)
+    # 5. ZONA E SEÇÃO (Blindado para Título Eleitoral)
     # ========================================================
     if eh_titulo:
-        # No Título, Zona e Seção vêm estritamente logo após a palavra INSCRIÇÃO
         for i, linha in enumerate(linhas):
-            if "INSCRICAO" in normalizar_rotulo(linha) or "INSCRICAO" in linha.upper():
-                for des in (1, 2):
-                    if i + des < len(linhas):
-                        nums = re.findall(r'\b\d{2,4}\b', linhas[i + des])
-                        if len(nums) >= 2:
-                            dados["zona"] = nums[0].zfill(3)
-                            dados["secao"] = nums[1].zfill(4)
-                            break
-                if dados["zona"]:
-                    break
-    
-    if not dados["zona"] or not dados["secao"]:
-        # Varredura padrão para outros documentos
-        for i, linha in enumerate(linhas):
-            r = normalizar_rotulo(linha)
-            if "ZONA" in r or "SECAO" in r or "ZONASECAO" in r:
-                bloco_texto = " ".join(linhas[i:i+3])
-                nums = re.findall(r'\b\d{1,4}\b', bloco_texto)
-                for n in nums:
-                    if 1900 <= int(n) <= 2100 or len(n) >= 11: continue
-                    if len(n) <= 3 and not dados["zona"] and n != dados.get("titulo", "")[-3:]:
-                        dados["zona"] = n.zfill(3)
-                    elif len(n) == 4 and not dados["secao"]:
-                        dados["secao"] = n.zfill(4)
+            if "INSCRICAO" in normalizar_rotulo(linha) or "ZONA" in normalizar_rotulo(linha):
+                # Olha a linha atual e a logo abaixo para capturar os números corretos da zona e seção
+                bloco = " ".join(linhas[i:i+3])
+                nums = re.findall(r'\b\d{2,4}\b', bloco)
+                candidatos_validos = [n for n in nums if not (1900 <= int(n) <= 2100) and n != dados.get("titulo", "")[-4:]]
+                
+                if len(candidatos_validos) >= 2:
+                    # No título, o primeiro número costuma ser a zona (ex: 055) e o seguinte a seção (ex: 0277)[cite: 3]
+                    for n in candidatos_validos:
+                        if len(n) <= 3 and not dados["zona"]:
+                            dados["zona"] = n.zfill(3)
+                        elif len(n) == 4 and not dados["secao"]:
+                            dados["secao"] = n.zfill(4)
             if dados["zona"] and dados["secao"]:
                 break
+    else:
+        # Extração de Zona/Seção para outros documentos se houver
+        for i, linha in enumerate(linhas):
+            if "ZONA" in normalizar_rotulo(linha):
+                if i + 1 < len(linhas):
+                    nums = re.findall(r'\b\d{1,4}\b', linhas[i+1])
+                    if nums: dados["zona"] = nums[0].zfill(3)
+            if "SECAO" in normalizar_rotulo(linha):
+                if i + 1 < len(linhas):
+                    nums = re.findall(r'\b\d{1,4}\b', linhas[i+1])
+                    if nums: dados["secao"] = nums[-1].zfill(4)
 
     # ========================================================
-    # 6. NOME DA MÃE (Tratamento Isolado Título vs CNH)
+    # 6. NOME DA MÃE (Regra Direta Título vs CNH)
     # ========================================================
     for i, linha in enumerate(linhas):
         r = normalizar_rotulo(linha)
         if r in ["FILIACAO", "FILIACAO:", "NOMEDAMAE", "MAE", "NOME DA MAE"]:
-            linhas_filiacao = []
+            candidatos_validados = []
             for des in range(1, 6):
                 if i + des < len(linhas):
                     cand = linhas[i + des].strip()
                     rcand = normalizar_rotulo(cand)
                     
-                    parar_em = ["PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "PROIBIDO", "ORIENTACOES", "MUNICIPIO", "ZONA", "SECAO", "CODIGO", "AUTENTICIDADE", "VALIDACAO", "TITULO", "ELEITORAL", "IMPRESSO"]
-                    if any(p in rcand for p in parar_em):
+                    parar = ["PERMISSAO", "VALIDADE", "LOCAL", "ASSINATURA", "DATAEMISSAO", "OBSERVACOES", "CATHAB", "ACC", "PROIBIDO", "ORIENTACOES", "MUNICIPIO", "ZONA", "SECAO", "CODIGO", "AUTENTICIDADE", "VALIDACAO", "TITULO", "ELEITORAL", "IMPRESSO", "DATADENASCIMENTO"]
+                    if any(p in rcand for p in parar):
                         break
                     
-                    if not cand or re.search(r"\d{4}", cand):
+                    if not cand or len(cand) < 3 or re.search(r"\d{4}", cand):
                         continue
                         
-                    if cand.upper() == dados["nome"] or "NOME" in rcand:
+                    if cand.upper() == dados["nome"] or "NOME" in rcand or "DATA" in rcand:
                         continue
                         
-                    linhas_filiacao.append(cand.upper())
+                    candidatos_validados.append(cand.upper())
             
-            if linhas_filiacao:
+            if candidatos_validados:
                 if eh_titulo:
-                    # No Título, a mãe é estritamente o primeiro nome logo após a filiação[cite: 7]
-                    dados["nome_mae"] = linhas_filiacao[0]
+                    # No Título, a mãe é estritamente o primeiro nome logo abaixo de filiação[cite: 3]
+                    dados["nome_mae"] = candidatos_validados[0]
                 else:
-                    # Na CNH, o pai ocupa as 2 primeiras linhas e a mãe as 2 últimas[cite: 2]
-                    if len(linhas_filiacao) >= 4:
-                        dados["nome_mae"] = " ".join(linhas_filiacao[2:])
-                    elif len(linhas_filiacao) == 3:
-                        dados["nome_mae"] = linhas_filiacao[2]
-                    elif len(linhas_filiacao) == 2:
-                        dados["nome_mae"] = linhas_filiacao[1]
+                    # Na CNH, o pai ocupa as primeiras linhas e a mãe as últimas[cite: 2]
+                    if len(candidatos_validados) >= 3:
+                        dados["nome_mae"] = " ".join(candidatos_validados[1:])
+                    elif len(candidatos_validados) == 2:
+                        dados["nome_mae"] = candidatos_validados[1]
                     else:
-                        dados["nome_mae"] = linhas_filiacao[0]
+                        dados["nome_mae"] = candidatos_validados[0]
             break
 
     return dados
