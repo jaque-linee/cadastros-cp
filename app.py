@@ -11,6 +11,10 @@ import io
 import json
 import numpy as np
 
+from PIL import Image
+from paddleocr import PaddleOCR
+import fitz
+
 
 # ============================================================
 # 1. CONFIGURAÇÃO DA PÁGINA
