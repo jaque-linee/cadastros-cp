@@ -1,50 +1,68 @@
 import streamlit as st
 import requests
-import re
-import io
-import gc
-import unicodedata
-import numpy as np
-import pandas as pd
-from PIL import Image, ImageOps, ImageEnhance, ImageFilter
-import pytesseract
-import fitz
-import sheets
-
-# ============================================================
-# 1. CONFIGURAÇÃO
-# ============================================================
-
-st.set_page_config(
-    page_title="Sistema de Cadastro CP",
-    layout="wide",
-    page_icon="📋"
-)
-
-
-# ============================================================
-# 2. CSS
-# ============================================================
-
-st.markdown(
+import rest.markdown(
     """
-    <style>
-    .stApp {
-        background-color: #eef2f5 !important;
+    /* Campo de telefone / inputs de texto */
+    div[data-baseweb="input"] {
+        background-color: white !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 8px !important;
     }
-
-    div.stButton > button {
-        background-color: #0056b3 !important;
-        color: white !important;
-        border-radius: 12px !important;
-        border: 2px solid #0056b3 !important;
-        font-weight: bold !important;
+    
+    div[data-baseweb="input"] input {
+        color: #111827 !important;
+        background-color: white !important;
+        caret-color: #111827 !important;
     }
-
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
+    
+    div[data-baseweb="input"]:focus-within {
+        border: 2px solid #1f77d0 !important;
     }
+        <style>
+    import io
+    import gc
+    import unicodedata
+    import numpy as np
+    import pandas as pd
+    from PIL import Image, ImageOps, ImageEnhance, ImageFilter
+    import pytesseract
+    import fitz
+    import sheets
+    
+    # ============================================================
+    # 1. CONFIGURAÇÃO
+    # ============================================================
+    
+    st.set_page_config(
+        page_title="Sistema de Cadastro CP",
+        layout="wide",
+        page_icon="📋"
+    )
+    
+    
+    # ============================================================
+    # 2. CSS
+    # ============================================================
+    
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-color: #eef2f5 !important;
+        }
+    
+        div.stButton > button {
+            background-color: #0056b3 !important;
+            color: white !important;
+            border-radius: 12px !important;
+            border: 2px solid #0056b3 !important;
+            font-weight: bold !important;
+        }
+    
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+        }
     </style>
     """,
     unsafe_allow_html=True
