@@ -3,10 +3,8 @@ import requests
 import json
 import re
 
-# 1. Configuração da página
 st.set_page_config(page_title="Sistema de Cadastro CP", layout="centered", page_icon="🗳️")
 
-# 2. CSS
 st.markdown("""
     <style>
     .stApp { background-color: #eef2f5 !important; }
@@ -29,21 +27,23 @@ except Exception as e:
 st.title("🗳️ Sistema de Cadastro CP")
 st.markdown("---")
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 def carregar_supervisores_rapido():
     supervisores_encontrados = ["ADEILTON", "ADRIANO BATISTA"]
     subs_encontrados = ["SEM SUBSUPERVISOR"]
     try:
-        response = requests.get(WEBHOOK_URL, timeout=5)
+        response = requests.get(WEBHOOK_URL, timeout=8)
         if response.status_code == 200:
-            for item in response.json():
-                sup = str(item.get("supervisor", "")).strip().upper()
-                sub = str(item.get("subsupervisor", "")).strip().upper()
-                if sup and sup not in supervisores_encontrados: 
-                    supervisores_encontrados.append(sup)
-                if sub and sub not in subs_encontrados: 
-                    subs_encontrados.append(sub)
-    except: 
+            dados = response.json()
+            if isinstance(dados, list):
+                for item in dados:
+                    sup = str(item.get("supervisor", "")).strip().upper()
+                    sub = str(item.get("subsupervisor", "")).strip().upper()
+                    if sup and sup not in supervisores_encontrados: 
+                        supervisores_encontrados.append(sup)
+                    if sub and sub not in subs_encontrados: 
+                        subs_encontrados.append(sub)
+    except Exception as ex:
         pass
     return sorted(supervisores_encontrados), sorted(subs_encontrados)
 
@@ -97,7 +97,7 @@ if menu == "📸 Envio de Documentos":
             st.markdown(f"**Resumo do Lote:** 🟢 **{sucessos}** salvos | 🟡 **{duplicados}** duplicados ignorados.")
 
 elif menu == "✍️ Formulário Manual":
-    st.subheader(f"✍️ Consulta & Cadastro Manual")
+    st.subheader("✍️ Consulta & Cadastro Manual")
     if "busca_realizada" not in st.session_state: 
         st.session_state.update({"busca_realizada": False, "titulo": "", "encontrado": None})
     
@@ -136,5 +136,5 @@ elif menu == "✍️ Formulário Manual":
                         }
                         requests.post(WEBHOOK_URL, json=payload)
                         st.success("Salvo com sucesso!")
-                        st.session_state.busca_realizada = False
+                        st.session_state.busca_realizada5 = False
                         st.rerun()
