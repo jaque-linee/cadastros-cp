@@ -3,6 +3,7 @@ import requests
 import re
 import io
 import gc
+import unicodedata
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageOps
@@ -68,7 +69,6 @@ except Exception:
 # ============================================================
 
 def somente_numeros(valor):
-
     return re.sub(
         r"\D",
         "",
@@ -77,16 +77,34 @@ def somente_numeros(valor):
 
 
 def normalizar_texto(valor):
+    return str(valor or "").strip().upper()
 
-    return (
-        str(valor or "")
-        .strip()
-        .upper()
+
+def remover_acentos(valor):
+    valor = str(valor or "")
+
+    return "".join(
+        caractere
+        for caractere in unicodedata.normalize(
+            "NFD",
+            valor
+        )
+        if unicodedata.category(caractere) != "Mn"
+    )
+
+
+def normalizar_rotulo(valor):
+    valor = remover_acentos(valor)
+    valor = valor.upper()
+
+    return re.sub(
+        r"[^A-Z0-9]",
+        "",
+        valor
     )
 
 
 def formatar_cpf(cpf):
-
     cpf = somente_numeros(cpf)
 
     if len(cpf) != 11:
@@ -100,13 +118,40 @@ def formatar_cpf(cpf):
     )
 
 
+def data_valida(valor):
+    match = re.fullmatch(
+        r"(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})",
+        str(valor or "").strip()
+    )
+
+    if not match:
+        return False
+
+    try:
+        dia = int(match.group(1))
+        mes = int(match.group(2))
+        ano = int(match.group(3))
+
+        return (
+            1 <= dia <= 31
+            and 1 <= mes <= 12
+            and 1900 <= ano <= 2026
+        )
+
+    except Exception:
+        return False
+
+
 # ============================================================
-# 5. OCR
+# 5. CARREGAMENTO DO OCR
+#
+# IMPORTANTE:
+# ESTA FUNÇÃO NÃO É EXECUTADA NA ABERTURA DO APP.
+# SÓ É CHAMADA SE REALMENTE HOUVER IMAGEM OU PDF ESCANEADO.
 # ============================================================
 
 @st.cache_resource(show_spinner=False)
 def carregar_ocr():
-
     import easyocr
 
     return easyocr.Reader(
@@ -117,11 +162,10 @@ def carregar_ocr():
 
 
 # ============================================================
-# 6. PREPARAÇÃO DA IMAGEM
+# 6. PREPARAR IMAGEM
 # ============================================================
 
 def preparar_imagem(imagem):
-
     imagem = ImageOps.exif_transpose(
         imagem
     )
@@ -130,13 +174,7 @@ def preparar_imagem(imagem):
 
     largura, altura = imagem.size
 
-
-    # --------------------------------------------
-    # AUMENTA IMAGENS MUITO PEQUENAS
-    # --------------------------------------------
-
     if largura < 1200:
-
         proporcao = 1200 / largura
 
         imagem = imagem.resize(
@@ -147,13 +185,7 @@ def preparar_imagem(imagem):
             Image.Resampling.LANCZOS
         )
 
-
-    # --------------------------------------------
-    # REDUZ IMAGENS GIGANTES
-    # --------------------------------------------
-
     if imagem.width > 2000:
-
         proporcao = 2000 / imagem.width
 
         imagem = imagem.resize(
@@ -164,7 +196,6 @@ def preparar_imagem(imagem):
             Image.Resampling.LANCZOS
         )
 
-
     return imagem
 
 
@@ -172,10 +203,8 @@ def preparar_imagem(imagem):
 # 7. OCR DE UMA IMAGEM
 # ============================================================
 
-def executar_ocr_imagem(
-    imagem,
-    leitor
-):
+def executar_ocr_imagem(imagem):
+    leitor = carregar_ocr()
 
     imagem = preparar_imagem(
         imagem
@@ -185,7 +214,6 @@ def executar_ocr_imagem(
         imagem
     )
 
-
     resultado = leitor.readtext(
         imagem_np,
         detail=1,
@@ -193,15 +221,11 @@ def executar_ocr_imagem(
         decoder="greedy"
     )
 
-
     itens = []
 
     for item in resultado:
-
         try:
-
             caixa = item[0]
-
             texto = str(
                 item[1]
             ).strip()
@@ -213,7 +237,6 @@ def executar_ocr_imagem(
             if not texto:
                 continue
 
-
             xs = [
                 ponto[0]
                 for ponto in caixa
@@ -223,7 +246,6 @@ def executar_ocr_imagem(
                 ponto[1]
                 for ponto in caixa
             ]
-
 
             itens.append(
                 {
@@ -237,26 +259,20 @@ def executar_ocr_imagem(
         except Exception:
             continue
 
-
     itens.sort(
         key=lambda item: (
-            item["y"],
+            round(item["y"] / 20),
             item["x"]
         )
     )
-
 
     texto = "\n".join(
         item["texto"]
         for item in itens
     )
 
-
-    # Libera array pesado
     del imagem_np
-
     gc.collect()
-
 
     return texto, itens
 
@@ -265,9 +281,8 @@ def executar_ocr_imagem(
 # 8. EXTRAIR TEXTO NATIVO DO PDF
 # ============================================================
 
-def extrair_texto_pdf(
-    arquivo
-):
+def extrair_texto_pdf(arquivo):
+    arquivo.seek(0)
 
     bytes_pdf = arquivo.getvalue()
 
@@ -279,7 +294,6 @@ def extrair_texto_pdf(
     textos = []
 
     for pagina in documento:
-
         texto = pagina.get_text(
             "text"
         )
@@ -289,7 +303,6 @@ def extrair_texto_pdf(
                 texto.strip()
             )
 
-
     documento.close()
 
     return "\n".join(
@@ -298,43 +311,44 @@ def extrair_texto_pdf(
 
 
 # ============================================================
-# 9. TRANSFORMAR UMA PÁGINA PDF EM IMAGEM
+# 9. VERIFICAR SE PDF TEM TEXTO NATIVO ÚTIL
 # ============================================================
 
-def pagina_pdf_para_imagem(
-    pagina
-):
-
-    # Resolução controlada para não explodir memória
-    pix = pagina.get_pixmap(
-        matrix=fitz.Matrix(1.5, 1.5),
-        alpha=False
+def pdf_tem_texto_util(texto):
+    texto_sem_espacos = re.sub(
+        r"\s",
+        "",
+        texto or ""
     )
 
+    if len(texto_sem_espacos) < 30:
+        return False
 
-    imagem = Image.open(
-        io.BytesIO(
-            pix.tobytes("jpeg")
-        )
-    ).convert("RGB")
+    letras = re.findall(
+        r"[A-Za-zÀ-ÿ]",
+        texto or ""
+    )
 
+    numeros = re.findall(
+        r"\d",
+        texto or ""
+    )
 
-    del pix
+    if len(letras) < 10:
+        return False
 
-    gc.collect()
+    if len(numeros) < 4:
+        return False
 
-
-    return imagem
+    return True
 
 
 # ============================================================
-# 10. OCR DE PDF ESCANEADO
+# 10. PDF ESCANEADO -> UMA PÁGINA POR VEZ
 # ============================================================
 
-def executar_ocr_pdf(
-    arquivo,
-    leitor
-):
+def executar_ocr_pdf(arquivo):
+    arquivo.seek(0)
 
     bytes_pdf = arquivo.getvalue()
 
@@ -343,54 +357,51 @@ def executar_ocr_pdf(
         filetype="pdf"
     )
 
-
     textos = []
-
     todos_itens = []
 
-
-    # Processa UMA página de cada vez
     for numero_pagina in range(
         len(documento)
     ):
-
         pagina = documento[
             numero_pagina
         ]
 
-        imagem = pagina_pdf_para_imagem(
-            pagina
+        pix = pagina.get_pixmap(
+            matrix=fitz.Matrix(1.25, 1.25),
+            alpha=False
         )
 
+        bytes_imagem = pix.tobytes(
+            "jpeg"
+        )
 
-        texto, itens = (
-            executar_ocr_imagem(
-                imagem,
-                leitor
+        imagem = Image.open(
+            io.BytesIO(
+                bytes_imagem
             )
-        )
+        ).convert("RGB")
 
+        texto, itens = executar_ocr_imagem(
+            imagem
+        )
 
         if texto:
-
             textos.append(
                 texto
             )
-
 
         todos_itens.extend(
             itens
         )
 
-
-        # Libera página imediatamente
         del imagem
+        del pix
+        del bytes_imagem
 
         gc.collect()
 
-
     documento.close()
-
 
     return (
         "\n".join(textos),
@@ -399,96 +410,38 @@ def executar_ocr_pdf(
 
 
 # ============================================================
-# 11. CONVERTER TEXTO NATIVO EM ITENS
+# 11. LER DOCUMENTO
 # ============================================================
 
-def texto_para_itens(
-    texto
-):
-
-    itens = []
-
-    linhas = [
-        linha.strip()
-        for linha in texto.splitlines()
-        if linha.strip()
-    ]
-
-
-    for indice, linha in enumerate(
-        linhas
-    ):
-
-        itens.append(
-            {
-                "texto": linha,
-                "confianca": 1.0,
-                "x": 0,
-                "y": indice * 30
-            }
-        )
-
-
-    return itens
-
-
-# ============================================================
-# 12. LER UM DOCUMENTO
-# ============================================================
-
-def ler_documento(
-    arquivo,
-    leitor
-):
-
+def ler_documento(arquivo):
     nome = arquivo.name.lower()
-
 
     # ========================================================
     # PDF
     # ========================================================
 
-    if nome.endswith(
-        ".pdf"
-    ):
+    if nome.endswith(".pdf"):
 
-        # Primeiro tenta texto real do PDF
-        texto_nativo = (
-            extrair_texto_pdf(
-                arquivo
-            )
+        # PRIMEIRO:
+        # tenta extrair texto diretamente.
+        texto_nativo = extrair_texto_pdf(
+            arquivo
         )
 
-
-        # Se houver quantidade razoável de texto,
-        # não usa OCR.
-        if len(
-            re.sub(
-                r"\s",
-                "",
-                texto_nativo
-            )
-        ) >= 30:
-
-            itens = texto_para_itens(
-                texto_nativo
-            )
-
+        if pdf_tem_texto_util(
+            texto_nativo
+        ):
             return (
                 texto_nativo,
-                itens,
+                [],
                 "PDF — texto digital"
             )
 
-
-        # PDF escaneado
-        texto, itens = (
-            executar_ocr_pdf(
-                arquivo,
-                leitor
-            )
+        # SOMENTE SE NÃO HOUVER TEXTO:
+        # usa EasyOCR.
+        texto, itens = executar_ocr_pdf(
+            arquivo
         )
-
 
         return (
             texto,
@@ -496,9 +449,8 @@ def ler_documento(
             "PDF — OCR"
         )
 
-
     # ========================================================
-    # JPG / PNG
+    # IMAGEM
     # ========================================================
 
     arquivo.seek(0)
@@ -507,19 +459,12 @@ def ler_documento(
         arquivo
     )
 
-
-    texto, itens = (
-        executar_ocr_imagem(
-            imagem,
-            leitor
-        )
+    texto, itens = executar_ocr_imagem(
+        imagem
     )
 
-
     del imagem
-
     gc.collect()
-
 
     return (
         texto,
@@ -529,25 +474,346 @@ def ler_documento(
 
 
 # ============================================================
-# 13. ENCONTRAR TÍTULO
+# 12. FUNÇÕES PARA TEXTO NATIVO DE PDF
 # ============================================================
 
-def encontrar_titulo(
-    itens
-):
+def linhas_texto(texto):
+    return [
+        linha.strip()
+        for linha in str(
+            texto or ""
+        ).splitlines()
+        if linha.strip()
+    ]
 
+
+def eh_rotulo_documento(texto):
+    valor = normalizar_rotulo(
+        texto
+    )
+
+    rotulos = [
+        "NOMEDOELEITOR",
+        "NOME",
+        "DATADENASCIMENTO",
+        "NASCIMENTO",
+        "INSCRICAO",
+        "TITULO",
+        "ZONA",
+        "SECAO",
+        "FILIACAO",
+        "MUNICIPIOUF",
+        "DATADEEMISSAO",
+        "CODIGODEVALIDACAO",
+        "JUSTICAELEITORAL",
+        "TITULOELEITORAL"
+    ]
+
+    return valor in rotulos
+
+
+# ============================================================
+# 13. EXTRAÇÃO ESPECÍFICA DE PDF DIGITAL
+# ============================================================
+
+def extrair_dados_pdf_digital(texto):
+    linhas = linhas_texto(
+        texto
+    )
+
+    dados = {
+        "nome": "",
+        "cpf": "",
+        "titulo": "",
+        "data_nascimento": "",
+        "zona": "",
+        "secao": ""
+    }
+
+    # ========================================================
+    # NOME
+    #
+    # PyMuPDF pode devolver:
+    #
+    # JAQUELINE MARIA DA SILVA
+    # NOME DO ELEITOR
+    #
+    # ou:
+    #
+    # NOME DO ELEITOR
+    # JAQUELINE MARIA DA SILVA
+    #
+    # Então procuramos nos dois sentidos.
+    # ========================================================
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if normalizar_rotulo(
+            linha
+        ) == "NOMEDOELEITOR":
+
+            candidatos = []
+
+            if i > 0:
+                candidatos.append(
+                    linhas[i - 1]
+                )
+
+            if i + 1 < len(linhas):
+                candidatos.append(
+                    linhas[i + 1]
+                )
+
+            for candidato in candidatos:
+                candidato_limpo = (
+                    candidato.strip()
+                )
+
+                if eh_rotulo_documento(
+                    candidato_limpo
+                ):
+                    continue
+
+                if re.search(
+                    r"\d",
+                    candidato_limpo
+                ):
+                    continue
+
+                palavras = candidato_limpo.split()
+
+                if (
+                    2 <= len(palavras) <= 8
+                    and len(candidato_limpo) >= 8
+                ):
+                    dados["nome"] = (
+                        candidato_limpo.upper()
+                    )
+                    break
+
+        if dados["nome"]:
+            break
+
+    # ========================================================
+    # NASCIMENTO
+    # ========================================================
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if normalizar_rotulo(
+            linha
+        ) in [
+            "DATADENASCIMENTO",
+            "NASCIMENTO"
+        ]:
+
+            candidatos = []
+
+            if i > 0:
+                candidatos.append(
+                    linhas[i - 1]
+                )
+
+            if i + 1 < len(linhas):
+                candidatos.append(
+                    linhas[i + 1]
+                )
+
+            for candidato in candidatos:
+                candidato = candidato.strip()
+
+                if data_valida(
+                    candidato
+                ):
+                    dados[
+                        "data_nascimento"
+                    ] = (
+                        candidato
+                        .replace(".", "/")
+                        .replace("-", "/")
+                    )
+                    break
+
+        if dados[
+            "data_nascimento"
+        ]:
+            break
+
+    # ========================================================
+    # TÍTULO
+    # ========================================================
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        rotulo = normalizar_rotulo(
+            linha
+        )
+
+        if rotulo in [
+            "INSCRICAO",
+            "TITULO"
+        ]:
+            candidatos = []
+
+            if i > 0:
+                candidatos.append(
+                    linhas[i - 1]
+                )
+
+            if i + 1 < len(linhas):
+                candidatos.append(
+                    linhas[i + 1]
+                )
+
+            for candidato in candidatos:
+                numero = somente_numeros(
+                    candidato
+                )
+
+                if len(numero) == 12:
+                    dados["titulo"] = numero
+                    break
+
+        if dados["titulo"]:
+            break
+
+    # Fallback do título
+    if not dados["titulo"]:
+        for linha in linhas:
+            numero = somente_numeros(
+                linha
+            )
+
+            if len(numero) == 12:
+                dados["titulo"] = numero
+                break
+
+    # ========================================================
+    # ZONA
+    # ========================================================
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if normalizar_rotulo(
+            linha
+        ) == "ZONA":
+
+            candidatos = []
+
+            if i > 0:
+                candidatos.append(
+                    linhas[i - 1]
+                )
+
+            if i + 1 < len(linhas):
+                candidatos.append(
+                    linhas[i + 1]
+                )
+
+            for candidato in candidatos:
+                numero = somente_numeros(
+                    candidato
+                )
+
+                if 1 <= len(numero) <= 3:
+                    dados["zona"] = (
+                        numero.zfill(3)
+                    )
+                    break
+
+        if dados["zona"]:
+            break
+
+    # ========================================================
+    # SEÇÃO
+    # ========================================================
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if normalizar_rotulo(
+            linha
+        ) == "SECAO":
+
+            candidatos = []
+
+            if i > 0:
+                candidatos.append(
+                    linhas[i - 1]
+                )
+
+            if i + 1 < len(linhas):
+                candidatos.append(
+                    linhas[i + 1]
+                )
+
+            for candidato in candidatos:
+                numero = somente_numeros(
+                    candidato
+                )
+
+                if 1 <= len(numero) <= 4:
+                    dados["secao"] = (
+                        numero.zfill(4)
+                    )
+                    break
+
+        if dados["secao"]:
+            break
+
+    # ========================================================
+    # CPF
+    # ========================================================
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if "CPF" in normalizar_texto(
+            linha
+        ):
+            numero_mesma_linha = somente_numeros(
+                linha
+            )
+
+            if len(
+                numero_mesma_linha
+            ) == 11:
+                dados["cpf"] = formatar_cpf(
+                    numero_mesma_linha
+                )
+                break
+
+            if i + 1 < len(linhas):
+                numero = somente_numeros(
+                    linhas[i + 1]
+                )
+
+                if len(numero) == 11:
+                    dados["cpf"] = formatar_cpf(
+                        numero
+                    )
+                    break
+
+    return dados
+
+
+# ============================================================
+# 14. EXTRAÇÃO PARA IMAGENS / OCR
+# ============================================================
+
+def encontrar_titulo_ocr(itens):
     candidatos = []
 
-
     for item in itens:
-
         numeros = somente_numeros(
             item["texto"]
         )
 
-
         if len(numeros) == 12:
-
             candidatos.append(
                 (
                     item["confianca"],
@@ -555,36 +821,21 @@ def encontrar_titulo(
                 )
             )
 
-
     if candidatos:
-
         candidatos.sort(
             reverse=True
         )
 
-        return candidatos[
-            0
-        ][1]
-
+        return candidatos[0][1]
 
     return ""
 
 
-# ============================================================
-# 14. ENCONTRAR NASCIMENTO
-# ============================================================
-
-def encontrar_nascimento(
-    itens
-):
-
+def encontrar_nascimento_ocr(itens):
     datas = []
 
-
     for item in itens:
-
         texto = item["texto"]
-
 
         for match in re.finditer(
             r"\b"
@@ -596,136 +847,72 @@ def encontrar_nascimento(
             r"\b",
             texto
         ):
+            valor = (
+                f"{match.group(1)}/"
+                f"{match.group(2)}/"
+                f"{match.group(3)}"
+            )
 
-            dia = match.group(1)
-
-            mes = match.group(2)
-
-            ano = match.group(3)
-
-
-            try:
-
-                dia_int = int(dia)
-
-                mes_int = int(mes)
-
-                ano_int = int(ano)
-
-
-                if (
-                    1 <= dia_int <= 31
-                    and 1 <= mes_int <= 12
-                    and 1900 <= ano_int <= 2026
-                ):
-
-                    datas.append(
-                        (
-                            item["y"],
-                            f"{dia}/{mes}/{ano}"
-                        )
+            if data_valida(
+                valor
+            ):
+                datas.append(
+                    (
+                        item["y"],
+                        valor
                     )
-
-            except Exception:
-                pass
-
+                )
 
     if datas:
+        datas.sort(
+            key=lambda x: x[0]
+        )
 
-        datas.sort()
-
-        return datas[
-            0
-        ][1]
-
+        return datas[0][1]
 
     return ""
 
 
-# ============================================================
-# 15. ENCONTRAR CPF
-# ============================================================
-
-def encontrar_cpf(
-    itens
-):
-
-    # Primeiro procura linha explicitamente associada a CPF
+def encontrar_cpf_ocr(itens):
     for indice, item in enumerate(
         itens
     ):
-
         texto = normalizar_texto(
             item["texto"]
         )
 
-
         if "CPF" in texto:
-
-            numeros = somente_numeros(
+            numero = somente_numeros(
                 texto
             )
 
-
-            if len(numeros) == 11:
-
+            if len(numero) == 11:
                 return formatar_cpf(
-                    numeros
+                    numero
                 )
 
-
-            # Tenta próxima linha
-            if indice + 1 < len(
-                itens
-            ):
-
-                numeros = somente_numeros(
+            if indice + 1 < len(itens):
+                numero = somente_numeros(
                     itens[
                         indice + 1
                     ]["texto"]
                 )
 
-                if len(numeros) == 11:
-
+                if len(numero) == 11:
                     return formatar_cpf(
-                        numeros
+                        numero
                     )
-
-
-    # Segunda tentativa
-    for item in itens:
-
-        numeros = somente_numeros(
-            item["texto"]
-        )
-
-
-        if len(numeros) == 11:
-
-            return formatar_cpf(
-                numeros
-            )
-
 
     return ""
 
 
-# ============================================================
-# 16. VERIFICAR SE TEXTO PARECE NOME
-# ============================================================
-
-def parece_nome(
-    texto
-):
-
+def parece_nome_ocr(texto):
     texto = str(
         texto or ""
     ).strip()
 
-
     if not texto:
         return False
-
 
     if re.search(
         r"\d",
@@ -733,71 +920,49 @@ def parece_nome(
     ):
         return False
 
-
-    texto_upper = (
-        texto.upper()
+    texto_normalizado = normalizar_rotulo(
+        texto
     )
 
-
     ignorar = [
-
-        "REPÚBLICA",
         "REPUBLICA",
         "FEDERATIVA",
         "BRASIL",
-        "JUSTIÇA",
         "JUSTICA",
         "ELEITORAL",
-        "TÍTULO",
         "TITULO",
-        "IDENTIFICAÇÃO",
         "IDENTIFICACAO",
         "BIOMETRICA",
-        "BIOMÉTRICA",
-        "NOME DO ELEITOR",
         "NOMEDOELEITOR",
-        "DATA DE NASCIMENTO",
+        "NOME",
+        "DATADENASCIMENTO",
         "NASCIMENTO",
-        "INSCRIÇÃO",
         "INSCRICAO",
         "CPF",
         "RG",
         "ZONA",
-        "SEÇÃO",
         "SECAO",
         "MUNICIPIO",
-        "MUNICÍPIO",
-        "EMISSÃO",
         "EMISSAO",
-        "VALIDO SOMENTE",
-        "VÁLIDO SOMENTE",
-        "MARCA D'AGUA",
-        "MARCA D'ÁGUA",
-        "SECRETARIA",
-        "ESTADO",
-        "CARTEIRA",
-        "IDENTIDADE"
+        "VALIDOSOMENTE",
+        "MARCADAGUA",
+        "AUTENTICIDADE",
+        "DOCUMENTO",
+        "PODERA",
+        "CONFERIDA",
+        "ORIENTACOES"
     ]
 
-
     for termo in ignorar:
-
-        if termo in texto_upper:
-
+        if termo in texto_normalizado:
             return False
-
 
     palavras = texto.split()
 
-
     if not (
-        2 <= len(
-            palavras
-        ) <= 8
+        2 <= len(palavras) <= 8
     ):
-
         return False
-
 
     letras = re.sub(
         r"[^A-Za-zÀ-ÿ]",
@@ -805,110 +970,93 @@ def parece_nome(
         texto
     )
 
-
-    if len(
-        letras
-    ) < 8:
-
+    if len(letras) < 8:
         return False
-
 
     return True
 
 
-# ============================================================
-# 17. ENCONTRAR NOME
-# ============================================================
-
-def encontrar_nome(
-    itens
-):
-
-    # --------------------------------------------------------
-    # Procura rótulo NOME
-    # --------------------------------------------------------
+def encontrar_nome_ocr(itens):
+    # ========================================================
+    # PRIMEIRO: procura NOME DO ELEITOR
+    # ========================================================
 
     for indice, item in enumerate(
         itens
     ):
-
-        texto = normalizar_texto(
+        rotulo = normalizar_rotulo(
             item["texto"]
         )
 
-
-        texto_limpo = re.sub(
-            r"[^A-ZÀ-Ú]",
-            "",
-            texto
-        )
-
-
         if (
-            "NOMEDOELEITOR"
-            in texto_limpo
-            or texto_limpo
-            == "NOME"
+            "NOMEDOELEITOR" in rotulo
+            or rotulo == "NOME"
         ):
+            rotulo_y = item["y"]
 
-            for proximo in itens[
-                indice + 1:
-                indice + 6
-            ]:
+            candidatos = []
 
-                candidato = (
-                    proximo[
-                        "texto"
-                    ]
-                )
+            for outro in itens:
+                if outro is item:
+                    continue
 
+                candidato = outro[
+                    "texto"
+                ].strip()
 
-                if parece_nome(
+                if not parece_nome_ocr(
                     candidato
                 ):
+                    continue
 
-                    return (
-                        candidato
-                        .strip()
-                        .upper()
+                distancia_y = (
+                    outro["y"]
+                    - rotulo_y
+                )
+
+                # Nome deve estar logo abaixo do rótulo
+                if (
+                    0 < distancia_y <= 200
+                ):
+                    candidatos.append(
+                        (
+                            distancia_y,
+                            -outro["confianca"],
+                            candidato
+                        )
                     )
 
+            if candidatos:
+                candidatos.sort()
 
-    # --------------------------------------------------------
-    # Melhor candidato geral
-    # --------------------------------------------------------
+                return (
+                    candidatos[0][2]
+                    .strip()
+                    .upper()
+                )
+
+    # ========================================================
+    # FALLBACK
+    # ========================================================
 
     candidatos = []
 
-
     for item in itens:
+        candidato = item[
+            "texto"
+        ].strip()
 
-        candidato = (
-            item[
-                "texto"
-            ].strip()
-        )
-
-
-        if parece_nome(
+        if parece_nome_ocr(
             candidato
         ):
-
-            quantidade = len(
+            palavras = len(
                 candidato.split()
             )
 
-
             pontuacao = (
-                quantidade * 20
-                + len(candidato)
-                + (
-                    item[
-                        "confianca"
-                    ] * 10
-                )
+                palavras * 20
+                + item["confianca"] * 20
             )
-
 
             candidatos.append(
                 (
@@ -917,412 +1065,326 @@ def encontrar_nome(
                 )
             )
 
-
     if candidatos:
-
         candidatos.sort(
             reverse=True
         )
 
-        return candidatos[
-            0
-        ][1]
-
+        return candidatos[0][1]
 
     return ""
 
 
 # ============================================================
-# 18. ENCONTRAR ZONA E SEÇÃO
+# 15. ZONA E SEÇÃO DO OCR
 # ============================================================
 
-def encontrar_zona_secao(
+def encontrar_zona_secao_ocr(
     itens,
     titulo
 ):
-
     zona = ""
-
     secao = ""
 
-
-    item_zona = None
-
-    item_secao = None
-
-
-    # --------------------------------------------------------
-    # LOCALIZA OS RÓTULOS
-    # --------------------------------------------------------
+    item_titulo = None
 
     for item in itens:
+        if somente_numeros(
+            item["texto"]
+        ) == titulo:
+            item_titulo = item
+            break
 
-        texto = normalizar_texto(
+    # ========================================================
+    # PROCURA OS RÓTULOS
+    # ========================================================
+
+    rotulo_zona = None
+    rotulo_secao = None
+
+    for item in itens:
+        rotulo = normalizar_rotulo(
             item["texto"]
         )
 
+        if rotulo == "ZONA":
+            rotulo_zona = item
 
-        texto_limpo = re.sub(
-            r"[^A-ZÀ-Ú]",
-            "",
-            texto
-        )
+        if rotulo == "SECAO":
+            rotulo_secao = item
 
+    # ========================================================
+    # VALOR MAIS PRÓXIMO ABAIXO DE CADA RÓTULO
+    # ========================================================
 
-        if texto_limpo == "ZONA":
-
-            item_zona = item
-
-
-        if texto_limpo in [
-            "SECAO",
-            "SEÇÃO"
-        ]:
-
-            item_secao = item
-
-
-    # --------------------------------------------------------
-    # FUNÇÃO PARA ACHAR VALOR ABAIXO DO RÓTULO
-    # --------------------------------------------------------
-
-    def numero_proximo(
+    def procurar_valor(
         rotulo,
         max_digitos
     ):
-
-        if not rotulo:
+        if rotulo is None:
             return ""
-
 
         candidatos = []
 
-
         for item in itens:
-
             if item is rotulo:
                 continue
 
+            texto = item["texto"]
+
+            # Não considera datas
+            if re.search(
+                r"\d{2}[\/.\-]\d{2}[\/.\-]\d{4}",
+                texto
+            ):
+                continue
+
+            numero = somente_numeros(
+                texto
+            )
+
+            if not (
+                1 <= len(numero) <= max_digitos
+            ):
+                continue
+
+            if numero == titulo:
+                continue
+
+            dy = (
+                item["y"]
+                - rotulo["y"]
+            )
+
+            dx = abs(
+                item["x"]
+                - rotulo["x"]
+            )
+
+            # Valor deve estar abaixo ou praticamente
+            # na mesma altura do rótulo.
+            if not (
+                0 < dy <= 180
+            ):
+                continue
+
+            # E alinhado horizontalmente.
+            if dx > 150:
+                continue
+
+            candidatos.append(
+                (
+                    dx * 4 + dy,
+                    -item["confianca"],
+                    numero
+                )
+            )
+
+        if candidatos:
+            candidatos.sort()
+
+            return candidatos[0][2]
+
+        return ""
+
+    zona = procurar_valor(
+        rotulo_zona,
+        3
+    )
+
+    secao = procurar_valor(
+        rotulo_secao,
+        4
+    )
+
+    # ========================================================
+    # FALLBACK ESPACIAL DO TÍTULO ELEITORAL
+    #
+    # Na linha:
+    #
+    # nascimento | título | zona | seção
+    #
+    # o título, zona e seção ficam praticamente
+    # na mesma altura.
+    # ========================================================
+
+    if item_titulo:
+        candidatos_direita = []
+
+        for item in itens:
+            if item is item_titulo:
+                continue
 
             numero = somente_numeros(
                 item["texto"]
             )
 
-
-            if not numero:
-                continue
-
-
-            if numero == titulo:
-                continue
-
-
             if not (
-                1 <= len(
-                    numero
-                ) <= max_digitos
+                1 <= len(numero) <= 4
             ):
-
                 continue
 
-
-            # Deve estar abaixo
-            if (
-                item["y"]
-                <= rotulo["y"]
+            if re.search(
+                r"\d{2}[\/.\-]\d{2}[\/.\-]\d{4}",
+                item["texto"]
             ):
-
                 continue
 
-
-            distancia_y = (
-                item["y"]
-                - rotulo["y"]
-            )
-
-
-            distancia_x = abs(
+            dx = (
                 item["x"]
-                - rotulo["x"]
+                - item_titulo["x"]
             )
 
-
-            # Damos muito mais peso
-            # à distância horizontal
-            pontuacao = (
-                distancia_y
-                + (
-                    distancia_x
-                    * 3
-                )
+            dy = abs(
+                item["y"]
+                - item_titulo["y"]
             )
 
-
-            if distancia_y <= 300:
-
-                candidatos.append(
+            if (
+                dx > 0
+                and dy <= 100
+            ):
+                candidatos_direita.append(
                     (
-                        pontuacao,
-                        numero
+                        item["x"],
+                        numero,
+                        item["confianca"]
                     )
                 )
 
+        candidatos_direita.sort(
+            key=lambda x: x[0]
+        )
 
-        if candidatos:
-
-            candidatos.sort()
-
-            return candidatos[
+        # Primeiro número à direita = zona
+        if (
+            not zona
+            and len(candidatos_direita) >= 1
+        ):
+            zona = candidatos_direita[
                 0
             ][1]
 
+        # Segundo número à direita = seção
+        if (
+            not secao
+            and len(candidatos_direita) >= 2
+        ):
+            secao = candidatos_direita[
+                1
+            ][1]
 
-        return ""
+    if zona:
+        zona = zona.zfill(3)
 
+    if secao:
+        secao = secao.zfill(4)
 
-    zona = numero_proximo(
-        item_zona,
-        3
-    )
-
-
-    secao = numero_proximo(
-        item_secao,
-        4
-    )
-
-
-    # --------------------------------------------------------
-    # FALLBACK ESPECÍFICO PARA TÍTULO ELEITORAL
-    # --------------------------------------------------------
-
-    if (
-        not zona
-        or not secao
-    ):
-
-        item_titulo = None
-
-
-        for item in itens:
-
-            if (
-                somente_numeros(
-                    item["texto"]
-                )
-                == titulo
-            ):
-
-                item_titulo = item
-
-                break
-
-
-        if item_titulo:
-
-            numeros = []
-
-
-            for item in itens:
-
-                numero = somente_numeros(
-                    item["texto"]
-                )
-
-
-                if not numero:
-                    continue
-
-
-                if numero == titulo:
-                    continue
-
-
-                # Somente itens aproximadamente
-                # na mesma linha do título ou logo abaixo
-                distancia_y = abs(
-                    item["y"]
-                    - item_titulo["y"]
-                )
-
-
-                if distancia_y > 180:
-                    continue
-
-
-                if not (
-                    1 <= len(numero) <= 4
-                ):
-                    continue
-
-
-                numeros.append(
-                    (
-                        item["x"],
-                        numero
-                    )
-                )
-
-
-            numeros.sort(
-                key=lambda x: x[0]
-            )
-
-
-            # No título eleitoral:
-            # título -> zona -> seção
-            posteriores = [
-                numero
-                for x, numero in numeros
-                if x > item_titulo["x"]
-            ]
-
-
-            if (
-                not zona
-                and len(
-                    posteriores
-                ) >= 1
-            ):
-
-                zona = posteriores[
-                    0
-                ]
-
-
-            if (
-                not secao
-                and len(
-                    posteriores
-                ) >= 2
-            ):
-
-                secao = posteriores[
-                    1
-                ]
-
-
-    return (
-        zona,
-        secao
-    )
+    return zona, secao
 
 
 # ============================================================
-# 19. EXTRAIR DADOS
+# 16. EXTRAIR DADOS OCR
 # ============================================================
 
-def extrair_dados(
+def extrair_dados_ocr(
     texto,
     itens
 ):
-
-    titulo = encontrar_titulo(
+    titulo = encontrar_titulo_ocr(
         itens
     )
 
-
-    nome = encontrar_nome(
+    nome = encontrar_nome_ocr(
         itens
     )
 
-
-    cpf = encontrar_cpf(
+    cpf = encontrar_cpf_ocr(
         itens
     )
 
-
-    nascimento = (
-        encontrar_nascimento(
-            itens
-        )
+    nascimento = encontrar_nascimento_ocr(
+        itens
     )
 
-
-    zona, secao = (
-        encontrar_zona_secao(
-            itens,
-            titulo
-        )
+    zona, secao = encontrar_zona_secao_ocr(
+        itens,
+        titulo
     )
-
 
     return {
-
-        "nome":
-            nome,
-
-        "cpf":
-            cpf,
-
-        "titulo":
-            titulo,
-
-        "data_nascimento":
-            nascimento,
-
-        "zona":
-            zona,
-
-        "secao":
-            secao
+        "nome": nome,
+        "cpf": cpf,
+        "titulo": titulo,
+        "data_nascimento": nascimento,
+        "zona": zona,
+        "secao": secao
     }
 
 
 # ============================================================
-# 20. CARREGAR BASE DO SHEETS
+# 17. EXTRAÇÃO GERAL
+# ============================================================
+
+def extrair_dados(
+    texto,
+    itens,
+    tipo_leitura
+):
+    if tipo_leitura == "PDF — texto digital":
+        return extrair_dados_pdf_digital(
+            texto
+        )
+
+    return extrair_dados_ocr(
+        texto,
+        itens
+    )
+
+
+# ============================================================
+# 18. CARREGAR BASE DO SHEETS
 # ============================================================
 
 @st.cache_data(ttl=60)
 def carregar_base():
-
     try:
-
         resposta = requests.get(
             WEBHOOK_URL,
             timeout=10
         )
 
-
         if resposta.status_code != 200:
-
             return []
 
-
         dados = resposta.json()
-
 
         if isinstance(
             dados,
             list
         ):
-
             return dados
-
 
     except Exception:
         pass
-
 
     return []
 
 
 # ============================================================
-# 21. VERIFICAR DUPLICIDADE
+# 19. VERIFICAR DUPLICIDADE
 # ============================================================
 
 def verificar_duplicidade(
     dados,
     base
 ):
-
     titulo_novo = somente_numeros(
         dados.get(
             "titulo",
             ""
         )
     )
-
 
     cpf_novo = somente_numeros(
         dados.get(
@@ -1331,28 +1393,20 @@ def verificar_duplicidade(
         )
     )
 
-
     for pessoa in base:
-
-        titulo_existente = (
-            somente_numeros(
-                pessoa.get(
-                    "titulo",
-                    ""
-                )
+        titulo_existente = somente_numeros(
+            pessoa.get(
+                "titulo",
+                ""
             )
         )
 
-
-        cpf_existente = (
-            somente_numeros(
-                pessoa.get(
-                    "cpf",
-                    ""
-                )
+        cpf_existente = somente_numeros(
+            pessoa.get(
+                "cpf",
+                ""
             )
         )
-
 
         if (
             titulo_novo
@@ -1360,56 +1414,38 @@ def verificar_duplicidade(
             and titulo_novo.lstrip("0")
             == titulo_existente.lstrip("0")
         ):
-
-            return (
-                True,
-                pessoa
-            )
-
+            return True, pessoa
 
         if (
             cpf_novo
             and cpf_existente
-            and cpf_novo
-            == cpf_existente
+            and cpf_novo == cpf_existente
         ):
+            return True, pessoa
 
-            return (
-                True,
-                pessoa
-            )
-
-
-    return (
-        False,
-        None
-    )
+    return False, None
 
 
 # ============================================================
-# 22. SUPERVISORES
+# 20. SUPERVISORES
 # ============================================================
 
 def obter_supervisores(
     base
 ):
-
     supervisores = []
 
     subs = [
         "SEM SUBSUPERVISOR"
     ]
 
-
     for item in base:
-
         sup = str(
             item.get(
                 "supervisor",
                 ""
             )
         ).strip().upper()
-
 
         sub = str(
             item.get(
@@ -1418,41 +1454,55 @@ def obter_supervisores(
             )
         ).strip().upper()
 
-
         if (
             sup
-            and sup
-            not in supervisores
+            and sup not in supervisores
         ):
-
             supervisores.append(
                 sup
             )
 
-
         if (
             sub
-            and sub
-            not in subs
+            and sub not in subs
         ):
-
             subs.append(
                 sub
             )
 
-
     return (
-        sorted(
-            supervisores
-        ),
-        sorted(
-            subs
-        )
+        sorted(supervisores),
+        sorted(subs)
     )
 
 
 # ============================================================
-# 23. CABEÇALHO
+# 21. CLASSIFICAR LEITURA
+# ============================================================
+
+def classificar_resultado(
+    dados,
+    duplicado
+):
+    if duplicado:
+        return "⚠️ JÁ CADASTRADO"
+
+    # Para considerar novo, pelo menos:
+    # nome + título OU nome + CPF.
+    if not dados["nome"]:
+        return "❌ CONFERIR"
+
+    if (
+        not dados["titulo"]
+        and not dados["cpf"]
+    ):
+        return "❌ CONFERIR"
+
+    return "✅ NOVO"
+
+
+# ============================================================
+# 22. CABEÇALHO
 # ============================================================
 
 st.title(
@@ -1467,29 +1517,24 @@ st.markdown("---")
 
 
 # ============================================================
-# 24. BASE
+# 23. BASE
 # ============================================================
 
 base = carregar_base()
 
-
-lista_sup, lista_sub = (
-    obter_supervisores(
-        base
-    )
+lista_sup, lista_sub = obter_supervisores(
+    base
 )
 
 
 # ============================================================
-# 25. SIDEBAR
+# 24. SIDEBAR
 # ============================================================
 
 with st.sidebar:
-
     st.header(
         "⚙️ Configuração"
     )
-
 
     sup_opcao = st.selectbox(
         "Supervisor",
@@ -1499,22 +1544,16 @@ with st.sidebar:
         ]
     )
 
-
     if (
         sup_opcao
         == "➕ Cadastrar Novo Supervisor"
     ):
-
-        supervisor = (
-            st.text_input(
-                "Novo Supervisor"
-            ).upper()
-        )
+        supervisor = st.text_input(
+            "Novo Supervisor"
+        ).upper()
 
     else:
-
         supervisor = sup_opcao
-
 
     sub_opcao = st.selectbox(
         "Subsupervisor",
@@ -1524,25 +1563,18 @@ with st.sidebar:
         ]
     )
 
-
     if (
         sub_opcao
         == "➕ Cadastrar Novo Sub"
     ):
-
-        sub = (
-            st.text_input(
-                "Novo Sub"
-            ).upper()
-        )
+        sub = st.text_input(
+            "Novo Sub"
+        ).upper()
 
     else:
-
         sub = sub_opcao
 
-
     st.markdown("---")
-
 
     menu = st.radio(
         "Escolha a Operação:",
@@ -1554,21 +1586,18 @@ with st.sidebar:
 
 
 # ============================================================
-# 26. ENVIO EM LOTE
+# 25. ENVIO DE DOCUMENTOS
 # ============================================================
 
 if menu == "📸 Envio de Documentos":
-
     st.subheader(
         "📁 Processamento de Documentos"
     )
-
 
     st.caption(
         f"Supervisor: {supervisor} | "
         f"Subsupervisor: {sub}"
     )
-
 
     arquivos = st.file_uploader(
         "Selecione fotos ou PDFs",
@@ -1581,301 +1610,162 @@ if menu == "📸 Envio de Documentos":
         ]
     )
 
-
     if arquivos:
-
         st.info(
             f"{len(arquivos)} arquivo(s) selecionado(s). "
-            "Os documentos serão processados "
-            "individualmente para reduzir o uso de memória."
+            "Cada documento será processado individualmente."
         )
-
 
         if st.button(
             "🔎 Processar Lote"
         ):
-
             resultados = []
-
-
-            # ================================================
-            # CARREGA OCR UMA VEZ
-            # ================================================
-
-            with st.spinner(
-                "Preparando leitor de documentos..."
-            ):
-
-                try:
-
-                    leitor = carregar_ocr()
-
-                except Exception as erro:
-
-                    st.error(
-                        "Não foi possível inicializar "
-                        "o OCR."
-                    )
-
-                    st.exception(
-                        erro
-                    )
-
-                    st.stop()
-
 
             total = len(
                 arquivos
             )
 
-
             barra = st.progress(
                 0
             )
 
-
             status_area = st.empty()
-
-
-            # ================================================
-            # PROCESSAMENTO UM POR UM
-            # ================================================
 
             for indice, arquivo in enumerate(
                 arquivos
             ):
-
                 status_area.info(
                     f"Processando "
                     f"{indice + 1} de {total}: "
                     f"{arquivo.name}"
                 )
 
-
                 try:
-
-                    texto, itens, tipo = (
-                        ler_documento(
-                            arquivo,
-                            leitor
-                        )
-                    )
-
-
-                    dados = (
-                        extrair_dados(
-                            texto,
-                            itens
-                        )
-                    )
-
-
-                    duplicado, existente = (
-                        verificar_duplicidade(
-                            dados,
-                            base
-                        )
-                    )
-
-
                     # ========================================
-                    # CLASSIFICA RESULTADO
+                    # AQUI CADA ARQUIVO DECIDE
+                    # SE PRECISA OU NÃO DE OCR
                     # ========================================
 
-                    if duplicado:
+                    texto, itens, tipo = ler_documento(
+                        arquivo
+                    )
 
-                        resultado = (
-                            "⚠️ JÁ CADASTRADO"
-                        )
+                    dados = extrair_dados(
+                        texto,
+                        itens,
+                        tipo
+                    )
 
-                        existente_nome = (
+                    duplicado, existente = verificar_duplicidade(
+                        dados,
+                        base
+                    )
+
+                    resultado = classificar_resultado(
+                        dados,
+                        duplicado
+                    )
+
+                    existente_nome = ""
+                    existente_sup = ""
+
+                    if duplicado and existente:
+                        existente_nome = str(
                             existente.get(
                                 "nome",
                                 ""
                             )
                         )
 
-                        existente_sup = (
+                        existente_sup = str(
                             existente.get(
                                 "supervisor",
                                 ""
                             )
                         )
 
-
-                    elif (
-                        not dados["nome"]
-                        or (
-                            not dados["titulo"]
-                            and not dados["cpf"]
-                        )
-                    ):
-
-                        resultado = (
-                            "❌ CONFERIR"
-                        )
-
-                        existente_nome = ""
-
-                        existente_sup = ""
-
-
-                    else:
-
-                        resultado = (
-                            "✅ NOVO"
-                        )
-
-                        existente_nome = ""
-
-                        existente_sup = ""
-
-
                     resultados.append(
                         {
-                            "Arquivo":
-                                arquivo.name,
-
-                            "Nome":
-                                dados["nome"],
-
-                            "CPF":
-                                dados["cpf"],
-
-                            "Título":
-                                dados["titulo"],
-
-                            "Nascimento":
-                                dados[
-                                    "data_nascimento"
-                                ],
-
-                            "Zona":
-                                dados["zona"],
-
-                            "Seção":
-                                dados["secao"],
-
-                            "Leitura":
-                                tipo,
-
-                            "Resultado":
-                                resultado,
-
-                            "Já cadastrado como":
-                                existente_nome,
-
-                            "Supervisor atual":
-                                existente_sup
+                            "Arquivo": arquivo.name,
+                            "Nome": dados["nome"],
+                            "CPF": dados["cpf"],
+                            "Título": dados["titulo"],
+                            "Nascimento": dados[
+                                "data_nascimento"
+                            ],
+                            "Zona": dados["zona"],
+                            "Seção": dados["secao"],
+                            "Leitura": tipo,
+                            "Resultado": resultado,
+                            "Já cadastrado como": existente_nome,
+                            "Supervisor atual": existente_sup
                         }
                     )
 
-
-                    # Libera dados intermediários
                     del texto
-
                     del itens
 
                     gc.collect()
 
-
                 except Exception as erro:
-
                     resultados.append(
                         {
-                            "Arquivo":
-                                arquivo.name,
-
-                            "Nome":
-                                "",
-
-                            "CPF":
-                                "",
-
-                            "Título":
-                                "",
-
-                            "Nascimento":
-                                "",
-
-                            "Zona":
-                                "",
-
-                            "Seção":
-                                "",
-
-                            "Leitura":
-                                "",
-
-                            "Resultado":
-                                "❌ ERRO",
-
-                            "Já cadastrado como":
-                                "",
-
-                            "Supervisor atual":
-                                ""
+                            "Arquivo": arquivo.name,
+                            "Nome": "",
+                            "CPF": "",
+                            "Título": "",
+                            "Nascimento": "",
+                            "Zona": "",
+                            "Seção": "",
+                            "Leitura": "",
+                            "Resultado": "❌ ERRO",
+                            "Já cadastrado como": "",
+                            "Supervisor atual": ""
                         }
                     )
 
+                    st.error(
+                        f"Erro em {arquivo.name}: {erro}"
+                    )
 
                 barra.progress(
-                    (
-                        indice + 1
-                    )
-                    / total
+                    (indice + 1) / total
                 )
 
-
                 gc.collect()
-
-
-            # ================================================
-            # TERMINOU
-            # ================================================
 
             status_area.success(
                 "Processamento concluído."
             )
 
-
             st.session_state[
                 "resultado_lote"
             ] = resultados
 
-
-# ============================================================
-# 27. RESULTADO DO LOTE
-# ============================================================
+    # ========================================================
+    # RESULTADO
+    # ========================================================
 
     if (
         "resultado_lote"
         in st.session_state
     ):
-
-        resultados = (
-            st.session_state[
-                "resultado_lote"
-            ]
-        )
-
+        resultados = st.session_state[
+            "resultado_lote"
+        ]
 
         if resultados:
-
             st.markdown("---")
 
             st.subheader(
                 "📊 Resultado do Lote"
             )
 
-
             novos = sum(
                 1
                 for r in resultados
-                if r["Resultado"]
-                == "✅ NOVO"
+                if r["Resultado"] == "✅ NOVO"
             )
-
 
             duplicados = sum(
                 1
@@ -1883,7 +1773,6 @@ if menu == "📸 Envio de Documentos":
                 if r["Resultado"]
                 == "⚠️ JÁ CADASTRADO"
             )
-
 
             conferir = sum(
                 1
@@ -1895,36 +1784,28 @@ if menu == "📸 Envio de Documentos":
                 ]
             )
 
-
-            col1, col2, col3 = (
-                st.columns(3)
+            col1, col2, col3 = st.columns(
+                3
             )
-
 
             col1.metric(
                 "Novos",
                 novos
             )
 
-
             col2.metric(
                 "Já cadastrados",
                 duplicados
             )
-
 
             col3.metric(
                 "Conferir",
                 conferir
             )
 
-
-            df_resultados = (
-                pd.DataFrame(
-                    resultados
-                )
+            df_resultados = pd.DataFrame(
+                resultados
             )
-
 
             st.dataframe(
                 df_resultados,
@@ -1932,111 +1813,78 @@ if menu == "📸 Envio de Documentos":
                 hide_index=True
             )
 
-
             st.caption(
-                "ℹ️ Nesta etapa o sistema apenas "
-                "confere os documentos. "
-                "Nenhum cadastro do lote foi gravado "
-                "automaticamente."
+                "ℹ️ Nenhum cadastro do lote "
+                "foi gravado automaticamente."
             )
 
 
 # ============================================================
-# 28. FORMULÁRIO MANUAL
+# 26. FORMULÁRIO MANUAL
 # ============================================================
 
 elif menu == "✍️ Formulário Manual":
-
     st.subheader(
         "✍️ Consulta & Cadastro Manual"
     )
-
 
     if (
         "busca_realizada"
         not in st.session_state
     ):
-
         st.session_state.update(
             {
-                "busca_realizada":
-                    False,
-
-                "titulo":
-                    "",
-
-                "encontrado":
-                    None
+                "busca_realizada": False,
+                "titulo": "",
+                "encontrado": None
             }
         )
-
 
     titulo_input = st.text_input(
         "Título de Eleitor:",
         value=st.session_state.titulo
     )
 
-
     if st.button(
         "🔍 Pesquisar"
     ):
-
         st.session_state.titulo = (
             titulo_input
         )
 
-
-        titulo_pesquisado = (
-            somente_numeros(
-                titulo_input
-            ).lstrip("0")
-        )
-
+        titulo_pesquisado = somente_numeros(
+            titulo_input
+        ).lstrip("0")
 
         encontrado = None
 
-
         for pessoa in base:
-
-            titulo_base = (
-                somente_numeros(
-                    pessoa.get(
-                        "titulo",
-                        ""
-                    )
-                ).lstrip("0")
-            )
-
+            titulo_base = somente_numeros(
+                pessoa.get(
+                    "titulo",
+                    ""
+                )
+            ).lstrip("0")
 
             if (
                 titulo_pesquisado
                 and titulo_base
                 == titulo_pesquisado
             ):
-
                 encontrado = pessoa
-
                 break
-
 
         st.session_state.encontrado = (
             encontrado
         )
 
-
         st.session_state.busca_realizada = (
             True
         )
 
-
     if st.session_state.busca_realizada:
-
         if st.session_state.encontrado:
-
-            e = (
-                st.session_state.encontrado
-            )
-
+            e = st.session_state.encontrado
 
             st.error(
                 f"⚠️ Já cadastrado: "
@@ -2045,11 +1893,9 @@ elif menu == "✍️ Formulário Manual":
                 f"{e.get('supervisor')}"
             )
 
-
             if st.button(
                 "Limpar"
             ):
-
                 st.session_state.busca_realizada = (
                     False
                 )
@@ -2058,96 +1904,66 @@ elif menu == "✍️ Formulário Manual":
                     None
                 )
 
-                st.session_state.titulo = (
-                    ""
-                )
+                st.session_state.titulo = ""
 
                 st.rerun()
 
-
         else:
-
             st.success(
                 "Título não localizado na base. "
                 "O cadastro pode ser realizado."
             )
 
-
             with st.form(
                 "cadastro_manual"
             ):
-
                 nome = st.text_input(
                     "Nome *"
                 )
 
-
                 cpf = st.text_input(
                     "CPF"
                 )
-
 
                 data_nasc = st.text_input(
                     "Data de Nascimento "
                     "(DD/MM/AAAA)"
                 )
 
-
-                salvar = (
-                    st.form_submit_button(
-                        "💾 Salvar"
-                    )
+                salvar = st.form_submit_button(
+                    "💾 Salvar"
                 )
 
-
                 if salvar:
-
                     if not nome:
-
                         st.error(
                             "Informe o nome."
                         )
 
-
                     else:
-
                         payload = {
-
                             "titulo":
                                 st.session_state.titulo,
-
                             "nome":
                                 nome,
-
                             "cpf":
                                 cpf,
-
                             "data_nascimento":
                                 data_nasc,
-
                             "supervisor":
                                 supervisor,
-
                             "subsupervisor":
                                 sub
                         }
 
-
                         try:
-
-                            resposta = (
-                                requests.post(
-                                    WEBHOOK_URL,
-                                    json=payload,
-                                    timeout=30
-                                )
+                            resposta = requests.post(
+                                WEBHOOK_URL,
+                                json=payload,
+                                timeout=30
                             )
 
-
-                            resultado = (
-                                resposta.json()
-                            )
-
+                            resultado = resposta.json()
 
                             if (
                                 resultado.get(
@@ -2155,35 +1971,25 @@ elif menu == "✍️ Formulário Manual":
                                 )
                                 == "SUCESSO"
                             ):
-
                                 st.success(
                                     "Salvo com sucesso!"
                                 )
 
-
                                 st.cache_data.clear()
-
 
                                 st.session_state.busca_realizada = (
                                     False
                                 )
 
-
                                 st.session_state.encontrado = (
                                     None
                                 )
 
-
-                                st.session_state.titulo = (
-                                    ""
-                                )
-
+                                st.session_state.titulo = ""
 
                                 st.rerun()
 
-
                             else:
-
                                 st.error(
                                     resultado.get(
                                         "mensagem",
@@ -2191,9 +1997,7 @@ elif menu == "✍️ Formulário Manual":
                                     )
                                 )
 
-
                         except Exception as erro:
-
                             st.error(
                                 f"Erro ao salvar: {erro}"
                             )
