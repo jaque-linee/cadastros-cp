@@ -6,3 +6,4 @@ paddlepaddle
 Pillow
 PyMuPDF
 opencv-python-headless
+numpy
