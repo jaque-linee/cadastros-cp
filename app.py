@@ -970,71 +970,180 @@ def extrair_dados_pdf_digital(texto):
 
     # ========================================================
     # 5. ZONA E SEÇÃO
-    #
-    # Lê cada campo pelo seu próprio rótulo.
-    # Não tenta deduzir pela ordem de números do documento.
     # ========================================================
 
     if eh_titulo:
+        zona_encontrada = ""
+        secao_encontrada = ""
 
-        # -------------------------
+        # ----------------------------------------------------
+        # PRIMEIRA TENTATIVA:
+        # procura ZONA e SEÇÃO explicitamente no texto,
+        # inclusive quando rótulo e valor estão na mesma linha.
+        # ----------------------------------------------------
+
+        for linha in linhas:
+            linha_sem_acento = remover_acentos(
+                linha
+            ).upper()
+
+            match_zona = re.search(
+                r"\bZONA\b\s*[:\-]?\s*(\d{1,3})\b",
+                linha_sem_acento
+            )
+
+            if match_zona:
+                zona_encontrada = (
+                    match_zona.group(1).zfill(3)
+                )
+
+            match_secao = re.search(
+                r"\bSECAO\b\s*[:\-]?\s*(\d{1,4})\b",
+                linha_sem_acento
+            )
+
+            if match_secao:
+                secao_encontrada = (
+                    match_secao.group(1).zfill(4)
+                )
+
+        # ----------------------------------------------------
+        # SEGUNDA TENTATIVA:
+        # quando os rótulos aparecem numa linha e os valores
+        # aparecem juntos na linha seguinte.
+        #
+        # Exemplo estrutural:
+        #
+        # ZONA    SEÇÃO
+        # 055     0277
+        # ----------------------------------------------------
+
+        if not zona_encontrada or not secao_encontrada:
+
+            for i, linha in enumerate(linhas):
+                linha_norm = remover_acentos(
+                    linha
+                ).upper()
+
+                tem_zona = (
+                    re.search(
+                        r"\bZONA\b",
+                        linha_norm
+                    )
+                    is not None
+                )
+
+                tem_secao = (
+                    re.search(
+                        r"\bSECAO\b",
+                        linha_norm
+                    )
+                    is not None
+                )
+
+                if tem_zona and tem_secao:
+
+                    for deslocamento in (1, 2):
+                        pos = i + deslocamento
+
+                        if pos >= len(linhas):
+                            continue
+
+                        numeros = re.findall(
+                            r"\b\d{1,4}\b",
+                            linhas[pos]
+                        )
+
+                        if len(numeros) >= 2:
+
+                            if not zona_encontrada:
+                                zona_encontrada = (
+                                    numeros[0].zfill(3)
+                                )
+
+                            if not secao_encontrada:
+                                secao_encontrada = (
+                                    numeros[1].zfill(4)
+                                )
+
+                            break
+
+        # ----------------------------------------------------
+        # TERCEIRA TENTATIVA:
+        # rótulos e valores foram separados em linhas pelo PDF.
+        #
         # ZONA
-        # -------------------------
-
-        for i, linha in enumerate(linhas):
-            rotulo = normalizar_rotulo(linha)
-
-            if rotulo == "ZONA":
-                candidatos = []
-
-                # Pode estar na própria linha
-                numero_propria = somente_numeros(linha)
-
-                if numero_propria and len(numero_propria) <= 3:
-                    candidatos.append(numero_propria)
-
-                # Ou imediatamente depois
-                for deslocamento in (1, 2):
-                    pos = i + deslocamento
-
-                    if pos < len(linhas):
-                        numero = somente_numeros(linhas[pos])
-
-                        if 1 <= len(numero) <= 3:
-                            candidatos.append(numero)
-
-                if candidatos:
-                    dados["zona"] = candidatos[0].zfill(3)
-                    break
-
-        # -------------------------
         # SEÇÃO
-        # -------------------------
+        # 055
+        # 0277
+        # ----------------------------------------------------
 
-        for i, linha in enumerate(linhas):
-            rotulo = normalizar_rotulo(linha)
+        if not zona_encontrada or not secao_encontrada:
 
-            if rotulo == "SECAO":
-                candidatos = []
+            for i, linha in enumerate(linhas):
+                rotulo = normalizar_rotulo(
+                    linha
+                )
 
-                numero_propria = somente_numeros(linha)
+                if rotulo == "ZONA":
 
-                if numero_propria and len(numero_propria) <= 4:
-                    candidatos.append(numero_propria)
+                    numeros_proximos = []
 
-                for deslocamento in (1, 2):
-                    pos = i + deslocamento
+                    for deslocamento in range(1, 5):
+                        pos = i + deslocamento
 
-                    if pos < len(linhas):
-                        numero = somente_numeros(linhas[pos])
+                        if pos >= len(linhas):
+                            break
 
-                        if 1 <= len(numero) <= 4:
-                            candidatos.append(numero)
+                        candidato = linhas[pos]
 
-                if candidatos:
-                    dados["secao"] = candidatos[0].zfill(4)
-                    break
+                        numero = somente_numeros(
+                            candidato
+                        )
 
+                        if (
+                            numero
+                            and len(numero) <= 4
+                            and not re.search(
+                                r"[A-Za-zÀ-ÿ]",
+                                candidato
+                            )
+                        ):
+                            numeros_proximos.append(
+                                numero
+                            )
+
+                    if numeros_proximos:
+
+                        if not zona_encontrada:
+                            primeiro = numeros_proximos[0]
+
+                            if len(primeiro) <= 3:
+                                zona_encontrada = (
+                                    primeiro.zfill(3)
+                                )
+
+                        if (
+                            not secao_encontrada
+                            and len(numeros_proximos) >= 2
+                        ):
+                            segundo = numeros_proximos[1]
+
+                            if len(segundo) <= 4:
+                                secao_encontrada = (
+                                    segundo.zfill(4)
+                                )
+
+        # ----------------------------------------------------
+        # SÓ GRAVA SE REALMENTE ENCONTROU.
+        # Não inventa valores nem usa números aleatórios.
+        # ----------------------------------------------------
+
+        if zona_encontrada:
+            dados["zona"] = zona_encontrada
+
+        if secao_encontrada:
+            dados["secao"] = secao_encontrada
     # ========================================================
     # 6. NOME DA MÃE
     # ========================================================
