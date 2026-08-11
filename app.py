@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageOps
 import fitz
+from sheets import carregar_base, procurar_duplicidade, salvar_cadastro
 
 
 # ============================================================
