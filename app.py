@@ -2599,6 +2599,9 @@ if menu == "📸 Envio de Documentos":
         f"Comunidade: {comunidade or 'NÃO INFORMADA'}"
     )
 
+    if "lote_upload_id" not in st.session_state:
+        st.session_state["lote_upload_id"] = 0
+
     arquivos = st.file_uploader(
         "Selecione fotos ou PDFs",
         accept_multiple_files=True,
@@ -2607,7 +2610,8 @@ if menu == "📸 Envio de Documentos":
             "jpg",
             "jpeg",
             "png"
-        ]
+        ],
+        key=f"arquivos_lote_{st.session_state['lote_upload_id']}"
     )
 
     if arquivos:
@@ -2912,10 +2916,6 @@ if menu == "📸 Envio de Documentos":
                 "---"
             )
 
-            st.subheader(
-                "📊 Resultado do Lote"
-            )
-
             completos = sum(
                 1
                 for r in resultados
@@ -2934,25 +2934,6 @@ if menu == "📸 Envio de Documentos":
                 len(resultados)
                 - completos
                 - duplicados
-            )
-
-            col1, col2, col3 = st.columns(
-                3
-            )
-
-            col1.metric(
-                "Completos",
-                completos
-            )
-
-            col2.metric(
-                "Já cadastrados",
-                duplicados
-            )
-
-            col3.metric(
-                "Conferir",
-                conferir
             )
 
             # ====================================================
@@ -3264,6 +3245,25 @@ if menu == "📸 Envio de Documentos":
                 "ℹ️ Completo = Nome + Nascimento + Nome da mãe + "
                 "CPF ou Título. Nenhum cadastro é gravado automaticamente."
             )
+
+            if st.button(
+                "🧹 Finalizar lote / Novo lote",
+                use_container_width=True
+            ):
+                st.session_state.pop("resultado_lote", None)
+
+                # Remove apenas estados temporários dos campos do lote atual.
+                for chave in list(st.session_state.keys()):
+                    if (
+                        str(chave).startswith("mae_compacta_")
+                        or str(chave).startswith("telefone_compacto_")
+                    ):
+                        del st.session_state[chave]
+
+                # Trocar a chave do uploader faz o Streamlit limpar
+                # todos os arquivos selecionados de uma vez.
+                st.session_state["lote_upload_id"] += 1
+                st.rerun()
 
 
 # ============================================================
