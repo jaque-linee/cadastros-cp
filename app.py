@@ -766,6 +766,97 @@ def extrair_dados_tesseract(texto, imagem_original=None):
     return dados
 
 
+def extrair_titulo_eleitoral_especializado(texto):
+    """
+    Complemento exclusivo para TÍTULO ELEITORAL fotografado.
+    Não altera a leitura dos demais tipos de documento.
+    """
+    bruto = str(texto or "")
+    norm = remover_acentos(bruto).upper()
+
+    # Só entra nesta regra quando o próprio OCR reconhece o documento eleitoral.
+    if not (
+        "TITULO ELEITORAL" in norm
+        or (
+            "JUSTICA ELEITORAL" in norm
+            and (
+                "INSCRICAO" in norm
+                or "NOME DO ELEITOR" in norm
+            )
+        )
+    ):
+        return {}
+
+    resultado = {}
+    linhas = linhas_texto(bruto)
+
+    # Nome: procura a linha imediatamente associada a NOME DO ELEITOR.
+    for i, linha in enumerate(linhas):
+        rot = normalizar_rotulo(linha)
+        if "NOMEDOELEITOR" in rot:
+            candidatos = [linha]
+            candidatos.extend(linhas[i + 1:i + 3])
+            for cand in candidatos:
+                limpo = remover_acentos(cand).upper()
+                limpo = re.sub(
+                    r".*?NOME\s*DO\s*ELEITOR\s*",
+                    "",
+                    limpo
+                ).strip(" -—|:[]")
+                limpo = re.sub(r"\s+", " ", limpo).strip()
+                if parece_nome(limpo):
+                    resultado["nome"] = limpo
+                    break
+            if resultado.get("nome"):
+                break
+
+    # Nascimento: somente data ligada ao rótulo NASCIMENTO.
+    padrao_data = r"(?<!\d)(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})(?!\d)"
+    for i, linha in enumerate(linhas):
+        if "NASCIMENTO" not in normalizar_rotulo(linha):
+            continue
+        bloco = " ".join(linhas[i:i + 3])
+        achou = re.search(padrao_data, bloco)
+        if achou:
+            valor = f"{achou.group(1)}/{achou.group(2)}/{achou.group(3)}"
+            if data_valida(valor):
+                resultado["data_nascimento"] = valor
+                break
+
+    # Inscrição: preenche apenas quando conseguimos 12 dígitos próximos do rótulo.
+    for i, linha in enumerate(linhas):
+        rot = normalizar_rotulo(linha)
+        if "INSCRICAO" not in rot:
+            continue
+        bloco = " ".join(linhas[i:i + 3])
+        for trecho in re.findall(r"(?:\d[\s.'’-]*){12,}", bloco):
+            numero = somente_numeros(trecho)
+            if len(numero) == 12:
+                resultado["titulo"] = numero
+                break
+        if resultado.get("titulo"):
+            break
+
+    # Zona e seção: usa somente valores ligados aos rótulos eleitorais.
+    # Primeiro tenta a mesma região textual em que ZONA/SEÇÃO foram reconhecidas.
+    for i, linha in enumerate(linhas):
+        rot = normalizar_rotulo(linha)
+        if "ZONA" in rot and ("SECAO" in rot or i + 1 < len(linhas)):
+            bloco = " ".join(linhas[i:i + 3])
+            nums = re.findall(r"(?<!\d)\d{3,4}(?!\d)", bloco)
+            nums = [n for n in nums if n not in (resultado.get("titulo", ""),)]
+            # Valores eleitorais típicos: zona com 3 dígitos e seção com 4.
+            zona = next((n for n in nums if len(n) == 3), "")
+            secao = next((n for n in nums if len(n) == 4), "")
+            if zona:
+                resultado["zona"] = zona
+            if secao:
+                resultado["secao"] = secao
+            break
+
+    return resultado
+
+
 def combinar_dados_ocr(principal, fallback):
     resultado = dict(principal)
 
@@ -2686,6 +2777,32 @@ if menu == "📸 Envio de Documentos":
                                 dados,
                                 dados_tesseract
                             )
+
+                            # Complemento específico para título eleitoral.
+                            # Corrige campos rotulados sem alterar outros documentos.
+                            dados_eleitorais = extrair_titulo_eleitoral_especializado(
+                                texto_tesseract
+                            )
+
+                            if dados_eleitorais:
+                                # Nome, nascimento, zona e seção podem substituir a
+                                # leitura genérica porque vêm dos rótulos do título.
+                                for campo in (
+                                    "nome",
+                                    "data_nascimento",
+                                    "zona",
+                                    "secao"
+                                ):
+                                    if dados_eleitorais.get(campo):
+                                        dados[campo] = dados_eleitorais[campo]
+
+                                # A inscrição especializada só completa quando a
+                                # leitura genérica não conseguiu obter o título.
+                                if (
+                                    not dados.get("titulo")
+                                    and dados_eleitorais.get("titulo")
+                                ):
+                                    dados["titulo"] = dados_eleitorais["titulo"]
 
                             candidatos_mae = (
                                 dados_tesseract.get(
