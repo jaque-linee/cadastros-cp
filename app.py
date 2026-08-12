@@ -12,6 +12,16 @@ import fitz
 import sheets
 import validacoes
 
+from validacoes import (
+    somente_numeros,
+    normalizar_texto,
+    remover_acentos,
+    normalizar_rotulo,
+    formatar_cpf,
+    cpf_valido,
+    data_valida,
+)
+
 # ============================================================
 # 1. CONFIGURAÇÃO
 # ============================================================
