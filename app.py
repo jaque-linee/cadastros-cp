@@ -10,6 +10,7 @@ from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 import pytesseract
 import fitz
 import sheets
+import validacoes
 
 # ============================================================
 # 1. CONFIGURAÇÃO
