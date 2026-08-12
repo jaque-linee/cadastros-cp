@@ -10,6 +10,7 @@ from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 import pytesseract
 import fitz
 import sheets
+import cruzamento
 from validacoes import (
     somente_numeros,
     normalizar_texto,
@@ -2211,6 +2212,73 @@ def carregar_base():
     return []
 
 
+
+@st.cache_data(ttl=60)
+def carregar_bases_concorrentes():
+    """
+    Carrega a aba CONCORRENTE uma vez por ciclo de cache.
+    Se houver falha, devolve o erro sem impedir o cadastro.
+    """
+    return cruzamento.carregar_bases(
+        WEBHOOK_URL
+    )
+
+
+def consultar_bases_titulo(titulo):
+    """
+    Cruza o título com as bases já carregadas.
+    Retorna somente as bases onde foi encontrado.
+    """
+    titulo = somente_numeros(
+        titulo
+    )
+
+    if not titulo:
+        return {
+            "sucesso": True,
+            "encontrado": False,
+            "bases": [],
+            "texto": "",
+            "mensagem": ""
+        }
+
+    consulta = carregar_bases_concorrentes()
+
+    if not consulta.get("sucesso"):
+        return {
+            "sucesso": False,
+            "encontrado": False,
+            "bases": [],
+            "texto": "",
+            "mensagem": consulta.get(
+                "mensagem",
+                "Erro ao consultar CONCORRENTE."
+            )
+        }
+
+    resultado = cruzamento.cruzar_titulo(
+        titulo,
+        consulta.get("bases", {})
+    )
+
+    return {
+        "sucesso": True,
+        "encontrado": resultado.get(
+            "encontrado",
+            False
+        ),
+        "bases": resultado.get(
+            "bases",
+            []
+        ),
+        "texto": resultado.get(
+            "texto",
+            ""
+        ),
+        "mensagem": ""
+    }
+
+
 # ============================================================
 # 26. VERIFICAR DUPLICIDADE
 # ============================================================
@@ -2639,6 +2707,17 @@ if menu == "📸 Envio de Documentos":
                             arquivo.name
                         )
 
+                    # Cruza automaticamente o título com a aba CONCORRENTE.
+                    cruzamento_item = consultar_bases_titulo(
+                        dados.get("titulo", "")
+                    )
+
+                    bases_encontradas = (
+                        cruzamento_item.get("texto", "")
+                        if cruzamento_item.get("sucesso")
+                        else ""
+                    )
+
                     duplicado, existente = verificar_duplicidade(
                         dados,
                         base
@@ -2680,6 +2759,9 @@ if menu == "📸 Envio de Documentos":
 
                             "Título":
                                 dados["titulo"],
+
+                            "Bases encontradas":
+                                bases_encontradas,
 
                             "Nascimento":
                                 dados[
@@ -2755,6 +2837,9 @@ if menu == "📸 Envio de Documentos":
                                 "",
 
                             "Título":
+                                "",
+
+                            "Bases encontradas":
                                 "",
 
                             "Nascimento":
@@ -3222,7 +3307,13 @@ elif menu == "✍️ Formulário Manual":
                     "",
 
                 "encontrado":
-                    None
+                    None,
+
+                "bases_concorrentes":
+                    "",
+
+                "erro_concorrentes":
+                    ""
             }
         )
 
@@ -3268,11 +3359,38 @@ elif menu == "✍️ Formulário Manual":
             encontrado
         )
 
+        resultado_cruzamento = consultar_bases_titulo(
+            titulo_input
+        )
+
+        if resultado_cruzamento.get("sucesso"):
+            st.session_state.bases_concorrentes = (
+                resultado_cruzamento.get("texto", "")
+            )
+            st.session_state.erro_concorrentes = ""
+        else:
+            st.session_state.bases_concorrentes = ""
+            st.session_state.erro_concorrentes = (
+                resultado_cruzamento.get("mensagem", "")
+            )
+
         st.session_state.busca_realizada = (
             True
         )
 
     if st.session_state.busca_realizada:
+
+        if st.session_state.bases_concorrentes:
+            st.warning(
+                "Encontrado nas bases: "
+                f"{st.session_state.bases_concorrentes}"
+            )
+
+        if st.session_state.erro_concorrentes:
+            st.warning(
+                "Não foi possível consultar a aba CONCORRENTE: "
+                f"{st.session_state.erro_concorrentes}"
+            )
 
         if st.session_state.encontrado:
             e = st.session_state.encontrado
@@ -3296,6 +3414,8 @@ elif menu == "✍️ Formulário Manual":
                 )
 
                 st.session_state.titulo = ""
+                st.session_state.bases_concorrentes = ""
+                st.session_state.erro_concorrentes = ""
 
                 st.rerun()
 
@@ -3392,6 +3512,8 @@ elif menu == "✍️ Formulário Manual":
                                 )
 
                                 st.session_state.titulo = ""
+                                st.session_state.bases_concorrentes = ""
+                                st.session_state.erro_concorrentes = ""
 
                                 st.rerun()
 
