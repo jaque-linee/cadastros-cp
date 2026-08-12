@@ -2956,85 +2956,92 @@ if menu == "📸 Envio de Documentos":
             )
 
             # ====================================================
-            # CONFERÊNCIA / EDIÇÃO DO TELEFONE
+            # RESULTADO COMPACTO / CONFERÊNCIA NA PRÓPRIA LINHA
             # ====================================================
 
-            st.markdown("---")
-            st.subheader("📞 Conferir / editar telefone")
-            st.caption(
-                "O telefone é opcional. Se o app encontrar no documento "
-                "ou no nome do arquivo, ele já aparece preenchido. "
-                "Você pode corrigir, digitar ou deixar vazio."
+            st.markdown(
+                f"""
+                <div style="
+                    background:#ffffff;
+                    border:1px solid #d9e1e8;
+                    border-radius:10px;
+                    padding:10px 14px;
+                    margin:4px 0 12px 0;
+                    font-size:0.95rem;
+                ">
+                    <b>📊 Resultado do lote</b>
+                    &nbsp;&nbsp; ✅ {completos} completos
+                    &nbsp;&nbsp; 🔁 {duplicados} já cadastrados
+                    &nbsp;&nbsp; ⚠️ {conferir} conferir
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
-            for indice_tel, item in enumerate(resultados):
+            st.caption(
+                "Confira os dados abaixo. Telefone e nome da mãe podem ser "
+                "ajustados na própria linha quando necessário."
+            )
+
+            for indice_item, item in enumerate(resultados):
                 dados_item = item.get("_dados")
 
                 if not dados_item:
-                    continue
-
-                if item.get("Resultado") == "⚠️ JÁ CADASTRADO":
-                    continue
-
-                chave_tel = (
-                    f"telefone_{indice_tel}_"
-                    f"{item.get('Arquivo', '')}"
-                )
-
-                telefone_atual = str(
-                    dados_item.get("telefone", "") or ""
-                )
-
-                telefone_editado = st.text_input(
-                    f"{item.get('Arquivo', 'Documento')} — "
-                    f"{dados_item.get('nome', '')}",
-                    value=telefone_atual,
-                    key=chave_tel,
-                    placeholder="Ex.: 82999999999"
-                )
-
-                if str(telefone_editado).strip():
-                    telefone_limpo = normalizar_telefone(
-                        telefone_editado
+                    st.error(
+                        f"{item.get('Arquivo', 'Documento')} — "
+                        f"{item.get('Resultado', '❌ ERRO')}"
                     )
-                else:
-                    telefone_limpo = ""
+                    continue
 
-                dados_item["telefone"] = telefone_limpo
-                item["Telefone"] = telefone_limpo
+                nome_item = str(
+                    dados_item.get("nome", "") or "NOME NÃO IDENTIFICADO"
+                ).strip()
 
-            st.session_state[
-                "resultado_lote"
-            ] = resultados
+                resultado_item = str(
+                    item.get("Resultado", "") or "⚠️ CONFERIR"
+                ).strip()
 
-            # ====================================================
-            # CONFERÊNCIA MANUAL DO NOME DA MÃE
-            # ====================================================
+                bases_item = str(
+                    item.get("Bases encontradas", "") or ""
+                ).strip()
 
-            pendentes_mae = [
-                item
-                for item in resultados
-                if (
-                    item.get("_dados")
-                    and not item["_dados"].get("nome_mae")
-                    and item["_dados"].get("_candidatos_mae")
-                    and item.get("Resultado") != "⚠️ JÁ CADASTRADO"
+                arquivo_item = str(
+                    item.get("Arquivo", "Documento") or "Documento"
+                ).strip()
+
+                # Cabeçalho compacto de cada pessoa.
+                cabecalho = (
+                    f"**{nome_item}**  ·  {resultado_item}  ·  "
+                    f"📄 {arquivo_item}"
                 )
-            ]
 
-            if pendentes_mae:
-                st.markdown("---")
-                st.subheader("👩 Conferir nome da mãe")
+                if bases_item:
+                    cabecalho += f"  ·  🎯 Base: **{bases_item}**"
+
+                st.markdown(cabecalho)
+
+                # Linha principal: documentos e localização.
+                cpf_item = str(dados_item.get("cpf", "") or "—")
+                titulo_item = str(dados_item.get("titulo", "") or "—")
+                nasc_item = str(
+                    dados_item.get("data_nascimento", "") or "—"
+                )
+                zona_item = str(dados_item.get("zona", "") or "—")
+                secao_item = str(dados_item.get("secao", "") or "—")
+
                 st.caption(
-                    "O OCR encontrou nomes no documento, mas não conseguiu "
-                    "determinar com segurança qual é o nome da mãe. "
-                    "Selecione somente nos documentos abaixo."
+                    f"CPF: {cpf_item}   •   Título: {titulo_item}   •   "
+                    f"Nascimento: {nasc_item}   •   "
+                    f"Zona/Seção: {zona_item}/{secao_item}"
                 )
 
-                houve_correcao = False
+                # Mãe e telefone ficam juntos, sem criar seções separadas.
+                col_mae, col_tel = st.columns([2.2, 1])
 
-                for indice_mae, item in enumerate(pendentes_mae):
-                    dados_item = item["_dados"]
+                with col_mae:
+                    mae_atual = str(
+                        dados_item.get("nome_mae", "") or ""
+                    ).strip().upper()
 
                     candidatos = []
 
@@ -3042,81 +3049,129 @@ if menu == "📸 Envio de Documentos":
                         "_candidatos_mae",
                         []
                     ):
-                        candidato = str(candidato or "").strip().upper()
+                        candidato = str(
+                            candidato or ""
+                        ).strip().upper()
 
                         if (
                             candidato
-                            and candidato != str(
-                                dados_item.get("nome", "")
-                            ).strip().upper()
+                            and candidato != nome_item.upper()
                             and candidato not in candidatos
                         ):
                             candidatos.append(candidato)
 
-                    if not candidatos:
-                        continue
-
-                    chave_base = (
-                        f"mae_{indice_mae}_"
-                        f"{item.get('Arquivo', '')}"
+                    chave_mae = (
+                        f"mae_compacta_{indice_item}_"
+                        f"{arquivo_item}"
                     )
 
-                    escolha = st.selectbox(
-                        f"{item.get('Arquivo', 'Documento')} — "
-                        f"{dados_item.get('nome', '')}",
-                        options=["— SELECIONE —"] + candidatos,
-                        key=chave_base
-                    )
-
-                    if escolha != "— SELECIONE —":
-                        dados_item["nome_mae"] = escolha
-                        item["Nome da mãe"] = escolha
-
-                        duplicado_atual, _ = verificar_duplicidade(
-                            dados_item,
-                            base
+                    if not mae_atual and candidatos:
+                        escolha_mae = st.selectbox(
+                            "Nome da mãe",
+                            options=["— SELECIONE —"] + candidatos,
+                            key=chave_mae
                         )
 
-                        item["Resultado"] = classificar_resultado(
-                            dados_item,
-                            duplicado_atual
+                        if escolha_mae != "— SELECIONE —":
+                            dados_item["nome_mae"] = escolha_mae
+                            item["Nome da mãe"] = escolha_mae
+
+                    elif mae_atual:
+                        st.text_input(
+                            "Nome da mãe",
+                            value=mae_atual,
+                            key=chave_mae,
+                            disabled=True
                         )
 
-                        houve_correcao = True
+                    else:
+                        mae_digitada = st.text_input(
+                            "Nome da mãe",
+                            value="",
+                            key=chave_mae,
+                            placeholder="Digite se não foi identificada"
+                        )
 
-                if houve_correcao:
-                    st.session_state[
-                        "resultado_lote"
-                    ] = resultados
+                        if str(mae_digitada).strip():
+                            dados_item["nome_mae"] = (
+                                str(mae_digitada).strip().upper()
+                            )
+                            item["Nome da mãe"] = dados_item["nome_mae"]
 
-            resultados_visiveis = []
-
-            for item in resultados:
-                item_visivel = {
-                    chave: valor
-                    for chave, valor in item.items()
-                    if chave not in (
-                        "_dados",
-                        "_texto_ocr",
-                        "_texto_tesseract",
-                        "_itens_ocr",
-                        "_candidatos_mae"
+                with col_tel:
+                    chave_tel = (
+                        f"telefone_compacto_{indice_item}_"
+                        f"{arquivo_item}"
                     )
-                }
 
-                resultados_visiveis.append(
-                    item_visivel
+                    telefone_atual = str(
+                        dados_item.get("telefone", "") or ""
+                    )
+
+                    telefone_editado = st.text_input(
+                        "Telefone",
+                        value=telefone_atual,
+                        key=chave_tel,
+                        placeholder="82999999999"
+                    )
+
+                    if str(telefone_editado).strip():
+                        telefone_limpo = normalizar_telefone(
+                            telefone_editado
+                        )
+                    else:
+                        telefone_limpo = ""
+
+                    dados_item["telefone"] = telefone_limpo
+                    item["Telefone"] = telefone_limpo
+
+                # Reclassifica após eventual escolha/digitação do nome da mãe.
+                if resultado_item != "⚠️ JÁ CADASTRADO":
+                    duplicado_atual, _ = verificar_duplicidade(
+                        dados_item,
+                        base
+                    )
+
+                    item["Resultado"] = classificar_resultado(
+                        dados_item,
+                        duplicado_atual
+                    )
+
+                # Se já existe, mostra a referência de forma curta.
+                if item.get("Resultado") == "⚠️ JÁ CADASTRADO":
+                    cadastrado_como = str(
+                        item.get("Já cadastrado como", "") or ""
+                    ).strip()
+                    supervisor_atual = str(
+                        item.get("Supervisor atual", "") or ""
+                    ).strip()
+
+                    detalhes_duplicado = []
+
+                    if cadastrado_como:
+                        detalhes_duplicado.append(
+                            f"já cadastrado como {cadastrado_como}"
+                        )
+
+                    if supervisor_atual:
+                        detalhes_duplicado.append(
+                            f"supervisor atual: {supervisor_atual}"
+                        )
+
+                    if detalhes_duplicado:
+                        st.caption(
+                            "↳ " + " • ".join(detalhes_duplicado)
+                        )
+
+                st.markdown(
+                    "<div style='border-bottom:1px solid #d9e1e8; "
+                    "margin:4px 0 10px 0;'></div>",
+                    unsafe_allow_html=True
                 )
 
-            df_resultados = pd.DataFrame(
-                resultados_visiveis
-            )
-
-            st.dataframe(
-                df_resultados,
-                use_container_width=True,
-                hide_index=True
-            )
+            st.session_state[
+                "resultado_lote"
+            ] = resultados
 
             # ====================================================
             # SALVAR CADASTROS COMPLETOS NA TABELA
@@ -3132,8 +3187,6 @@ if menu == "📸 Envio de Documentos":
             ]
 
             if aptos_para_salvar:
-
-                st.markdown("---")
 
                 st.info(
                     f"📥 {len(aptos_para_salvar)} cadastro(s) "
@@ -3208,80 +3261,9 @@ if menu == "📸 Envio de Documentos":
                     st.cache_data.clear()
 
             st.caption(
-                "ℹ️ Para ser considerado completo: "
-                "Nome + Nascimento + Nome da mãe + "
-                "CPF ou Título. "
-                "Nenhum cadastro do lote foi gravado "
-                "automaticamente."
+                "ℹ️ Completo = Nome + Nascimento + Nome da mãe + "
+                "CPF ou Título. Nenhum cadastro é gravado automaticamente."
             )
-
-            # ====================================================
-            # DIAGNÓSTICO TEMPORÁRIO DO OCR
-            # ====================================================
-            st.markdown("---")
-            st.subheader("🛠️ Diagnóstico OCR")
-
-            st.caption(
-                "Área temporária para conferir exatamente o que "
-                "o OCR reconheceu. Não altera nem salva cadastros."
-            )
-
-            for indice_diag, item_diag in enumerate(resultados):
-                texto_diag = str(
-                    item_diag.get("_texto_ocr", "") or ""
-                ).strip()
-
-                itens_diag = item_diag.get(
-                    "_itens_ocr",
-                    []
-                )
-
-                with st.expander(
-                    f"🔎 {item_diag.get('Arquivo', 'Documento')}",
-                    expanded=False
-                ):
-                    st.markdown("**Texto reconhecido:**")
-
-                    if texto_diag:
-                        st.code(
-                            texto_diag,
-                            language=None
-                        )
-                    else:
-                        st.warning(
-                            "Nenhum texto bruto foi retornado."
-                        )
-
-                    texto_tess_diag = str(
-                        item_diag.get("_texto_tesseract", "") or ""
-                    ).strip()
-
-                    if texto_tess_diag:
-                        st.markdown(
-                            "**Texto reconhecido pelo Tesseract (fallback):**"
-                        )
-                        st.code(
-                            texto_tess_diag,
-                            language=None
-                        )
-
-                    st.markdown("**Blocos reconhecidos pelo OCR:**")
-
-                    if itens_diag:
-                        df_diag = pd.DataFrame(
-                            itens_diag
-                        )
-
-                        st.dataframe(
-                            df_diag,
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                    else:
-                        st.info(
-                            "Este arquivo não possui blocos OCR. "
-                            "Se for PDF com texto digital, isso é esperado."
-                        )
 
 
 # ============================================================
