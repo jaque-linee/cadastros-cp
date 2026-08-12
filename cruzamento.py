@@ -1,4 +1,5 @@
 import re
+import requests
 
 
 # ============================================================
@@ -17,13 +18,8 @@ def normalizar_titulo(valor):
     """
     Normaliza o título para comparação.
 
-    Remove:
-    - pontos;
-    - espaços;
-    - traços;
-    - outros caracteres não numéricos.
-
-    Também desconsidera zeros à esquerda.
+    Remove qualquer caractere não numérico
+    e desconsidera zeros à esquerda.
     """
 
     titulo = somente_numeros(valor)
@@ -35,7 +31,96 @@ def normalizar_titulo(valor):
 
 
 # ============================================================
-# 2. CRUZAR UM TÍTULO
+# 2. CARREGAR BASES DA ABA CONCORRENTE
+# ============================================================
+
+def carregar_bases(
+    webhook_url,
+    timeout=20
+):
+    """
+    Carrega dinamicamente todas as bases existentes
+    na aba CONCORRENTE através do Apps Script.
+
+    A linha 1 da planilha define os nomes das bases.
+    Nenhum nome ou quantidade de colunas é fixado.
+    """
+
+    try:
+        resposta = requests.get(
+            webhook_url,
+            params={
+                "acao": "concorrentes"
+            },
+            timeout=timeout
+        )
+
+        resposta.raise_for_status()
+
+        dados = resposta.json()
+
+        if not isinstance(
+            dados,
+            dict
+        ):
+            return {
+                "sucesso": False,
+                "bases": {},
+                "mensagem": (
+                    "Resposta inválida recebida "
+                    "da aba CONCORRENTE."
+                )
+            }
+
+        return {
+            "sucesso": True,
+            "bases": dados,
+            "mensagem": ""
+        }
+
+    except requests.exceptions.Timeout:
+        return {
+            "sucesso": False,
+            "bases": {},
+            "mensagem": (
+                "A consulta à aba CONCORRENTE "
+                "demorou demais."
+            )
+        }
+
+    except requests.exceptions.RequestException as erro:
+        return {
+            "sucesso": False,
+            "bases": {},
+            "mensagem": (
+                "Erro de comunicação com "
+                f"a planilha: {erro}"
+            )
+        }
+
+    except ValueError:
+        return {
+            "sucesso": False,
+            "bases": {},
+            "mensagem": (
+                "A aba CONCORRENTE retornou "
+                "uma resposta inválida."
+            )
+        }
+
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "bases": {},
+            "mensagem": (
+                "Erro ao carregar as bases: "
+                f"{erro}"
+            )
+        }
+
+
+# ============================================================
+# 3. PROCURAR TÍTULO NAS BASES
 # ============================================================
 
 def buscar_titulo(
@@ -43,21 +128,10 @@ def buscar_titulo(
     bases
 ):
     """
-    Procura um título em todas as bases recebidas.
-
-    Formato esperado de 'bases':
-
-    {
-        "AF": ["123456789012", "999999999999"],
-        "AT": ["111111111111"],
-        "MC": ["123456789012"]
-    }
+    Procura o título em todas as bases.
 
     Retorna somente os nomes das bases
     onde o título foi encontrado.
-
-    Exemplo:
-        ["AF", "MC"]
     """
 
     titulo_procurado = normalizar_titulo(
@@ -67,20 +141,27 @@ def buscar_titulo(
     if not titulo_procurado:
         return []
 
-    encontradas = []
-
     if not isinstance(
         bases,
         dict
     ):
-        return encontradas
+        return []
+
+    encontradas = []
 
     for nome_base, titulos in bases.items():
+
+        nome_base = str(
+            nome_base or ""
+        ).strip()
 
         if not nome_base:
             continue
 
-        if titulos is None:
+        if not isinstance(
+            titulos,
+            list
+        ):
             continue
 
         for titulo_base in titulos:
@@ -97,7 +178,7 @@ def buscar_titulo(
                 == titulo_existente
             ):
                 encontradas.append(
-                    str(nome_base).strip()
+                    nome_base
                 )
 
                 break
@@ -106,21 +187,20 @@ def buscar_titulo(
 
 
 # ============================================================
-# 3. FORMATAR RESULTADO
+# 4. FORMATAR RESULTADO
 # ============================================================
 
 def formatar_bases_encontradas(
     bases_encontradas
 ):
     """
-    Transforma a lista de bases encontradas
-    em texto para exibição no app.
-
     Exemplo:
-        ["AF", "MC", "PB"]
 
-    Resultado:
-        "AF | MC | PB"
+    ["AF", "MC", "PB"]
+
+    vira:
+
+    AF | MC | PB
     """
 
     if not bases_encontradas:
@@ -134,7 +214,7 @@ def formatar_bases_encontradas(
 
 
 # ============================================================
-# 4. CRUZAMENTO COMPLETO
+# 5. CRUZAR TÍTULO COM BASES JÁ CARREGADAS
 # ============================================================
 
 def cruzar_titulo(
@@ -142,8 +222,8 @@ def cruzar_titulo(
     bases
 ):
     """
-    Executa o cruzamento e devolve
-    uma estrutura pronta para o app.py.
+    Cruza um título usando bases
+    que já foram carregadas.
     """
 
     encontradas = buscar_titulo(
@@ -162,4 +242,77 @@ def cruzar_titulo(
         "texto": formatar_bases_encontradas(
             encontradas
         )
+    }
+
+
+# ============================================================
+# 6. CONSULTAR TÍTULO DIRETAMENTE NA PLANILHA
+# ============================================================
+
+def consultar_titulo(
+    webhook_url,
+    titulo,
+    timeout=20
+):
+    """
+    Fluxo completo:
+
+    1. carrega a aba CONCORRENTE;
+    2. procura o título;
+    3. devolve somente as bases encontradas.
+    """
+
+    titulo_normalizado = normalizar_titulo(
+        titulo
+    )
+
+    if not titulo_normalizado:
+        return {
+            "sucesso": True,
+            "titulo": "",
+            "encontrado": False,
+            "bases": [],
+            "texto": "",
+            "mensagem": ""
+        }
+
+    consulta = carregar_bases(
+        webhook_url,
+        timeout=timeout
+    )
+
+    if not consulta["sucesso"]:
+        return {
+            "sucesso": False,
+            "titulo": somente_numeros(
+                titulo
+            ),
+            "encontrado": False,
+            "bases": [],
+            "texto": "",
+            "mensagem": consulta[
+                "mensagem"
+            ]
+        }
+
+    resultado = cruzar_titulo(
+        titulo,
+        consulta["bases"]
+    )
+
+    return {
+        "sucesso": True,
+        "titulo": resultado[
+            "titulo"
+        ],
+        "encontrado": resultado[
+            "encontrado"
+        ],
+        "bases": resultado[
+            "bases"
+        ],
+        "texto": resultado[
+            "texto"
+        ],
+        "mensagem": ""
     }
