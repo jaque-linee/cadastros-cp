@@ -11,6 +11,7 @@ import pytesseract
 import fitz
 import sheets
 import cruzamento
+import relatorios
 from validacoes import (
     somente_numeros,
     normalizar_texto,
@@ -2510,77 +2511,87 @@ lista_sup, lista_sub, lista_comunidade = obter_supervisores(
 
 with st.sidebar:
     st.header(
-        "⚙️ Configuração"
-    )
-
-    sup_opcao = st.selectbox(
-        "Supervisor",
-        lista_sup
-        + [
-            "➕ Cadastrar Novo Supervisor"
-        ]
-    )
-
-    if (
-        sup_opcao
-        == "➕ Cadastrar Novo Supervisor"
-    ):
-        supervisor = st.text_input(
-            "Novo Supervisor"
-        ).upper()
-
-    else:
-        supervisor = sup_opcao
-
-    sub_opcao = st.selectbox(
-        "Subsupervisor",
-        lista_sub
-        + [
-            "➕ Cadastrar Novo Sub"
-        ]
-    )
-
-    if (
-        sub_opcao
-        == "➕ Cadastrar Novo Sub"
-    ):
-        sub = st.text_input(
-            "Novo Sub"
-        ).upper()
-
-    else:
-        sub = sub_opcao
-
-    comunidade_opcao = st.selectbox(
-        "Comunidade",
-        lista_comunidade
-        + [
-            "➕ Cadastrar Nova Comunidade"
-        ]
-    )
-
-    if (
-        comunidade_opcao
-        == "➕ Cadastrar Nova Comunidade"
-    ):
-        comunidade = st.text_input(
-            "Nova Comunidade"
-        ).strip().upper()
-
-    else:
-        comunidade = comunidade_opcao
-
-    st.markdown(
-        "---"
+        "⚙️ Menu"
     )
 
     menu = st.radio(
         "Escolha a Operação:",
         [
             "📸 Envio de Documentos",
-            "✍️ Formulário Manual"
+            "✍️ Formulário Manual",
+            "📊 Relatórios"
         ]
     )
+
+    supervisor = ""
+    sub = ""
+    comunidade = ""
+
+    if menu != "📊 Relatórios":
+        st.markdown(
+            "---"
+        )
+
+        st.subheader(
+            "Configuração do cadastro"
+        )
+
+        sup_opcao = st.selectbox(
+            "Supervisor",
+            lista_sup
+            + [
+                "➕ Cadastrar Novo Supervisor"
+            ]
+        )
+
+        if (
+            sup_opcao
+            == "➕ Cadastrar Novo Supervisor"
+        ):
+            supervisor = st.text_input(
+                "Novo Supervisor"
+            ).upper()
+
+        else:
+            supervisor = sup_opcao
+
+        sub_opcao = st.selectbox(
+            "Subsupervisor",
+            lista_sub
+            + [
+                "➕ Cadastrar Novo Sub"
+            ]
+        )
+
+        if (
+            sub_opcao
+            == "➕ Cadastrar Novo Sub"
+        ):
+            sub = st.text_input(
+                "Novo Sub"
+            ).upper()
+
+        else:
+            sub = sub_opcao
+
+        comunidade_opcao = st.selectbox(
+            "Comunidade",
+            lista_comunidade
+            + [
+                "➕ Cadastrar Nova Comunidade"
+            ]
+        )
+
+        if (
+            comunidade_opcao
+            == "➕ Cadastrar Nova Comunidade"
+        ):
+            comunidade = st.text_input(
+                "Nova Comunidade"
+            ).strip().upper()
+
+        else:
+            comunidade = comunidade_opcao
 
 
 # ============================================================
@@ -3626,3 +3637,218 @@ elif menu == "✍️ Formulário Manual":
                             st.error(
                                 f"Erro ao salvar: {erro}"
                             )
+
+
+# ============================================================
+# 35. RELATÓRIOS
+# ============================================================
+
+elif menu == "📊 Relatórios":
+
+    st.subheader(
+        "📊 Relatórios"
+    )
+
+    st.caption(
+        "Consulte a base cadastrada de forma rápida e organizada."
+    )
+
+    tipo_relatorio = st.selectbox(
+        "Tipo de relatório",
+        [
+            "👤 Por Nome"
+        ],
+        key="tipo_relatorio"
+    )
+
+    filtros_disponiveis = relatorios.obter_filtros_nome(
+        base
+    )
+
+    col_filtro_sup, col_filtro_sub, col_filtro_sit = st.columns(3)
+
+    with col_filtro_sup:
+        filtro_supervisor = st.selectbox(
+            "Supervisor",
+            ["Todos"]
+            + filtros_disponiveis.get(
+                "supervisores",
+                []
+            ),
+            key="relatorio_supervisor"
+        )
+
+    with col_filtro_sub:
+        filtro_subsupervisor = st.selectbox(
+            "Subsupervisor",
+            ["Todos"]
+            + filtros_disponiveis.get(
+                "subsupervisores",
+                []
+            ),
+            key="relatorio_subsupervisor"
+        )
+
+    with col_filtro_sit:
+        filtro_situacao = st.selectbox(
+            "Situação",
+            ["Todas"]
+            + filtros_disponiveis.get(
+                "situacoes",
+                []
+            ),
+            key="relatorio_situacao"
+        )
+
+    gerar_relatorio = st.button(
+        "🔎 Gerar relatório",
+        type="primary",
+        use_container_width=True
+    )
+
+    if gerar_relatorio:
+        st.session_state[
+            "relatorio_nome_gerado"
+        ] = relatorios.gerar_relatorio_nome(
+            dados_base=base,
+            supervisor=(
+                ""
+                if filtro_supervisor == "Todos"
+                else filtro_supervisor
+            ),
+            subsupervisor=(
+                ""
+                if filtro_subsupervisor == "Todos"
+                else filtro_subsupervisor
+            ),
+            situacao=(
+                ""
+                if filtro_situacao == "Todas"
+                else filtro_situacao
+            )
+        )
+
+    resultado_relatorio = st.session_state.get(
+        "relatorio_nome_gerado"
+    )
+
+    if resultado_relatorio is not None:
+
+        total_relatorio = resultado_relatorio.get(
+            "total",
+            0
+        )
+
+        st.markdown(
+            f"""
+            <div style="
+                background:#ffffff;
+                border:1px solid #d9e1e8;
+                border-radius:10px;
+                padding:10px 14px;
+                margin:14px 0 12px 0;
+                font-size:0.95rem;
+            ">
+                <b>👤 Relatório por Nome</b>
+                &nbsp;&nbsp; <b>{total_relatorio}</b> registro(s)
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        if total_relatorio == 0:
+            st.info(
+                "Nenhum cadastro encontrado para os filtros selecionados."
+            )
+
+        else:
+            for numero_grupo, grupo in enumerate(
+                resultado_relatorio.get(
+                    "grupos",
+                    []
+                ),
+                start=1
+            ):
+                nome_supervisor = str(
+                    grupo.get(
+                        "supervisor",
+                        "SEM SUPERVISOR"
+                    )
+                ).strip()
+
+                nome_subsupervisor = str(
+                    grupo.get(
+                        "subsupervisor",
+                        "SEM SUBSUPERVISOR"
+                    )
+                ).strip()
+
+                registros_grupo = grupo.get(
+                    "registros",
+                    []
+                )
+
+                st.markdown(
+                    f"""
+                    <div style="
+                        background:#f7f9fb;
+                        border-left:4px solid #0056b3;
+                        padding:8px 12px;
+                        margin-top:12px;
+                        margin-bottom:6px;
+                        border-radius:6px;
+                    ">
+                        <b>Supervisor:</b> {nome_supervisor}
+                        &nbsp;&nbsp;&nbsp;
+                        <b>Subsupervisor:</b> {nome_subsupervisor}
+                        &nbsp;&nbsp;&nbsp;
+                        <b>Total:</b> {len(registros_grupo)}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                linhas_tabela = []
+
+                for numero, registro in enumerate(
+                    registros_grupo,
+                    start=1
+                ):
+                    linhas_tabela.append(
+                        {
+                            "Nº": numero,
+                            "Nome": str(
+                                registro.get(
+                                    "nome",
+                                    ""
+                                )
+                            ).strip(),
+                            "Comunidade": str(
+                                registro.get(
+                                    "comunidade",
+                                    ""
+                                )
+                            ).strip(),
+                            "Telefone": str(
+                                registro.get(
+                                    "telefone",
+                                    ""
+                                )
+                            ).strip()
+                        }
+                    )
+
+                tabela_grupo = pd.DataFrame(
+                    linhas_tabela
+                )
+
+                st.dataframe(
+                    tabela_grupo,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(
+                        38 * len(tabela_grupo) + 38,
+                        500
+                    )
+                )
+
