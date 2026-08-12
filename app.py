@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import re
 import io
+import base64
 import gc
 import unicodedata
 import numpy as np
@@ -3862,17 +3863,52 @@ elif menu == "📊 Relatórios":
                     resultado_relatorio
                 )
 
-                st.download_button(
-                    label="📄 Baixar PDF",
-                    data=pdf_relatorio,
-                    file_name="relatorio_por_nome.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="baixar_pdf_relatorio_nome"
-                )
+                coluna_imprimir, coluna_pdf = st.columns(2)
+
+                with coluna_imprimir:
+                    pdf_base64 = base64.b64encode(
+                        pdf_relatorio
+                    ).decode("utf-8")
+
+                    html_imprimir = f"""
+                    <a
+                        href="data:application/pdf;base64,{pdf_base64}"
+                        target="_blank"
+                        style="
+                            display:flex;
+                            align-items:center;
+                            justify-content:center;
+                            width:100%;
+                            min-height:38px;
+                            background:#0056b3;
+                            color:white;
+                            text-decoration:none;
+                            font-weight:700;
+                            border-radius:12px;
+                            border:2px solid #0056b3;
+                            box-sizing:border-box;
+                        "
+                    >
+                        🖨️ Abrir para imprimir
+                    </a>
+                    """
+
+                    st.markdown(
+                        html_imprimir,
+                        unsafe_allow_html=True
+                    )
+
+                with coluna_pdf:
+                    st.download_button(
+                        label="📄 Baixar PDF",
+                        data=pdf_relatorio,
+                        file_name="relatorio_por_nome.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="baixar_pdf_relatorio_nome"
+                    )
 
             except Exception as erro_pdf:
                 st.error(
                     f"Não foi possível gerar o PDF: {erro_pdf}"
                 )
-
