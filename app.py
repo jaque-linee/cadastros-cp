@@ -3102,8 +3102,6 @@ if menu == "📸 Envio de Documentos":
                             candidato or ""
                         ).strip().upper()
 
-                        # Não oferece o próprio nome nem fragmentos óbvios
-                        # do nome do eleitor como candidato a mãe.
                         candidato_norm = normalizar_rotulo(
                             candidato
                         )
@@ -3128,31 +3126,39 @@ if menu == "📸 Envio de Documentos":
                             candidatos.append(candidato)
 
                     chave_mae = f"{prefixo_chave}_mae"
+                    chave_sugestao = f"{prefixo_chave}_sugestao_mae"
 
-                    if not mae_atual and candidatos:
-                        escolha_mae = st.selectbox(
-                            "Nome da mãe",
-                            options=["— SELECIONE —"] + candidatos,
-                            key=chave_mae
+                    # O nome da mãe é SEMPRE um campo livre/editável.
+                    # Sugestões do OCR nunca bloqueiam a digitação.
+                    if chave_mae not in st.session_state:
+                        st.session_state[chave_mae] = mae_atual
+
+                    # Se houver sugestão, ela é opcional e apenas preenche
+                    # o campo livre quando o usuário escolher.
+                    if candidatos:
+                        sugestao_mae = st.selectbox(
+                            "Sugestão do OCR (opcional)",
+                            options=["— IGNORAR —"] + candidatos,
+                            key=chave_sugestao
                         )
 
-                        if escolha_mae != "— SELECIONE —":
-                            dados_item["nome_mae"] = escolha_mae
-                            item["Nome da mãe"] = escolha_mae
+                        if (
+                            sugestao_mae != "— IGNORAR —"
+                            and st.session_state.get(chave_mae, "") != sugestao_mae
+                        ):
+                            st.session_state[chave_mae] = sugestao_mae
 
-                    else:
-                        mae_editada = st.text_input(
-                            "Nome da mãe",
-                            value=mae_atual,
-                            key=chave_mae,
-                            placeholder="Digite se não foi identificada"
-                        )
+                    mae_editada = st.text_input(
+                        "Nome da mãe",
+                        key=chave_mae,
+                        placeholder="Digite o nome da mãe"
+                    )
 
-                        dados_item["nome_mae"] = str(
-                            mae_editada or ""
-                        ).strip().upper()
+                    dados_item["nome_mae"] = str(
+                        mae_editada or ""
+                    ).strip().upper()
 
-                        item["Nome da mãe"] = dados_item["nome_mae"]
+                    item["Nome da mãe"] = dados_item["nome_mae"]
 
                 with col_tel:
                     telefone_editado = st.text_input(
