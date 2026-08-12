@@ -780,265 +780,6 @@ def combinar_dados_ocr(principal, fallback):
 
 
 # ============================================================
-# 7B. TRATAMENTO ESPECÍFICO - TÍTULO ELEITORAL
-# ============================================================
-
-def titulo_eleitoral_valido(valor):
-    """Validação matemática dos 12 dígitos do título eleitoral."""
-    numero = somente_numeros(valor)
-
-    if len(numero) != 12:
-        return False
-
-    digitos = [int(x) for x in numero]
-
-    resto_1 = sum(
-        digitos[i] * (i + 2)
-        for i in range(8)
-    ) % 11
-    dv_1 = 0 if resto_1 == 10 else resto_1
-
-    resto_2 = (
-        digitos[8] * 7
-        + digitos[9] * 8
-        + dv_1 * 9
-    ) % 11
-    dv_2 = 0 if resto_2 == 10 else resto_2
-
-    return (
-        digitos[10] == dv_1
-        and digitos[11] == dv_2
-    )
-
-
-def corrigir_espacos_nome_titulo(nome):
-    """Corrige apenas partículas claramente coladas em nomes longos."""
-    nome = str(nome or "").strip().upper()
-
-    if not nome:
-        return ""
-
-    sobrenomes = (
-        "FREITAS|SILVA|SOUZA|SANTOS|OLIVEIRA|LIMA|MELO|"
-        "COSTA|CARVALHO|ALMEIDA|PEREIRA|FERREIRA|GOMES|"
-        "ROCHA|BARBOSA|NASCIMENTO|ARAUJO|ALVES|MARTINS"
-    )
-
-    nome = re.sub(
-        rf"([A-ZÁÉÍÓÚÂÊÔÃÕÇ]{{4,}})(DE|DA|DO|DOS|DAS)({sobrenomes})\b",
-        r"\1 \2 \3",
-        nome
-    )
-
-    return re.sub(r"\s+", " ", nome).strip()
-
-
-def extrair_titulo_eleitoral_especial(imagem_original, dados_atuais):
-    """
-    Leitura complementar SOMENTE para TÍTULO ELEITORAL.
-    Usa a orientação EXIF correta e combina PSM 6/11 do Tesseract.
-    """
-    resultado = {
-        "detectado": False,
-        "nome": "",
-        "titulo": "",
-        "data_nascimento": "",
-        "zona": "",
-        "secao": ""
-    }
-
-    try:
-        imagem = ImageOps.exif_transpose(
-            imagem_original
-        ).convert("RGB")
-
-        textos = []
-        for psm in (6, 11):
-            texto = pytesseract.image_to_string(
-                imagem,
-                lang="por+eng",
-                config=f"--oem 3 --psm {psm}"
-            )
-            if texto:
-                textos.append(texto)
-
-        texto_total = "\n".join(textos)
-        texto_norm = remover_acentos(texto_total).upper()
-
-        if "TITULO ELEITORAL" not in texto_norm:
-            return resultado
-
-        resultado["detectado"] = True
-
-        # NOME: aproveita linhas completas reconhecidas pelo Tesseract.
-        palavras_proibidas = (
-            "REPUBLICA", "JUSTICA", "ELEITORAL", "IDENTIFICACAO",
-            "NOME DO ELEITOR", "NASCIMENTO", "INSCRICAO", "ZONA",
-            "SECAO", "MUNICIPIO", "EMISSAO", "JUIZ"
-        )
-        candidatos_nome = []
-        for texto in textos:
-            for linha in texto.splitlines():
-                limpa = re.sub(r"\s+", " ", linha).strip(" []|_-.")
-                norm = remover_acentos(limpa).upper()
-                if any(x in norm for x in palavras_proibidas):
-                    continue
-                if parece_nome(limpa) and len(limpa.split()) >= 4:
-                    candidatos_nome.append(limpa.upper())
-
-        if candidatos_nome:
-            # Prefere o candidato com mais palavras/letras.
-            resultado["nome"] = max(
-                candidatos_nome,
-                key=lambda x: (len(x.split()), len(x))
-            )
-
-        # NASCIMENTO: em título eleitoral, nascimento é a data cronologicamente
-        # mais antiga. Isso impede confundir com DATA DE EMISSÃO.
-        datas = []
-        padrao_data = re.compile(
-            r"(?<!\d)(\d{2})[/.\-]?(\d{2})[/.\-](\d{4})(?!\d)"
-        )
-        for texto in textos:
-            for match in padrao_data.finditer(texto):
-                valor = (
-                    f"{match.group(1)}/"
-                    f"{match.group(2)}/"
-                    f"{match.group(3)}"
-                )
-                if data_valida(valor):
-                    try:
-                        chave = datetime.strptime(valor, "%d/%m/%Y")
-                        datas.append((chave, valor))
-                    except ValueError:
-                        pass
-
-        if datas:
-            resultado["data_nascimento"] = min(datas)[1]
-
-        # TÍTULO: primeiro aceita qualquer leitura matematicamente válida.
-        # Em documentos de AL, os dígitos 9-10 são 17. Isso também permite
-        # localizar o título quando data e inscrição saem grudadas na mesma linha.
-        candidatos = []
-        for texto in textos:
-            for linha in texto.splitlines():
-                numeros_linha = somente_numeros(linha)
-                if len(numeros_linha) >= 12:
-                    for i in range(len(numeros_linha) - 11):
-                        candidatos.append(numeros_linha[i:i + 12])
-
-        titulo_atual = somente_numeros(dados_atuais.get("titulo", ""))
-        if titulo_eleitoral_valido(titulo_atual):
-            candidatos.insert(0, titulo_atual)
-
-        for numero in candidatos:
-            if titulo_eleitoral_valido(numero):
-                # Evita falso positivo formado pela concatenação de uma data.
-                if "ARAPIRACA" in texto_norm or "/ AL" in texto_norm or "AL" in texto_norm:
-                    if numero[8:10] != "17":
-                        continue
-                resultado["titulo"] = numero
-                break
-
-        # Se o OCR acertou os 10 primeiros dígitos e errou apenas os DVs,
-        # recalcula os dois verificadores. Só usa esta recuperação quando AL
-        # aparece no próprio documento e a posição estadual é 17.
-        if not resultado["titulo"] and (
-            "ARAPIRACA" in texto_norm or "/ AL" in texto_norm
-        ):
-            for numero in candidatos:
-                if len(numero) != 12 or numero[8:10] != "17":
-                    continue
-
-                base = numero[:10]
-                digitos = [int(x) for x in base]
-
-                resto_1 = sum(
-                    digitos[i] * (i + 2)
-                    for i in range(8)
-                ) % 11
-                dv_1 = 0 if resto_1 == 10 else resto_1
-
-                resto_2 = (
-                    digitos[8] * 7
-                    + digitos[9] * 8
-                    + dv_1 * 9
-                ) % 11
-                dv_2 = 0 if resto_2 == 10 else resto_2
-
-                recuperado = base + str(dv_1) + str(dv_2)
-                if titulo_eleitoral_valido(recuperado):
-                    resultado["titulo"] = recuperado
-                    break
-
-        # ZONA/SEÇÃO: no PSM 6 os dois campos aparecem antes das demais
-        # sequências curtas. Exclui anos para não confundir emissão/nascimento.
-        texto_psm6 = textos[0] if textos else ""
-        zonas = re.findall(r"(?<!\d)(\d{3})(?!\d)", texto_psm6)
-        if zonas:
-            # Prefere 022 quando explicitamente reconhecida; caso contrário,
-            # usa a primeira zona de três dígitos do documento.
-            resultado["zona"] = "022" if "022" in zonas else zonas[0]
-
-        secoes = []
-        for valor in re.findall(r"(?<!\d)(\d{4})(?!\d)", texto_psm6):
-            numero = int(valor)
-            if 1900 <= numero <= 2100:
-                continue
-            # Partes de datas sem a barra não devem virar seção.
-            if valor in ("0412", "3001", "0604", "2910", "2310"):
-                continue
-            secoes.append(valor)
-
-        if secoes:
-            resultado["secao"] = secoes[0]
-
-        return resultado
-
-    except Exception:
-        return resultado
-
-    finally:
-        try:
-            del imagem
-        except Exception:
-            pass
-        gc.collect()
-
-def aplicar_titulo_eleitoral_especial(dados, especial):
-    if not especial.get("detectado"):
-        return dados
-
-    dados = dict(dados)
-
-    # Título eleitoral físico não contém filiação.
-    # Impede que pedaços do nome do eleitor virem candidatos de mãe.
-    dados["nome_mae"] = ""
-    dados["_candidatos_mae"] = []
-    dados["_titulo_eleitoral"] = True
-
-    if especial.get("nome"):
-        dados["nome"] = especial["nome"]
-    else:
-        dados["nome"] = corrigir_espacos_nome_titulo(
-            dados.get("nome", "")
-        )
-
-    # Nunca conserva um título eleitoral matematicamente inválido.
-    titulo_atual = somente_numeros(dados.get("titulo", ""))
-    if especial.get("titulo"):
-        dados["titulo"] = especial["titulo"]
-    elif titulo_atual and not titulo_eleitoral_valido(titulo_atual):
-        dados["titulo"] = ""
-
-    for campo in ("data_nascimento", "zona", "secao"):
-        if especial.get(campo):
-            dados[campo] = especial[campo]
-
-    return dados
-
-
-# ============================================================
 # 8. EXTRAIR TEXTO NATIVO DO PDF
 # ============================================================
 
@@ -2929,7 +2670,7 @@ if menu == "📸 Envio de Documentos":
                         )
                     ):
                         arquivo.seek(0)
-                        imagem_fallback = ImageOps.exif_transpose(Image.open(arquivo)).convert("RGB")
+                        imagem_fallback = Image.open(arquivo).convert("RGB")
 
                         texto_tesseract = executar_tesseract_imagem(
                             imagem_fallback
@@ -2957,17 +2698,6 @@ if menu == "📸 Envio de Documentos":
                                 dados[
                                     "_candidatos_mae"
                                 ] = candidatos_mae
-
-                        # Tratamento isolado para TÍTULO ELEITORAL.
-                        # É aplicado somente a esse tipo de documento.
-                        especial_titulo = extrair_titulo_eleitoral_especial(
-                            imagem_fallback,
-                            dados
-                        )
-                        dados = aplicar_titulo_eleitoral_especial(
-                            dados,
-                            especial_titulo
-                        )
 
                         del imagem_fallback
                         gc.collect()
@@ -3230,8 +2960,8 @@ if menu == "📸 Envio de Documentos":
             )
 
             st.caption(
-                "Confira os dados abaixo. Telefone e nome da mãe podem ser "
-                "ajustados na própria linha quando necessário."
+                "Confira os dados abaixo. Se o OCR errar algum campo, "
+                "corrija diretamente antes de salvar."
             )
 
             for indice_item, item in enumerate(resultados):
@@ -3244,49 +2974,117 @@ if menu == "📸 Envio de Documentos":
                     )
                     continue
 
-                nome_item = str(
-                    dados_item.get("nome", "") or "NOME NÃO IDENTIFICADO"
-                ).strip()
-
-                resultado_item = str(
-                    item.get("Resultado", "") or "⚠️ CONFERIR"
-                ).strip()
-
-                bases_item = str(
-                    item.get("Bases encontradas", "") or ""
-                ).strip()
-
                 arquivo_item = str(
                     item.get("Arquivo", "Documento") or "Documento"
                 ).strip()
 
-                # Cabeçalho compacto de cada pessoa.
-                cabecalho = (
-                    f"**{nome_item}**  ·  {resultado_item}  ·  "
-                    f"📄 {arquivo_item}"
+                prefixo_chave = (
+                    f"edicao_{indice_item}_"
+                    f"{re.sub(r'[^A-Za-z0-9]+', '_', arquivo_item)}"
                 )
 
-                if bases_item:
-                    cabecalho += f"  ·  🎯 Base: **{bases_item}**"
+                # ------------------------------------------------
+                # CAMPOS EDITÁVEIS DO OCR
+                # ------------------------------------------------
+                # A leitura automática continua sendo o ponto de partida.
+                # O operador corrige somente as exceções.
+                col_nome, col_nasc = st.columns([2.2, 1])
 
-                st.markdown(cabecalho)
+                with col_nome:
+                    nome_editado = st.text_input(
+                        "Nome",
+                        value=str(
+                            dados_item.get("nome", "") or ""
+                        ).strip(),
+                        key=f"{prefixo_chave}_nome"
+                    )
 
-                # Linha principal: documentos e localização.
-                cpf_item = str(dados_item.get("cpf", "") or "—")
-                titulo_item = str(dados_item.get("titulo", "") or "—")
-                nasc_item = str(
-                    dados_item.get("data_nascimento", "") or "—"
+                with col_nasc:
+                    nascimento_editado = st.text_input(
+                        "Nascimento",
+                        value=str(
+                            dados_item.get(
+                                "data_nascimento",
+                                ""
+                            ) or ""
+                        ).strip(),
+                        key=f"{prefixo_chave}_nascimento",
+                        placeholder="DD/MM/AAAA"
+                    )
+
+                col_cpf, col_titulo, col_zona, col_secao = st.columns(
+                    [1.25, 1.35, 0.65, 0.65]
                 )
-                zona_item = str(dados_item.get("zona", "") or "—")
-                secao_item = str(dados_item.get("secao", "") or "—")
 
-                st.caption(
-                    f"CPF: {cpf_item}   •   Título: {titulo_item}   •   "
-                    f"Nascimento: {nasc_item}   •   "
-                    f"Zona/Seção: {zona_item}/{secao_item}"
+                with col_cpf:
+                    cpf_editado = st.text_input(
+                        "CPF",
+                        value=str(
+                            dados_item.get("cpf", "") or ""
+                        ).strip(),
+                        key=f"{prefixo_chave}_cpf"
+                    )
+
+                with col_titulo:
+                    titulo_editado = st.text_input(
+                        "Título",
+                        value=str(
+                            dados_item.get("titulo", "") or ""
+                        ).strip(),
+                        key=f"{prefixo_chave}_titulo"
+                    )
+
+                with col_zona:
+                    zona_editada = st.text_input(
+                        "Zona",
+                        value=str(
+                            dados_item.get("zona", "") or ""
+                        ).strip(),
+                        key=f"{prefixo_chave}_zona"
+                    )
+
+                with col_secao:
+                    secao_editada = st.text_input(
+                        "Seção",
+                        value=str(
+                            dados_item.get("secao", "") or ""
+                        ).strip(),
+                        key=f"{prefixo_chave}_secao"
+                    )
+
+                # Atualiza os dados usados pelo restante do sistema.
+                dados_item["nome"] = str(
+                    nome_editado or ""
+                ).strip().upper()
+
+                dados_item["data_nascimento"] = str(
+                    nascimento_editado or ""
+                ).strip()
+
+                dados_item["cpf"] = somente_numeros(
+                    cpf_editado
                 )
 
-                # Mãe e telefone ficam juntos, sem criar seções separadas.
+                dados_item["titulo"] = somente_numeros(
+                    titulo_editado
+                )
+
+                dados_item["zona"] = somente_numeros(
+                    zona_editada
+                )
+
+                dados_item["secao"] = somente_numeros(
+                    secao_editada
+                )
+
+                # ------------------------------------------------
+                # NOME DA MÃE + TELEFONE
+                # ------------------------------------------------
+                nome_item = str(
+                    dados_item.get("nome", "")
+                    or "NOME NÃO IDENTIFICADO"
+                ).strip()
+
                 col_mae, col_tel = st.columns([2.2, 1])
 
                 with col_mae:
@@ -3304,17 +3102,32 @@ if menu == "📸 Envio de Documentos":
                             candidato or ""
                         ).strip().upper()
 
+                        # Não oferece o próprio nome nem fragmentos óbvios
+                        # do nome do eleitor como candidato a mãe.
+                        candidato_norm = normalizar_rotulo(
+                            candidato
+                        )
+                        nome_norm = normalizar_rotulo(
+                            nome_item
+                        )
+
+                        eh_fragmento_nome = (
+                            candidato_norm
+                            and nome_norm
+                            and (
+                                candidato_norm in nome_norm
+                                or nome_norm in candidato_norm
+                            )
+                        )
+
                         if (
                             candidato
-                            and candidato != nome_item.upper()
+                            and not eh_fragmento_nome
                             and candidato not in candidatos
                         ):
                             candidatos.append(candidato)
 
-                    chave_mae = (
-                        f"mae_compacta_{indice_item}_"
-                        f"{arquivo_item}"
-                    )
+                    chave_mae = f"{prefixo_chave}_mae"
 
                     if not mae_atual and candidatos:
                         escolha_mae = st.selectbox(
@@ -3327,86 +3140,112 @@ if menu == "📸 Envio de Documentos":
                             dados_item["nome_mae"] = escolha_mae
                             item["Nome da mãe"] = escolha_mae
 
-                    elif mae_atual:
-                        st.text_input(
+                    else:
+                        mae_editada = st.text_input(
                             "Nome da mãe",
                             value=mae_atual,
-                            key=chave_mae,
-                            disabled=True
-                        )
-
-                    else:
-                        mae_digitada = st.text_input(
-                            "Nome da mãe",
-                            value="",
                             key=chave_mae,
                             placeholder="Digite se não foi identificada"
                         )
 
-                        if str(mae_digitada).strip():
-                            dados_item["nome_mae"] = (
-                                str(mae_digitada).strip().upper()
-                            )
-                            item["Nome da mãe"] = dados_item["nome_mae"]
+                        dados_item["nome_mae"] = str(
+                            mae_editada or ""
+                        ).strip().upper()
+
+                        item["Nome da mãe"] = dados_item["nome_mae"]
 
                 with col_tel:
-                    chave_tel = (
-                        f"telefone_compacto_{indice_item}_"
-                        f"{arquivo_item}"
-                    )
-
-                    telefone_atual = str(
-                        dados_item.get("telefone", "") or ""
-                    )
-
                     telefone_editado = st.text_input(
                         "Telefone",
-                        value=telefone_atual,
-                        key=chave_tel,
+                        value=str(
+                            dados_item.get("telefone", "") or ""
+                        ),
+                        key=f"{prefixo_chave}_telefone",
                         placeholder="82999999999"
                     )
 
-                    if str(telefone_editado).strip():
-                        telefone_limpo = normalizar_telefone(
-                            telefone_editado
-                        )
-                    else:
-                        telefone_limpo = ""
+                    dados_item["telefone"] = normalizar_telefone(
+                        telefone_editado
+                    ) if str(telefone_editado).strip() else ""
 
-                    dados_item["telefone"] = telefone_limpo
-                    item["Telefone"] = telefone_limpo
+                    item["Telefone"] = dados_item["telefone"]
 
-                # Reclassifica após eventual escolha/digitação do nome da mãe.
-                if resultado_item != "⚠️ JÁ CADASTRADO":
-                    duplicado_atual, _ = verificar_duplicidade(
-                        dados_item,
-                        base
+                # ------------------------------------------------
+                # RECALCULAR DUPLICIDADE + CRUZAMENTO + STATUS
+                # ------------------------------------------------
+                duplicado_atual, existente_atual = verificar_duplicidade(
+                    dados_item,
+                    base
+                )
+
+                resultado_cruzamento = consultar_bases_titulo(
+                    dados_item.get("titulo", "")
+                )
+
+                if resultado_cruzamento.get("sucesso"):
+                    bases_item = str(
+                        resultado_cruzamento.get("texto", "") or ""
+                    ).strip()
+                else:
+                    bases_item = ""
+
+                item["Bases encontradas"] = bases_item
+
+                if duplicado_atual:
+                    item["Resultado"] = "⚠️ JÁ CADASTRADO"
+                    item["Já cadastrado como"] = str(
+                        (existente_atual or {}).get("nome", "") or ""
                     )
-
+                    item["Supervisor atual"] = str(
+                        (existente_atual or {}).get(
+                            "supervisor",
+                            ""
+                        ) or ""
+                    )
+                else:
                     item["Resultado"] = classificar_resultado(
                         dados_item,
-                        duplicado_atual
+                        False
                     )
+                    item["Já cadastrado como"] = ""
+                    item["Supervisor atual"] = ""
 
-                # Se já existe, mostra a referência de forma curta.
+                # Espelha os valores editados no item.
+                item["Nome"] = dados_item.get("nome", "")
+                item["CPF"] = dados_item.get("cpf", "")
+                item["Título"] = dados_item.get("titulo", "")
+                item["Nascimento"] = dados_item.get(
+                    "data_nascimento",
+                    ""
+                )
+                item["Zona"] = dados_item.get("zona", "")
+                item["Seção"] = dados_item.get("secao", "")
+
+                # ------------------------------------------------
+                # RESULTADO SINTÉTICO DEPOIS DAS CORREÇÕES
+                # ------------------------------------------------
+                resumo = f"**{nome_item}**  ·  {item['Resultado']}"
+
+                if bases_item:
+                    resumo += f"  ·  🎯 Base: **{bases_item}**"
+
+                resumo += f"  ·  📄 {arquivo_item}"
+
+                st.markdown(resumo)
+
                 if item.get("Resultado") == "⚠️ JÁ CADASTRADO":
-                    cadastrado_como = str(
-                        item.get("Já cadastrado como", "") or ""
-                    ).strip()
-                    supervisor_atual = str(
-                        item.get("Supervisor atual", "") or ""
-                    ).strip()
-
                     detalhes_duplicado = []
 
-                    if cadastrado_como:
+                    if item.get("Já cadastrado como"):
                         detalhes_duplicado.append(
-                            f"já cadastrado como {cadastrado_como}"
+                            "já cadastrado como "
+                            + item["Já cadastrado como"]
                         )
 
-                    if supervisor_atual:
+                    if item.get("Supervisor atual"):
                         detalhes_duplicado.append(
-                            f"supervisor atual: {supervisor_atual}"
+                            "supervisor atual: "
+                            + item["Supervisor atual"]
                         )
 
                     if detalhes_duplicado:
