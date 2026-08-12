@@ -1728,49 +1728,27 @@ def obter_supervisores(
     base
 ):
     supervisores = []
-
-    subs = [
-        "SEM SUBSUPERVISOR"
-    ]
+    subs = ["SEM SUBSUPERVISOR"]
+    comunidades = []
 
     for item in base:
-        sup = str(
-            item.get(
-                "supervisor",
-                ""
-            )
-        ).strip().upper()
+        sup = str(item.get("supervisor", "")).strip().upper()
+        sub = str(item.get("subsupervisor", "")).strip().upper()
+        comunidade = str(item.get("comunidade", "")).strip().upper()
 
-        sub = str(
-            item.get(
-                "subsupervisor",
-                ""
-            )
-        ).strip().upper()
+        if sup and sup not in supervisores:
+            supervisores.append(sup)
 
-        if (
-            sup
-            and sup not in supervisores
-        ):
-            supervisores.append(
-                sup
-            )
+        if sub and sub not in subs:
+            subs.append(sub)
 
-        if (
-            sub
-            and sub not in subs
-        ):
-            subs.append(
-                sub
-            )
+        if comunidade and comunidade not in comunidades:
+            comunidades.append(comunidade)
 
     return (
-        sorted(
-            supervisores
-        ),
-        sorted(
-            subs
-        )
+        sorted(supervisores),
+        sorted(subs),
+        sorted(comunidades)
     )
 
 
@@ -1797,7 +1775,7 @@ st.markdown(
 
 base = carregar_base()
 
-lista_sup, lista_sub = obter_supervisores(
+lista_sup, lista_sub, lista_comunidade = obter_supervisores(
     base
 )
 
@@ -1849,6 +1827,19 @@ with st.sidebar:
     else:
         sub = sub_opcao
 
+    comunidade_opcao = st.selectbox(
+        "Comunidade",
+        lista_comunidade
+        + ["➕ Cadastrar Nova Comunidade"]
+    )
+
+    if comunidade_opcao == "➕ Cadastrar Nova Comunidade":
+        comunidade = st.text_input(
+            "Nova Comunidade"
+        ).strip().upper()
+    else:
+        comunidade = comunidade_opcao
+
     st.markdown(
         "---"
     )
@@ -1874,7 +1865,8 @@ if menu == "📸 Envio de Documentos":
 
     st.caption(
         f"Supervisor: {supervisor} | "
-        f"Subsupervisor: {sub}"
+        f"Subsupervisor: {sub} | "
+        f"Comunidade: {comunidade or '-'}"
     )
 
     arquivos = st.file_uploader(
@@ -2307,7 +2299,10 @@ elif menu == "✍️ Formulário Manual":
                                 supervisor,
 
                             "subsupervisor":
-                                sub
+                                sub,
+
+                            "comunidade":
+                                comunidade
                         }
 
                         try:
