@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import re
 import io
@@ -3862,18 +3863,46 @@ elif menu == "📊 Relatórios":
                     resultado_relatorio
                 )
 
-                st.download_button(
-                    label="📄 Baixar PDF",
-                    data=pdf_relatorio,
-                    file_name="relatorio_por_nome.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="baixar_pdf_relatorio_nome"
-                )
+                coluna_imprimir, coluna_pdf = st.columns(2)
 
-                st.caption(
-                    "Para imprimir: abra o PDF baixado e use Ctrl+P."
-                )
+                with coluna_imprimir:
+                    if st.button(
+                        "🖨️ Imprimir",
+                        use_container_width=True,
+                        key="imprimir_relatorio_nome"
+                    ):
+                        st.session_state[
+                            "abrir_popup_impressao"
+                        ] = True
+
+                with coluna_pdf:
+                    st.download_button(
+                        label="📄 Baixar PDF",
+                        data=pdf_relatorio,
+                        file_name="relatorio_por_nome.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="baixar_pdf_relatorio_nome"
+                    )
+
+                if st.session_state.get(
+                    "abrir_popup_impressao",
+                    False
+                ):
+                    html_relatorio = relatorios.gerar_html_relatorio_nome(
+                        resultado_relatorio
+                    )
+
+                    components.html(
+                        html_relatorio,
+                        height=1,
+                        scrolling=False
+                    )
+
+                    st.session_state[
+                        "abrir_popup_impressao"
+                    ] = False
+
 
             except Exception as erro_pdf:
                 st.error(
