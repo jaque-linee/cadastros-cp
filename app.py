@@ -3654,7 +3654,8 @@ elif menu == "📊 Relatórios":
         "Tipo de relatório",
         [
             "👤 Por Nome",
-            "📍 Por Zona"
+            "📍 Por Zona",
+            "🏠 Por Domicílio"
         ],
         key="tipo_relatorio"
     )
@@ -4164,6 +4165,248 @@ elif menu == "📊 Relatórios":
                             mime="application/pdf",
                             use_container_width=True,
                             key="baixar_pdf_relatorio_zona"
+                        )
+
+                except Exception as erro_pdf:
+                    st.error(
+                        f"Não foi possível gerar o PDF: {erro_pdf}"
+                    )
+
+    # ========================================================
+    # RELATÓRIO POR DOMICÍLIO
+    # ========================================================
+
+    elif tipo_relatorio == "🏠 Por Domicílio":
+
+        filtros_disponiveis = relatorios.obter_filtros_domicilio(base)
+
+        col_sup, col_sub = st.columns(2)
+
+        with col_sup:
+            filtro_supervisor = st.selectbox(
+                "Supervisor",
+                ["Todos"] + filtros_disponiveis.get("supervisores", []),
+                key="relatorio_domicilio_supervisor"
+            )
+
+        with col_sub:
+            filtro_subsupervisor = st.selectbox(
+                "Subsupervisor",
+                ["Todos"] + filtros_disponiveis.get("subsupervisores", []),
+                key="relatorio_domicilio_subsupervisor"
+            )
+
+        col_dom, col_sit = st.columns(2)
+
+        with col_dom:
+            filtro_domicilio = st.selectbox(
+                "Domicílio",
+                ["Todos"] + filtros_disponiveis.get("domicilios", []),
+                key="relatorio_domicilio_domicilio"
+            )
+
+        with col_sit:
+            filtro_situacao = st.selectbox(
+                "Situação",
+                ["Todas"] + filtros_disponiveis.get("situacoes", []),
+                key="relatorio_domicilio_situacao"
+            )
+
+        gerar_relatorio_domicilio = st.button(
+            "🔎 Gerar relatório",
+            type="primary",
+            use_container_width=True,
+            key="gerar_relatorio_domicilio"
+        )
+
+        if gerar_relatorio_domicilio:
+            st.session_state["relatorio_domicilio_gerado"] = (
+                relatorios.gerar_relatorio_domicilio(
+                    dados_base=base,
+                    supervisor=(
+                        "" if filtro_supervisor == "Todos"
+                        else filtro_supervisor
+                    ),
+                    subsupervisor=(
+                        "" if filtro_subsupervisor == "Todos"
+                        else filtro_subsupervisor
+                    ),
+                    domicilio=(
+                        "" if filtro_domicilio == "Todos"
+                        else filtro_domicilio
+                    ),
+                    situacao=(
+                        "" if filtro_situacao == "Todas"
+                        else filtro_situacao
+                    )
+                )
+            )
+
+        resultado_domicilio = st.session_state.get(
+            "relatorio_domicilio_gerado"
+        )
+
+        if resultado_domicilio is not None:
+            total = resultado_domicilio.get("total", 0)
+            total_domicilios = resultado_domicilio.get("total_domicilios", 0)
+
+            st.markdown(
+                f"""
+                <div style="
+                    background:#ffffff;
+                    border:1px solid #d9e1e8;
+                    border-radius:10px;
+                    padding:10px 14px;
+                    margin:14px 0 12px 0;
+                    font-size:0.95rem;
+                ">
+                    <b>🏠 Relatório por Domicílio</b>
+                    &nbsp;&nbsp; <b>{total}</b> registro(s)
+                    &nbsp;&nbsp; <b>{total_domicilios}</b> domicílio(s)
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            if total == 0:
+                st.info(
+                    "Nenhum cadastro encontrado para os filtros selecionados."
+                )
+
+            else:
+                linhas = []
+
+                for numero, registro in enumerate(
+                    resultado_domicilio.get("registros", []),
+                    start=1
+                ):
+                    linhas.append(
+                        {
+                            "Nº": numero,
+                            "Domicílio": registro.get("domicilio", ""),
+                            "Nome": registro.get("nome", ""),
+                            "Comunidade": registro.get("comunidade", ""),
+                            "Telefone": registro.get("telefone", "")
+                        }
+                    )
+
+                tabela_domicilio = pd.DataFrame(linhas)
+
+                st.dataframe(
+                    tabela_domicilio,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(
+                        38 * len(tabela_domicilio) + 38,
+                        600
+                    )
+                )
+
+                st.markdown("#### Resumo por Domicílio")
+
+                resumo_linhas = []
+
+                for item in resultado_domicilio.get("resumo", []):
+                    resumo_linhas.append(
+                        {
+                            "Domicílio": item.get("domicilio", ""),
+                            "Quantidade": item.get("total", 0)
+                        }
+                    )
+
+                resumo_linhas.append(
+                    {
+                        "Domicílio": "TOTAL GERAL",
+                        "Quantidade": total
+                    }
+                )
+
+                st.dataframe(
+                    pd.DataFrame(resumo_linhas),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                try:
+                    pdf_relatorio_domicilio = (
+                        relatorios.gerar_pdf_relatorio_domicilio(
+                            resultado_domicilio
+                        )
+                    )
+
+                    coluna_imprimir, coluna_pdf = st.columns(2)
+
+                    with coluna_imprimir:
+                        pdf_base64_domicilio = base64.b64encode(
+                            pdf_relatorio_domicilio
+                        ).decode("utf-8")
+
+                        components.html(
+                            f"""
+                            <button onclick="imprimirPDFDomicilio()" style="
+                                width: 100%;
+                                height: 38px;
+                                background: #0056b3;
+                                color: white;
+                                border: 2px solid #0056b3;
+                                border-radius: 12px;
+                                font-weight: bold;
+                                cursor: pointer;
+                                font-family: sans-serif;
+                            ">🖨️ Imprimir</button>
+
+                            <script>
+                            function imprimirPDFDomicilio() {{
+                                const base64 = "{pdf_base64_domicilio}";
+                                const binario = atob(base64);
+                                const bytes = new Uint8Array(binario.length);
+
+                                for (let i = 0; i < binario.length; i++) {{
+                                    bytes[i] = binario.charCodeAt(i);
+                                }}
+
+                                const blob = new Blob(
+                                    [bytes],
+                                    {{type: "application/pdf"}}
+                                );
+
+                                const url = URL.createObjectURL(blob);
+                                const janela = window.open(
+                                    url,
+                                    "_blank",
+                                    "width=1000,height=800"
+                                );
+
+                                if (!janela) {{
+                                    alert(
+                                        "O navegador bloqueou o pop-up. "
+                                        + "Permita pop-ups para este site."
+                                    );
+                                    return;
+                                }}
+
+                                setTimeout(function() {{
+                                    try {{
+                                        janela.focus();
+                                        janela.print();
+                                    }} catch (e) {{
+                                    }}
+                                }}, 1200);
+                            }}
+                            </script>
+                            """,
+                            height=45,
+                            scrolling=False
+                        )
+
+                    with coluna_pdf:
+                        st.download_button(
+                            label="📄 Baixar PDF",
+                            data=pdf_relatorio_domicilio,
+                            file_name="relatorio_por_domicilio.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key="baixar_pdf_relatorio_domicilio"
                         )
 
                 except Exception as erro_pdf:
