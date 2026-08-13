@@ -1676,7 +1676,12 @@ def gerar_pdf_relatorio_domicilio(resultado_relatorio):
 # ============================================================
 
 def _normalizar_titulo_cruzamento(valor):
-    return "".join(c for c in limpar_texto(valor) if c.isdigit())
+    titulo = "".join(
+        c for c in limpar_texto(valor)
+        if c.isdigit()
+    )
+
+    return titulo.lstrip("0")
 
 
 def obter_filtros_cruzamentos(dados_base):
