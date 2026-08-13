@@ -1494,3 +1494,180 @@ def gerar_pdf_relatorio_zona(resultado_relatorio):
     buffer.close()
     return pdf
 
+# ============================================================
+# RELATÓRIO POR DOMICÍLIO
+# ============================================================
+
+def obter_filtros_domicilio(dados_base):
+    supervisores, subsupervisores, domicilios, situacoes = set(), set(), set(), set()
+    for r in dados_base or []:
+        supervisor = limpar_texto(r.get("supervisor", ""))
+        subsupervisor = limpar_texto(r.get("subsupervisor", ""))
+        domicilio = limpar_texto(r.get("domicilio", ""))
+        situacao = limpar_texto(r.get("situacao", ""))
+        if supervisor: supervisores.add(supervisor)
+        if subsupervisor: subsupervisores.add(subsupervisor)
+        if domicilio: domicilios.add(domicilio)
+        if situacao: situacoes.add(situacao)
+    return {
+        "supervisores": sorted(supervisores, key=str.upper),
+        "subsupervisores": sorted(subsupervisores, key=str.upper),
+        "domicilios": sorted(domicilios, key=str.upper),
+        "situacoes": sorted(situacoes, key=str.upper)
+    }
+
+
+def filtrar_relatorio_domicilio(dados_base, supervisor="", subsupervisor="", domicilio="", situacao=""):
+    fs = normalizar_filtro(supervisor)
+    fsub = normalizar_filtro(subsupervisor)
+    fd = normalizar_filtro(domicilio)
+    fsi = normalizar_filtro(situacao)
+    registros = []
+
+    for r in dados_base or []:
+        sup = limpar_texto(r.get("supervisor", ""))
+        sub = limpar_texto(r.get("subsupervisor", ""))
+        dom = limpar_texto(r.get("domicilio", ""))
+        sit = limpar_texto(r.get("situacao", ""))
+
+        if fs and normalizar_filtro(sup) != fs: continue
+        if fsub and normalizar_filtro(sub) != fsub: continue
+        if fd and normalizar_filtro(dom) != fd: continue
+        if fsi and normalizar_filtro(sit) != fsi: continue
+
+        registros.append({
+            "supervisor": sup,
+            "subsupervisor": sub,
+            "domicilio": dom,
+            "nome": limpar_texto(r.get("nome", "")),
+            "comunidade": limpar_texto(r.get("comunidade", "")),
+            "telefone": limpar_texto(r.get("telefone", "")),
+            "situacao": sit
+        })
+
+    registros.sort(key=lambda x: (
+        normalizar_filtro(x["domicilio"]),
+        normalizar_filtro(x["nome"])
+    ))
+    return registros
+
+
+def resumir_relatorio_domicilio(registros):
+    totais = {}
+    for r in registros:
+        dom = limpar_texto(r.get("domicilio", "")) or "SEM DOMICÍLIO"
+        totais[dom] = totais.get(dom, 0) + 1
+    return [
+        {"domicilio": dom, "total": totais[dom]}
+        for dom in sorted(totais, key=str.upper)
+    ]
+
+
+def gerar_relatorio_domicilio(dados_base, supervisor="", subsupervisor="", domicilio="", situacao=""):
+    registros = filtrar_relatorio_domicilio(
+        dados_base, supervisor, subsupervisor, domicilio, situacao
+    )
+    return {
+        "tipo": "domicilio",
+        "titulo": "Relatório por Domicílio",
+        "total": len(registros),
+        "total_domicilios": len({
+            normalizar_filtro(r["domicilio"])
+            for r in registros if limpar_texto(r["domicilio"])
+        }),
+        "filtros": {
+            "supervisor": limpar_texto(supervisor),
+            "subsupervisor": limpar_texto(subsupervisor),
+            "domicilio": limpar_texto(domicilio),
+            "situacao": limpar_texto(situacao)
+        },
+        "registros": registros,
+        "resumo": resumir_relatorio_domicilio(registros)
+    }
+
+
+def gerar_pdf_relatorio_domicilio(resultado_relatorio):
+    buffer = BytesIO()
+    documento = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        rightMargin=1.0*cm, leftMargin=1.0*cm,
+        topMargin=1.2*cm, bottomMargin=1.2*cm,
+        title="Relatório por Domicílio"
+    )
+    estilos = _estilos_pdf()
+    elementos = [Paragraph("RELATÓRIO POR DOMICÍLIO", estilos["titulo"])]
+
+    total = resultado_relatorio.get("total", 0)
+    total_domicilios = resultado_relatorio.get("total_domicilios", 0)
+    filtros = resultado_relatorio.get("filtros", {})
+    partes = []
+    for rotulo, chave in (
+        ("Supervisor","supervisor"), ("Subsupervisor","subsupervisor"),
+        ("Domicílio","domicilio"), ("Situação","situacao")
+    ):
+        valor = limpar_texto(filtros.get(chave, ""))
+        if valor: partes.append(f"{rotulo}: {valor}")
+
+    topo = f"Total: {total} &nbsp;|&nbsp; Domicílios: {total_domicilios}"
+    if partes: topo += "<br/>" + " &nbsp;|&nbsp; ".join(partes)
+    elementos += [Paragraph(topo, estilos["subtitulo"]), Spacer(1, 0.35*cm)]
+
+    registros = resultado_relatorio.get("registros", [])
+    if registros:
+        dados = [[
+            Paragraph("<b>Nº</b>", estilos["texto_centro"]),
+            Paragraph("<b>DOMICÍLIO</b>", estilos["texto"]),
+            Paragraph("<b>NOME</b>", estilos["texto"]),
+            Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
+            Paragraph("<b>TELEFONE</b>", estilos["texto"])
+        ]]
+        for n, r in enumerate(registros, 1):
+            dados.append([
+                Paragraph(str(n), estilos["texto_centro"]),
+                Paragraph(r["domicilio"] or "—", estilos["texto"]),
+                Paragraph(r["nome"] or "—", estilos["texto"]),
+                Paragraph(r["comunidade"] or "—", estilos["texto"]),
+                Paragraph(r["telefone"] or "—", estilos["texto"])
+            ])
+
+        tabela = Table(dados, colWidths=[0.8*cm,4.0*cm,6.2*cm,4.0*cm,3.0*cm], repeatRows=1)
+        tabela.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#EAF2F8")),
+            ("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#D9DEE5")),
+            ("BOX",(0,0),(-1,-1),0.5,colors.HexColor("#C9D2DC")),
+            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+            ("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),
+            ("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)
+        ]))
+        elementos += [tabela, Spacer(1,0.55*cm),
+                      Paragraph("RESUMO POR DOMICÍLIO", estilos["grupo"]),
+                      Spacer(1,0.18*cm)]
+
+        rd = [[Paragraph("<b>DOMICÍLIO</b>", estilos["texto"]),
+               Paragraph("<b>QUANTIDADE</b>", estilos["texto_centro"])]]
+        for item in resultado_relatorio.get("resumo", []):
+            rd.append([
+                Paragraph(item["domicilio"] or "—", estilos["texto"]),
+                Paragraph(str(item["total"]), estilos["texto_centro"])
+            ])
+        rd.append([
+            Paragraph("<b>TOTAL GERAL</b>", estilos["texto"]),
+            Paragraph(f"<b>{total}</b>", estilos["texto_centro"])
+        ])
+
+        tr = Table(rd, colWidths=[11.0*cm,4.0*cm], repeatRows=1)
+        tr.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#F2F4F7")),
+            ("BACKGROUND",(0,-1),(-1,-1),colors.HexColor("#EAF2F8")),
+            ("GRID",(0,0),(-1,-1),0.25,colors.HexColor("#D9DEE5")),
+            ("VALIGN",(0,0),(-1,-1),"MIDDLE")
+        ]))
+        elementos.append(tr)
+    else:
+        elementos.append(Paragraph("Nenhum registro encontrado.", estilos["texto"]))
+
+    documento.build(elementos, onFirstPage=_cabecalho_rodape_pdf, onLaterPages=_cabecalho_rodape_pdf)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
+
