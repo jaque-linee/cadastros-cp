@@ -1183,4 +1183,314 @@ def gerar_html_relatorio_nome(resultado_relatorio):
     </html>
     """
 
+# ============================================================
+# RELATÓRIO POR ZONA
+# ============================================================
+
+def _chave_num_relatorio(valor):
+    texto = limpar_texto(valor)
+    numeros = "".join(c for c in texto if c.isdigit())
+    return (int(numeros) if numeros else 10**12, texto.upper())
+
+
+def obter_filtros_zona(dados_base):
+    supervisores, subsupervisores = set(), set()
+    situacoes, zonas, secoes = set(), set(), set()
+
+    for registro in dados_base or []:
+        campos = {
+            "supervisor": limpar_texto(registro.get("supervisor", "")),
+            "subsupervisor": limpar_texto(registro.get("subsupervisor", "")),
+            "situacao": limpar_texto(registro.get("situacao", "")),
+            "zona": limpar_texto(registro.get("zona", "")),
+            "secao": limpar_texto(registro.get("secao", ""))
+        }
+        if campos["supervisor"]: supervisores.add(campos["supervisor"])
+        if campos["subsupervisor"]: subsupervisores.add(campos["subsupervisor"])
+        if campos["situacao"]: situacoes.add(campos["situacao"])
+        if campos["zona"]: zonas.add(campos["zona"])
+        if campos["secao"]: secoes.add(campos["secao"])
+
+    return {
+        "supervisores": sorted(supervisores, key=str.upper),
+        "subsupervisores": sorted(subsupervisores, key=str.upper),
+        "situacoes": sorted(situacoes, key=str.upper),
+        "zonas": sorted(zonas, key=_chave_num_relatorio),
+        "secoes": sorted(secoes, key=_chave_num_relatorio)
+    }
+
+
+def obter_secoes_por_zona(dados_base, zona=""):
+    zona_filtro = normalizar_filtro(zona)
+    secoes = set()
+
+    for registro in dados_base or []:
+        zona_registro = limpar_texto(registro.get("zona", ""))
+        if zona_filtro and normalizar_filtro(zona_registro) != zona_filtro:
+            continue
+        secao = limpar_texto(registro.get("secao", ""))
+        if secao:
+            secoes.add(secao)
+
+    return sorted(secoes, key=_chave_num_relatorio)
+
+
+def filtrar_relatorio_zona(
+    dados_base,
+    supervisor="",
+    subsupervisor="",
+    zona="",
+    secao="",
+    situacao=""
+):
+    filtros = {
+        "supervisor": normalizar_filtro(supervisor),
+        "subsupervisor": normalizar_filtro(subsupervisor),
+        "zona": normalizar_filtro(zona),
+        "secao": normalizar_filtro(secao),
+        "situacao": normalizar_filtro(situacao)
+    }
+
+    registros = []
+
+    for registro in dados_base or []:
+        atual = {
+            "supervisor": limpar_texto(registro.get("supervisor", "")),
+            "subsupervisor": limpar_texto(registro.get("subsupervisor", "")),
+            "zona": limpar_texto(registro.get("zona", "")),
+            "secao": limpar_texto(registro.get("secao", "")),
+            "situacao": limpar_texto(registro.get("situacao", ""))
+        }
+
+        if any(
+            filtros[chave] and normalizar_filtro(atual[chave]) != filtros[chave]
+            for chave in filtros
+        ):
+            continue
+
+        registros.append({
+            **atual,
+            "nome": limpar_texto(registro.get("nome", "")),
+            "comunidade": limpar_texto(registro.get("comunidade", "")),
+            "telefone": limpar_texto(registro.get("telefone", ""))
+        })
+
+    registros.sort(
+        key=lambda item: (
+            _chave_num_relatorio(item["zona"]),
+            _chave_num_relatorio(item["secao"]),
+            normalizar_filtro(item["nome"])
+        )
+    )
+    return registros
+
+
+def resumir_relatorio_zona(registros):
+    mapa = {}
+
+    for registro in registros:
+        zona = limpar_texto(registro.get("zona", "")) or "SEM ZONA"
+        secao = limpar_texto(registro.get("secao", "")) or "SEM SEÇÃO"
+        mapa.setdefault(zona, {})
+        mapa[zona][secao] = mapa[zona].get(secao, 0) + 1
+
+    resumo = []
+    for zona in sorted(mapa, key=_chave_num_relatorio):
+        secoes = [
+            {"secao": secao, "total": mapa[zona][secao]}
+            for secao in sorted(mapa[zona], key=_chave_num_relatorio)
+        ]
+        resumo.append({
+            "zona": zona,
+            "secoes": secoes,
+            "total": sum(item["total"] for item in secoes)
+        })
+
+    return resumo
+
+
+def gerar_relatorio_zona(
+    dados_base,
+    supervisor="",
+    subsupervisor="",
+    zona="",
+    secao="",
+    situacao=""
+):
+    registros = filtrar_relatorio_zona(
+        dados_base, supervisor, subsupervisor, zona, secao, situacao
+    )
+
+    return {
+        "tipo": "zona",
+        "titulo": "Relatório por Zona",
+        "total": len(registros),
+        "total_zonas": len({r["zona"] for r in registros if r["zona"]}),
+        "total_secoes": len({
+            (r["zona"], r["secao"])
+            for r in registros if r["secao"]
+        }),
+        "filtros": {
+            "supervisor": limpar_texto(supervisor),
+            "subsupervisor": limpar_texto(subsupervisor),
+            "zona": limpar_texto(zona),
+            "secao": limpar_texto(secao),
+            "situacao": limpar_texto(situacao)
+        },
+        "registros": registros,
+        "resumo": resumir_relatorio_zona(registros)
+    }
+
+
+def gerar_pdf_relatorio_zona(resultado_relatorio):
+    buffer = BytesIO()
+    documento = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.0 * cm,
+        leftMargin=1.0 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+        title="Relatório por Zona"
+    )
+
+    estilos = _estilos_pdf()
+    elementos = [
+        Paragraph("RELATÓRIO POR ZONA", estilos["titulo"])
+    ]
+
+    total = resultado_relatorio.get("total", 0)
+    total_zonas = resultado_relatorio.get("total_zonas", 0)
+    total_secoes = resultado_relatorio.get("total_secoes", 0)
+    filtros = resultado_relatorio.get("filtros", {})
+
+    linha_filtros = []
+    for rotulo, chave in (
+        ("Supervisor", "supervisor"),
+        ("Subsupervisor", "subsupervisor"),
+        ("Zona", "zona"),
+        ("Seção", "secao"),
+        ("Situação", "situacao")
+    ):
+        valor = limpar_texto(filtros.get(chave, ""))
+        if valor:
+            linha_filtros.append(f"{rotulo}: {valor}")
+
+    topo = f"Total: {total} &nbsp;|&nbsp; Zonas: {total_zonas} &nbsp;|&nbsp; Seções: {total_secoes}"
+    if linha_filtros:
+        topo += "<br/>" + " &nbsp;|&nbsp; ".join(linha_filtros)
+
+    elementos += [
+        Paragraph(topo, estilos["subtitulo"]),
+        Spacer(1, 0.35 * cm)
+    ]
+
+    registros = resultado_relatorio.get("registros", [])
+
+    if registros:
+        dados = [[
+            Paragraph("<b>Nº</b>", estilos["texto_centro"]),
+            Paragraph("<b>ZONA</b>", estilos["texto_centro"]),
+            Paragraph("<b>SEÇÃO</b>", estilos["texto_centro"]),
+            Paragraph("<b>NOME</b>", estilos["texto"]),
+            Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
+            Paragraph("<b>TELEFONE</b>", estilos["texto"])
+        ]]
+
+        for numero, r in enumerate(registros, 1):
+            dados.append([
+                Paragraph(str(numero), estilos["texto_centro"]),
+                Paragraph(r["zona"] or "—", estilos["texto_centro"]),
+                Paragraph(r["secao"] or "—", estilos["texto_centro"]),
+                Paragraph(r["nome"] or "—", estilos["texto"]),
+                Paragraph(r["comunidade"] or "—", estilos["texto"]),
+                Paragraph(r["telefone"] or "—", estilos["texto"])
+            ])
+
+        tabela = Table(
+            dados,
+            colWidths=[0.8*cm, 1.3*cm, 1.5*cm, 6.4*cm, 4.3*cm, 3.7*cm],
+            repeatRows=1
+        )
+        tabela.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#EAF2F8")),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#D9DEE5")),
+            ("BOX", (0,0), (-1,-1), 0.5, colors.HexColor("#C9D2DC")),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 4),
+            ("RIGHTPADDING", (0,0), (-1,-1), 4),
+            ("TOPPADDING", (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 3)
+        ]))
+        elementos += [tabela, Spacer(1, 0.55*cm)]
+
+        elementos.append(
+            Paragraph("RESUMO POR ZONA E SEÇÃO", estilos["grupo"])
+        )
+        elementos.append(Spacer(1, 0.18*cm))
+
+        resumo_dados = [[
+            Paragraph("<b>ZONA</b>", estilos["texto"]),
+            Paragraph("<b>SEÇÃO</b>", estilos["texto"]),
+            Paragraph("<b>QUANTIDADE</b>", estilos["texto_centro"])
+        ]]
+
+        linhas_total_zona = []
+        for grupo in resultado_relatorio.get("resumo", []):
+            zona = grupo["zona"]
+            for item in grupo["secoes"]:
+                resumo_dados.append([
+                    Paragraph(zona, estilos["texto"]),
+                    Paragraph(item["secao"], estilos["texto"]),
+                    Paragraph(str(item["total"]), estilos["texto_centro"])
+                ])
+            linhas_total_zona.append(len(resumo_dados))
+            resumo_dados.append([
+                Paragraph(f"<b>TOTAL ZONA {zona}</b>", estilos["texto"]),
+                "",
+                Paragraph(f"<b>{grupo['total']}</b>", estilos["texto_centro"])
+            ])
+
+        resumo_dados.append([
+            Paragraph("<b>TOTAL GERAL</b>", estilos["texto"]),
+            "",
+            Paragraph(f"<b>{total}</b>", estilos["texto_centro"])
+        ])
+
+        tabela_resumo = Table(
+            resumo_dados,
+            colWidths=[5.5*cm, 5.5*cm, 4.0*cm],
+            repeatRows=1
+        )
+
+        estilo_resumo = [
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#F2F4F7")),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#D9DEE5")),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("SPAN", (0,-1), (1,-1))
+        ]
+
+        for linha in linhas_total_zona:
+            estilo_resumo += [
+                ("SPAN", (0,linha), (1,linha)),
+                ("BACKGROUND", (0,linha), (-1,linha), colors.HexColor("#EAF2F8"))
+            ]
+
+        tabela_resumo.setStyle(TableStyle(estilo_resumo))
+        elementos.append(tabela_resumo)
+
+    else:
+        elementos.append(
+            Paragraph("Nenhum registro encontrado.", estilos["texto"])
+        )
+
+    documento.build(
+        elementos,
+        onFirstPage=_cabecalho_rodape_pdf,
+        onLaterPages=_cabecalho_rodape_pdf
+    )
+
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
 
