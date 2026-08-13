@@ -92,6 +92,125 @@ def carregar_base(webhook_url, timeout=15):
             "mensagem": f"Erro ao consultar a planilha: {erro}"
         }
 
+def carregar_concorrentes(webhook_url, timeout=15):
+    """
+    Carrega as bases da aba CONCORRENTE
+    através do doGet do Google Apps Script.
+
+    Retorno esperado:
+    {
+        "AF": ["titulo1", "titulo2", ...],
+        "AT": ["titulo1", "titulo2", ...],
+        ...
+    }
+    """
+
+    try:
+        resposta = requests.get(
+            webhook_url,
+            params={
+                "acao": "concorrentes"
+            },
+            timeout=timeout
+        )
+
+        resposta.raise_for_status()
+
+        dados = resposta.json()
+
+        if not isinstance(dados, dict):
+            return {
+                "sucesso": False,
+                "dados": {},
+                "mensagem": (
+                    "Resposta inválida recebida "
+                    "da aba CONCORRENTE."
+                )
+            }
+
+        if dados.get("error"):
+            return {
+                "sucesso": False,
+                "dados": {},
+                "mensagem": str(
+                    dados.get("error")
+                )
+            }
+
+        bases = {}
+
+        for nome_base, titulos in dados.items():
+
+            nome_base = str(
+                nome_base or ""
+            ).strip().upper()
+
+            if not nome_base:
+                continue
+
+            if not isinstance(titulos, list):
+                continue
+
+            titulos_normalizados = set()
+
+            for titulo in titulos:
+
+                titulo_normalizado = normalizar_titulo(
+                    titulo
+                )
+
+                if titulo_normalizado:
+                    titulos_normalizados.add(
+                        titulo_normalizado
+                    )
+
+            bases[nome_base] = titulos_normalizados
+
+        return {
+            "sucesso": True,
+            "dados": bases,
+            "mensagem": ""
+        }
+
+    except requests.exceptions.Timeout:
+        return {
+            "sucesso": False,
+            "dados": {},
+            "mensagem": (
+                "A consulta à aba CONCORRENTE "
+                "demorou demais."
+            )
+        }
+
+    except requests.exceptions.RequestException as erro:
+        return {
+            "sucesso": False,
+            "dados": {},
+            "mensagem": (
+                "Erro de comunicação com a "
+                f"aba CONCORRENTE: {erro}"
+            )
+        }
+
+    except ValueError:
+        return {
+            "sucesso": False,
+            "dados": {},
+            "mensagem": (
+                "A aba CONCORRENTE retornou "
+                "uma resposta que não é JSON."
+            )
+        }
+
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "dados": {},
+            "mensagem": (
+                "Erro ao consultar as bases "
+                f"concorrentes: {erro}"
+            )
+        }
 
 def procurar_duplicidade(
     dados_base,
