@@ -4,6 +4,7 @@
 
 from io import BytesIO
 from datetime import datetime
+import html
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -871,3 +872,315 @@ def gerar_pdf_relatorio_nome(
     buffer.close()
 
     return pdf
+
+# ============================================================
+# GERAR HTML IMPRIMÍVEL DO RELATÓRIO POR NOME
+# ============================================================
+
+def gerar_html_relatorio_nome(resultado_relatorio):
+    """
+    Gera uma janela de impressão do Relatório por Nome.
+
+    O HTML é aberto pelo app em um popup do navegador.
+    Supervisor/Subsupervisor e cabeçalho da tabela
+    são repetidos nas páginas impressas.
+    """
+
+    def escapar(valor):
+        return html.escape(
+            limpar_texto(valor)
+        )
+
+    filtros = resultado_relatorio.get(
+        "filtros",
+        {}
+    )
+
+    situacao = limpar_texto(
+        filtros.get(
+            "situacao",
+            ""
+        )
+    )
+
+    total = resultado_relatorio.get(
+        "total",
+        0
+    )
+
+    grupos = resultado_relatorio.get(
+        "grupos",
+        []
+    )
+
+    partes = []
+
+    for grupo in grupos:
+
+        supervisor = escapar(
+            grupo.get(
+                "supervisor",
+                ""
+            ) or "SEM SUPERVISOR"
+        )
+
+        subsupervisor = escapar(
+            grupo.get(
+                "subsupervisor",
+                ""
+            ) or "SEM SUBSUPERVISOR"
+        )
+
+        registros = grupo.get(
+            "registros",
+            []
+        )
+
+        linhas = []
+
+        for numero, registro in enumerate(
+            registros,
+            start=1
+        ):
+            linhas.append(
+                f"""
+                <tr>
+                    <td class="numero">{numero}</td>
+                    <td>{escapar(registro.get("nome", "")) or "—"}</td>
+                    <td>{escapar(registro.get("comunidade", "")) or "—"}</td>
+                    <td>{escapar(registro.get("telefone", "")) or "—"}</td>
+                </tr>
+                """
+            )
+
+        partes.append(
+            f"""
+            <section class="grupo">
+                <table>
+                    <thead>
+                        <tr class="identificacao">
+                            <th colspan="4">
+                                Supervisor: {supervisor}
+                                &nbsp;&nbsp;&nbsp;
+                                Subsupervisor: {subsupervisor}
+                                &nbsp;&nbsp;&nbsp;
+                                Total: {len(registros)}
+                            </th>
+                        </tr>
+                        <tr class="cabecalho">
+                            <th class="numero">Nº</th>
+                            <th>Nome</th>
+                            <th>Comunidade</th>
+                            <th>Telefone</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join(linhas)}
+                    </tbody>
+                </table>
+            </section>
+            """
+        )
+
+    situacao_html = (
+        f" &nbsp;|&nbsp; Situação: {escapar(situacao)}"
+        if situacao
+        else ""
+    )
+
+    conteudo = "".join(partes)
+
+    if not conteudo:
+        conteudo = "<p>Nenhum registro encontrado.</p>"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Relatório por Nome</title>
+
+        <style>
+            @page {{
+                size: A4;
+                margin: 12mm;
+            }}
+
+            * {{
+                box-sizing: border-box;
+            }}
+
+            body {{
+                margin: 0;
+                font-family: Arial, sans-serif;
+                color: #1f2937;
+                background: white;
+                font-size: 11px;
+            }}
+
+            .acoes {{
+                position: sticky;
+                top: 0;
+                display: flex;
+                justify-content: flex-end;
+                gap: 8px;
+                padding: 10px 0;
+                background: white;
+                border-bottom: 1px solid #ddd;
+                margin-bottom: 12px;
+            }}
+
+            button {{
+                border: 0;
+                border-radius: 6px;
+                padding: 8px 16px;
+                cursor: pointer;
+                font-weight: 600;
+            }}
+
+            .imprimir {{
+                background: #0b5fc6;
+                color: white;
+            }}
+
+            .fechar {{
+                background: #e5e7eb;
+                color: #111827;
+            }}
+
+            h1 {{
+                text-align: center;
+                font-size: 17px;
+                margin: 0 0 4px 0;
+            }}
+
+            .resumo {{
+                text-align: center;
+                color: #666;
+                margin-bottom: 12px;
+            }}
+
+            .grupo {{
+                margin-bottom: 12px;
+            }}
+
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                table-layout: fixed;
+            }}
+
+            thead {{
+                display: table-header-group;
+            }}
+
+            tr {{
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }}
+
+            th,
+            td {{
+                border: 1px solid #d7dce2;
+                padding: 5px 6px;
+                text-align: left;
+                vertical-align: middle;
+            }}
+
+            .identificacao th {{
+                background: #eaf2f8;
+                font-weight: 700;
+            }}
+
+            .cabecalho th {{
+                background: #f2f4f7;
+            }}
+
+            .numero {{
+                width: 7%;
+                text-align: center;
+            }}
+
+            th:nth-child(2),
+            td:nth-child(2) {{
+                width: 45%;
+            }}
+
+            th:nth-child(3),
+            td:nth-child(3) {{
+                width: 28%;
+            }}
+
+            th:nth-child(4),
+            td:nth-child(4) {{
+                width: 20%;
+            }}
+
+            @media print {{
+                .acoes {{
+                    display: none !important;
+                }}
+
+                body {{
+                    font-size: 9px;
+                }}
+
+                .grupo {{
+                    margin-bottom: 8px;
+                }}
+            }}
+        </style>
+    </head>
+
+    <body>
+        <div class="acoes">
+            <button
+                class="imprimir"
+                onclick="window.print()"
+            >
+                🖨️ Imprimir
+            </button>
+
+            <button
+                class="fechar"
+                onclick="window.close()"
+            >
+                Fechar
+            </button>
+        </div>
+
+        <h1>RELATÓRIO POR NOME</h1>
+
+        <div class="resumo">
+            Total de registros: {total}{situacao_html}
+        </div>
+
+        {conteudo}
+
+        <script>
+            /*
+             * O app injeta esta página em um componente.
+             * Abrimos o conteúdo em uma janela separada para
+             * que o navegador possa imprimir somente o relatório.
+             */
+            window.addEventListener("load", function() {{
+                const popup = window.open(
+                    "",
+                    "relatorio_impressao",
+                    "width=1000,height=760,scrollbars=yes,resizable=yes"
+                );
+
+                if (popup) {{
+                    popup.document.open();
+                    popup.document.write(
+                        document.documentElement.outerHTML
+                    );
+                    popup.document.close();
+                }}
+            }});
+        </script>
+    </body>
+    </html>
+    """
+
+
