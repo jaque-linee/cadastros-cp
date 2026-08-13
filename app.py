@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import requests
 import re
 import io
+import base64
 import gc
 import unicodedata
 import numpy as np
@@ -3866,14 +3867,61 @@ elif menu == "📊 Relatórios":
                 coluna_imprimir, coluna_pdf = st.columns(2)
 
                 with coluna_imprimir:
-                    if st.button(
-                        "🖨️ Imprimir",
-                        use_container_width=True,
-                        key="imprimir_relatorio_nome"
-                    ):
-                        st.session_state[
-                            "abrir_popup_impressao"
-                        ] = True
+                    pdf_base64 = base64.b64encode(
+                        pdf_relatorio
+                    ).decode("utf-8")
+
+                    components.html(
+                        f"""
+                        <button onclick="imprimirPDF()" style="
+                            width: 100%;
+                            height: 38px;
+                            background: #0056b3;
+                            color: white;
+                            border: 2px solid #0056b3;
+                            border-radius: 12px;
+                            font-weight: bold;
+                            cursor: pointer;
+                            font-family: sans-serif;
+                        ">🖨️ Imprimir</button>
+
+                        <script>
+                        function imprimirPDF() {{
+                            const base64 = "{pdf_base64}";
+                            const binario = atob(base64);
+                            const bytes = new Uint8Array(binario.length);
+
+                            for (let i = 0; i < binario.length; i++) {{
+                                bytes[i] = binario.charCodeAt(i);
+                            }}
+
+                            const blob = new Blob(
+                                [bytes],
+                                {{type: "application/pdf"}}
+                            );
+
+                            const url = URL.createObjectURL(blob);
+                            const janela = window.open(url, "_blank", "width=1000,height=800");
+
+                            if (!janela) {{
+                                alert("O navegador bloqueou o pop-up. Permita pop-ups para este site.");
+                                return;
+                            }}
+
+                            setTimeout(function() {{
+                                try {{
+                                    janela.focus();
+                                    janela.print();
+                                }} catch (e) {{
+                                    // O PDF continua aberto para impressão manual.
+                                }}
+                            }}, 1200);
+                        }}
+                        </script>
+                        """,
+                        height=45,
+                        scrolling=False
+                    )
 
                 with coluna_pdf:
                     st.download_button(
@@ -3884,24 +3932,6 @@ elif menu == "📊 Relatórios":
                         use_container_width=True,
                         key="baixar_pdf_relatorio_nome"
                     )
-
-                if st.session_state.get(
-                    "abrir_popup_impressao",
-                    False
-                ):
-                    html_relatorio = relatorios.gerar_html_relatorio_nome(
-                        resultado_relatorio
-                    )
-
-                    components.html(
-                        html_relatorio,
-                        height=1,
-                        scrolling=False
-                    )
-
-                    st.session_state[
-                        "abrir_popup_impressao"
-                    ] = False
 
 
             except Exception as erro_pdf:
