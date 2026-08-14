@@ -1772,10 +1772,6 @@ def gerar_relatorio_cruzamentos(
         situacao
     )
 
-    # Mantém os nomes das bases exatamente como vieram
-    # da aba CONCORRENTE. O cruzamento em si passa a usar
-    # a função buscar_titulo() do cruzamento.py, que percorre
-    # TODAS as bases e pode retornar várias para o mesmo título.
     nomes_bases = sorted(
         [
             limpar_texto(nome).upper()
@@ -1785,66 +1781,65 @@ def gerar_relatorio_cruzamentos(
         key=str.upper
     )
 
+    # Monta um SET normalizado para cada base.
+    # Assim cada pessoa é comparada contra TODAS as bases
+    # e pode cruzar em AF + FL + TIM etc. ao mesmo tempo.
+    titulos_por_base = {}
+
+    for nome_original, valores in (bases_concorrentes or {}).items():
+        nome_base = limpar_texto(nome_original).upper()
+
+        if not nome_base:
+            continue
+
+        conjunto = set()
+
+        if isinstance(valores, (list, tuple, set)):
+            for valor in valores:
+                titulo_base = _normalizar_titulo_cruzamento(valor)
+                if titulo_base:
+                    conjunto.add(titulo_base)
+
+        titulos_por_base[nome_base] = conjunto
+
     for r in registros:
-        bases_encontradas_originais = buscar_titulo(
-            r.get("titulo", ""),
-            bases_concorrentes or {}
+        titulo = _normalizar_titulo_cruzamento(
+            r.get("titulo", "")
         )
 
         bases_encontradas = []
-        vistos = set()
 
-        for nome in bases_encontradas_originais:
-            base = limpar_texto(nome).upper()
-            if base and base not in vistos:
-                vistos.add(base)
-                bases_encontradas.append(base)
+        if titulo:
+            for base in nomes_bases:
+                if titulo in titulos_por_base.get(base, set()):
+                    bases_encontradas.append(base)
 
         cruzamentos = {
-            base: base in vistos
+            base: base in bases_encontradas
             for base in nomes_bases
         }
 
         r["cruzamentos"] = cruzamentos
         r["bases_cruzadas"] = bases_encontradas
-        r["cruzamentos_texto"] = ", ".join(
-            bases_encontradas
-        )
-        r["cruzou_alguma"] = bool(
-            bases_encontradas
-        )
+        r["cruzamentos_texto"] = " | ".join(bases_encontradas)
+        r["cruzou_alguma"] = bool(bases_encontradas)
 
-    base_filtro = normalizar_filtro(
-        base_cruzada
-    )
-    resultado_filtro = normalizar_filtro(
-        resultado_cruzamento
-    )
+    base_filtro = normalizar_filtro(base_cruzada)
+    resultado_filtro = normalizar_filtro(resultado_cruzamento)
 
     registros_filtrados = []
 
     for r in registros:
         if base_filtro:
             cruzou_base = bool(
-                r.get(
-                    "cruzamentos",
-                    {}
-                ).get(
-                    base_filtro
-                )
+                r.get("cruzamentos", {}).get(base_filtro)
             )
 
-            if (
-                resultado_filtro == "CRUZOU"
-                and not cruzou_base
-            ):
+            if resultado_filtro == "CRUZOU" and not cruzou_base:
                 continue
 
             if (
-                resultado_filtro in (
-                    "NÃO CRUZOU",
-                    "NAO CRUZOU"
-                )
+                resultado_filtro in ("NÃO CRUZOU", "NAO CRUZOU")
                 and cruzou_base
             ):
                 continue
@@ -1857,10 +1852,7 @@ def gerar_relatorio_cruzamentos(
                 continue
 
             if (
-                resultado_filtro in (
-                    "NÃO CRUZOU",
-                    "NAO CRUZOU"
-                )
+                resultado_filtro in ("NÃO CRUZOU", "NAO CRUZOU")
                 and r["cruzou_alguma"]
             ):
                 continue
@@ -1886,13 +1878,17 @@ def gerar_relatorio_cruzamentos(
             total_sem += 1
 
         for b in nomes_bases:
-            if r.get(
-                "cruzamentos",
-                {}
-            ).get(b):
+            if r.get("cruzamentos", {}).get(b):
                 resumo[b]["cruzaram"] += 1
             else:
                 resumo[b]["nao_cruzaram"] += 1
+
+    # No resumo aparecem apenas bases que tiveram cruzamento.
+    resumo_bases = [
+        resumo[b]
+        for b in nomes_bases
+        if resumo[b]["cruzaram"] > 0
+    ]
 
     return {
         "tipo": "cruzamentos",
@@ -1901,20 +1897,13 @@ def gerar_relatorio_cruzamentos(
         "total_com_cruzamento": total_com,
         "total_sem_cruzamento": total_sem,
         "bases": nomes_bases,
-        "resumo_bases": [
-            resumo[b]
-            for b in nomes_bases
-        ],
+        "resumo_bases": resumo_bases,
         "filtros": {
             "supervisor": limpar_texto(supervisor),
             "subsupervisor": limpar_texto(subsupervisor),
             "situacao": limpar_texto(situacao),
-            "base_cruzada": limpar_texto(
-                base_cruzada
-            ).upper(),
-            "resultado_cruzamento": limpar_texto(
-                resultado_cruzamento
-            )
+            "base_cruzada": limpar_texto(base_cruzada).upper(),
+            "resultado_cruzamento": limpar_texto(resultado_cruzamento)
         },
         "registros": registros_filtrados,
         "grupos": agrupar_relatorio_nome(
@@ -2097,11 +2086,12 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 )
 
             colunas = [
-                1.7*cm,
-                7.2*cm,
-                4.5*cm,
-                3.2*cm,
-                9.5*cm
+                0.55*cm,   # marcador
+                0.85*cm,   # nº
+                7.2*cm,    # nome
+                4.5*cm,    # comunidade
+                3.2*cm,    # telefone
+                9.5*cm     # cruzamentos
             ]
 
             tabela = Table(
@@ -2137,20 +2127,18 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
 
         rd = [[
             Paragraph("<b>BASE</b>", estilos["texto"]),
-            Paragraph("<b>CRUZARAM</b>", estilos["texto_centro"]),
-            Paragraph("<b>NÃO CRUZARAM</b>", estilos["texto_centro"])
+            Paragraph("<b>CRUZARAM</b>", estilos["texto_centro"])
         ]]
 
         for item in resultado_relatorio.get("resumo_bases", []):
             rd.append([
                 Paragraph(item["base"], estilos["texto"]),
-                Paragraph(str(item["cruzaram"]), estilos["texto_centro"]),
-                Paragraph(str(item["nao_cruzaram"]), estilos["texto_centro"])
+                Paragraph(str(item["cruzaram"]), estilos["texto_centro"])
             ])
 
         tr = Table(
             rd,
-            colWidths=[7.0*cm, 4.0*cm, 4.0*cm],
+            colWidths=[9.0*cm, 4.0*cm],
             repeatRows=1
         )
 
@@ -2165,13 +2153,13 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
 
         elementos.append(
             Paragraph(
-                f"<b>Com cruzamento em pelo menos uma base:</b> "
+                f"<b>Total exibido:</b> {total}"
+                f"&nbsp;&nbsp;|&nbsp;&nbsp;"
+                f"<b>Com cruzamento:</b> "
                 f"{resultado_relatorio.get('total_com_cruzamento', 0)}"
                 f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-                f"<b>Sem cruzamento em nenhuma base:</b> "
-                f"{resultado_relatorio.get('total_sem_cruzamento', 0)}"
-                f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-                f"<b>Total:</b> {total}",
+                f"<b>Sem cruzamento:</b> "
+                f"{resultado_relatorio.get('total_sem_cruzamento', 0)}",
                 estilos["texto"]
             )
         )
