@@ -1797,11 +1797,25 @@ def gerar_relatorio_cruzamentos(
                 algum = True
 
         r["cruzamentos"] = cruzamentos
+
+        # Usa exatamente o mesmo mapa de verdadeiro/falso
+        # que alimentava os X nas antigas colunas.
+        bases_encontradas = [
+            nome_base
+            for nome_base in nomes_bases
+            if cruzamentos.get(
+                nome_base,
+                False
+            )
+        ]
+
         r["bases_cruzadas"] = bases_encontradas
         r["cruzamentos_texto"] = ", ".join(
             bases_encontradas
         )
-        r["cruzou_alguma"] = algum
+        r["cruzou_alguma"] = bool(
+            bases_encontradas
+        )
 
     base_filtro = normalizar_filtro(
         base_cruzada
