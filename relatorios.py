@@ -1981,7 +1981,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
 
             registros = grupo.get("registros", [])
 
-            total_colunas = 6
+            total_colunas = 5
 
             identificacao = Paragraph(
                 f"<b>Supervisor:</b> {supervisor}"
@@ -1993,7 +1993,6 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
             )
 
             cabecalho = [
-                Paragraph("", estilos["texto_centro"]),
                 Paragraph("<b>Nº</b>", estilos["texto_centro"]),
                 Paragraph("<b>NOME</b>", estilos["texto"]),
                 Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
@@ -2045,15 +2044,21 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                     or "—"
                 )
 
-                marcador_pdf = (
-                    "●"
-                    if cruzou
-                    else ""
-                )
-
-                numero_pdf = str(
-                    numero
-                )
+                # Marcador e número ficam na MESMA célula.
+                # A bolinha invisível nas linhas sem cruzamento
+                # mantém todos os números exatamente alinhados.
+                if cruzou:
+                    numero_pdf = (
+                        '<font size="7"><b>●</b></font>'
+                        '&nbsp;&nbsp;'
+                        + str(numero)
+                    )
+                else:
+                    numero_pdf = (
+                        '<font color="#FFFFFF" size="7"><b>●</b></font>'
+                        '&nbsp;&nbsp;'
+                        + str(numero)
+                    )
 
                 if cruzou:
                     nome_pdf = (
@@ -2068,10 +2073,6 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                     cruzamentos_pdf = "—"
 
                 linha = [
-                    Paragraph(
-                        marcador_pdf,
-                        estilo_marcador_pdf
-                    ),
                     Paragraph(
                         numero_pdf,
                         estilos["texto_centro"]
@@ -2099,8 +2100,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 )
 
             colunas = [
-                0.70*cm,   # marcador
-                0.85*cm,   # nº
+                1.55*cm,   # nº + marcador
                 7.2*cm,    # nome
                 4.5*cm,    # comunidade
                 3.2*cm,    # telefone
@@ -2125,8 +2125,6 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 ("RIGHTPADDING", (0,0), (-1,-1), 3),
                 ("TOPPADDING", (0,0), (-1,-1), 3),
                 ("BOTTOMPADDING", (0,0), (-1,-1), 3),
-                ("LEFTPADDING", (0,1), (0,-1), 0),
-                ("RIGHTPADDING", (0,1), (0,-1), 0),
                 ("ALIGN", (0,1), (0,-1), "CENTER")
             ]))
 
