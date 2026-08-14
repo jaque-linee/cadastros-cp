@@ -1926,6 +1926,19 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
     )
 
     estilos = _estilos_pdf()
+
+    # Estilo exclusivo do marcador no PDF.
+    estilo_marcador_pdf = ParagraphStyle(
+        "MarcadorCruzamentoPDF",
+        parent=estilos["texto_centro"],
+        fontName="Helvetica-Bold",
+        fontSize=5,
+        leading=5,
+        alignment=TA_CENTER,
+        spaceBefore=0,
+        spaceAfter=0
+    )
+
     elementos = [
         Paragraph("RELATÓRIO DE CRUZAMENTOS", estilos["titulo"])
     ]
@@ -2033,7 +2046,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 )
 
                 marcador_pdf = (
-                    '<font size="7"><b>●</b></font>'
+                    "●"
                     if cruzou
                     else ""
                 )
@@ -2057,7 +2070,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 linha = [
                     Paragraph(
                         marcador_pdf,
-                        estilos["texto_centro"]
+                        estilo_marcador_pdf
                     ),
                     Paragraph(
                         numero_pdf,
@@ -2086,7 +2099,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 )
 
             colunas = [
-                0.55*cm,   # marcador
+                0.70*cm,   # marcador
                 0.85*cm,   # nº
                 7.2*cm,    # nome
                 4.5*cm,    # comunidade
@@ -2111,7 +2124,10 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 ("LEFTPADDING", (0,0), (-1,-1), 3),
                 ("RIGHTPADDING", (0,0), (-1,-1), 3),
                 ("TOPPADDING", (0,0), (-1,-1), 3),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 3)
+                ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+                ("LEFTPADDING", (0,1), (0,-1), 0),
+                ("RIGHTPADDING", (0,1), (0,-1), 0),
+                ("ALIGN", (0,1), (0,-1), "CENTER")
             ]))
 
             elementos.append(tabela)
