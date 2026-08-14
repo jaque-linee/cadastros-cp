@@ -5,6 +5,7 @@
 from io import BytesIO
 from datetime import datetime
 import html
+from cruzamento import buscar_titulo
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -1765,50 +1766,46 @@ def gerar_relatorio_cruzamentos(
     resultado_cruzamento=""
 ):
     registros = filtrar_relatorio_cruzamentos(
-        dados_base, supervisor, subsupervisor, situacao
+        dados_base,
+        supervisor,
+        subsupervisor,
+        situacao
     )
 
-    bases = {}
-    for nome_base, titulos in (bases_concorrentes or {}).items():
-        nome = limpar_texto(nome_base).upper()
-        if not nome:
-            continue
-        bases[nome] = {
-            _normalizar_titulo_cruzamento(t)
-            for t in (titulos or [])
-            if _normalizar_titulo_cruzamento(t)
-        }
-
-    nomes_bases = sorted(bases, key=str.upper)
+    # Mantém os nomes das bases exatamente como vieram
+    # da aba CONCORRENTE. O cruzamento em si passa a usar
+    # a função buscar_titulo() do cruzamento.py, que percorre
+    # TODAS as bases e pode retornar várias para o mesmo título.
+    nomes_bases = sorted(
+        [
+            limpar_texto(nome).upper()
+            for nome in (bases_concorrentes or {}).keys()
+            if limpar_texto(nome)
+        ],
+        key=str.upper
+    )
 
     for r in registros:
-        cruzamentos = {}
+        bases_encontradas_originais = buscar_titulo(
+            r.get("titulo", ""),
+            bases_concorrentes or {}
+        )
+
         bases_encontradas = []
-        algum = False
+        vistos = set()
 
-        for b in nomes_bases:
-            cruzou = bool(r["titulo"] and r["titulo"] in bases[b])
-            cruzamentos[b] = cruzou
+        for nome in bases_encontradas_originais:
+            base = limpar_texto(nome).upper()
+            if base and base not in vistos:
+                vistos.add(base)
+                bases_encontradas.append(base)
 
-            if cruzou:
-                bases_encontradas.append(
-                    b
-                )
-                algum = True
+        cruzamentos = {
+            base: base in vistos
+            for base in nomes_bases
+        }
 
         r["cruzamentos"] = cruzamentos
-
-        # Usa exatamente o mesmo mapa de verdadeiro/falso
-        # que alimentava os X nas antigas colunas.
-        bases_encontradas = [
-            nome_base
-            for nome_base in nomes_bases
-            if cruzamentos.get(
-                nome_base,
-                False
-            )
-        ]
-
         r["bases_cruzadas"] = bases_encontradas
         r["cruzamentos_texto"] = ", ".join(
             bases_encontradas
@@ -1820,7 +1817,6 @@ def gerar_relatorio_cruzamentos(
     base_filtro = normalizar_filtro(
         base_cruzada
     )
-
     resultado_filtro = normalizar_filtro(
         resultado_cruzamento
     )
@@ -1869,9 +1865,7 @@ def gerar_relatorio_cruzamentos(
             ):
                 continue
 
-        registros_filtrados.append(
-            r
-        )
+        registros_filtrados.append(r)
 
     resumo = {
         b: {
@@ -1895,9 +1889,7 @@ def gerar_relatorio_cruzamentos(
             if r.get(
                 "cruzamentos",
                 {}
-            ).get(
-                b
-            ):
+            ).get(b):
                 resumo[b]["cruzaram"] += 1
             else:
                 resumo[b]["nao_cruzaram"] += 1
@@ -1909,20 +1901,26 @@ def gerar_relatorio_cruzamentos(
         "total_com_cruzamento": total_com,
         "total_sem_cruzamento": total_sem,
         "bases": nomes_bases,
-        "resumo_bases": [resumo[b] for b in nomes_bases],
+        "resumo_bases": [
+            resumo[b]
+            for b in nomes_bases
+        ],
         "filtros": {
             "supervisor": limpar_texto(supervisor),
             "subsupervisor": limpar_texto(subsupervisor),
             "situacao": limpar_texto(situacao),
-            "base_cruzada": limpar_texto(base_cruzada).upper(),
-            "resultado_cruzamento": limpar_texto(resultado_cruzamento)
+            "base_cruzada": limpar_texto(
+                base_cruzada
+            ).upper(),
+            "resultado_cruzamento": limpar_texto(
+                resultado_cruzamento
+            )
         },
         "registros": registros_filtrados,
         "grupos": agrupar_relatorio_nome(
             registros_filtrados
         )
     }
-
 
 def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
     from reportlab.lib.pagesizes import landscape
@@ -1981,7 +1979,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
 
             registros = grupo.get("registros", [])
 
-            total_colunas = 5
+            total_colunas = 6
 
             identificacao = Paragraph(
                 f"<b>Supervisor:</b> {supervisor}"
@@ -1993,6 +1991,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
             )
 
             cabecalho = [
+                Paragraph("", estilos["texto_centro"]),
                 Paragraph("<b>Nº</b>", estilos["texto_centro"]),
                 Paragraph("<b>NOME</b>", estilos["texto"]),
                 Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
