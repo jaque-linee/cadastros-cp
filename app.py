@@ -4620,10 +4620,14 @@ elif menu == "📊 Relatórios":
                                 registro.get("cruzou_alguma")
                             )
 
-                            numero_exibido = (
-                                f"●   {numero}"
+                            marcador = (
+                                "●"
                                 if cruzou
-                                else str(numero)
+                                else ""
+                            )
+
+                            numero_exibido = str(
+                                numero
                             )
 
                             cruzamentos_texto = (
@@ -4636,6 +4640,7 @@ elif menu == "📊 Relatórios":
 
                             linhas_tabela.append(
                                 {
+                                    "●": marcador,
                                     "Nº": numero_exibido,
                                     "Nome": registro.get("nome", ""),
                                     "Comunidade": registro.get(
@@ -4659,6 +4664,10 @@ elif menu == "📊 Relatórios":
                                 600
                             ),
                             column_config={
+                                "●": st.column_config.TextColumn(
+                                    "",
+                                    width="small"
+                                ),
                                 "Nº": st.column_config.TextColumn(
                                     "Nº",
                                     width="small"
