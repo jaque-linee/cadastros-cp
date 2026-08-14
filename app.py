@@ -4434,10 +4434,7 @@ elif menu == "📊 Relatórios":
             )
 
         else:
-            bases_concorrentes = consulta_concorrentes.get(
-                "bases",
-                {}
-            )
+            bases_concorrentes = consulta_concorrentes.get("bases", {})
 
             filtros_disponiveis = relatorios.obter_filtros_cruzamentos(
                 base,
