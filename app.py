@@ -4421,287 +4421,381 @@ elif menu == "📊 Relatórios":
 
     elif tipo_relatorio == "🔀 Cruzamentos":
 
-        filtros_disponiveis = relatorios.obter_filtros_cruzamentos(base)
-
-        col_sup, col_sub, col_sit = st.columns(3)
-
-        with col_sup:
-            filtro_supervisor = st.selectbox(
-                "Supervisor",
-                ["Todos"] + filtros_disponiveis.get("supervisores", []),
-                key="relatorio_cruzamentos_supervisor"
-            )
-
-        with col_sub:
-            filtro_subsupervisor = st.selectbox(
-                "Subsupervisor",
-                ["Todos"] + filtros_disponiveis.get("subsupervisores", []),
-                key="relatorio_cruzamentos_subsupervisor"
-            )
-
-        with col_sit:
-            filtro_situacao = st.selectbox(
-                "Situação",
-                ["Todas"] + filtros_disponiveis.get("situacoes", []),
-                key="relatorio_cruzamentos_situacao"
-            )
-
-        gerar_cruzamentos = st.button(
-            "🔎 Gerar relatório",
-            type="primary",
-            use_container_width=True,
-            key="gerar_relatorio_cruzamentos"
+        consulta_concorrentes = sheets.carregar_concorrentes(
+            WEBHOOK_URL
         )
 
-        if gerar_cruzamentos:
-            consulta_concorrentes = sheets.carregar_concorrentes(WEBHOOK_URL)
-
-            if not consulta_concorrentes.get("sucesso"):
-                st.error(
-                    consulta_concorrentes.get(
-                        "mensagem",
-                        "Não foi possível carregar as bases concorrentes."
-                    )
+        if not consulta_concorrentes.get("sucesso"):
+            st.error(
+                consulta_concorrentes.get(
+                    "mensagem",
+                    "Não foi possível carregar as bases concorrentes."
                 )
-            else:
+            )
+
+        else:
+            bases_concorrentes = consulta_concorrentes.get(
+                "dados",
+                {}
+            )
+
+            filtros_disponiveis = relatorios.obter_filtros_cruzamentos(
+                base,
+                bases_concorrentes
+            )
+
+            col_sup, col_sub, col_sit = st.columns(3)
+
+            with col_sup:
+                filtro_supervisor = st.selectbox(
+                    "Supervisor",
+                    ["Todos"] + filtros_disponiveis.get(
+                        "supervisores",
+                        []
+                    ),
+                    key="relatorio_cruzamentos_supervisor"
+                )
+
+            with col_sub:
+                filtro_subsupervisor = st.selectbox(
+                    "Subsupervisor",
+                    ["Todos"] + filtros_disponiveis.get(
+                        "subsupervisores",
+                        []
+                    ),
+                    key="relatorio_cruzamentos_subsupervisor"
+                )
+
+            with col_sit:
+                filtro_situacao = st.selectbox(
+                    "Situação",
+                    ["Todas"] + filtros_disponiveis.get(
+                        "situacoes",
+                        []
+                    ),
+                    key="relatorio_cruzamentos_situacao"
+                )
+
+            col_base, col_resultado = st.columns(2)
+
+            with col_base:
+                filtro_base_cruzada = st.selectbox(
+                    "Base cruzada",
+                    ["Todas"] + filtros_disponiveis.get(
+                        "bases",
+                        []
+                    ),
+                    key="relatorio_cruzamentos_base"
+                )
+
+            with col_resultado:
+                filtro_resultado_cruzamento = st.selectbox(
+                    "Resultado",
+                    [
+                        "Todos",
+                        "Cruzou",
+                        "Não cruzou"
+                    ],
+                    key="relatorio_cruzamentos_resultado"
+                )
+
+            gerar_cruzamentos = st.button(
+                "🔎 Gerar relatório",
+                type="primary",
+                use_container_width=True,
+                key="gerar_relatorio_cruzamentos"
+            )
+
+            if gerar_cruzamentos:
                 st.session_state["relatorio_cruzamentos_gerado"] = (
                     relatorios.gerar_relatorio_cruzamentos(
                         dados_base=base,
-                        bases_concorrentes=consulta_concorrentes.get("dados", {}),
+                        bases_concorrentes=bases_concorrentes,
                         supervisor=(
-                            "" if filtro_supervisor == "Todos"
+                            ""
+                            if filtro_supervisor == "Todos"
                             else filtro_supervisor
                         ),
                         subsupervisor=(
-                            "" if filtro_subsupervisor == "Todos"
+                            ""
+                            if filtro_subsupervisor == "Todos"
                             else filtro_subsupervisor
                         ),
                         situacao=(
-                            "" if filtro_situacao == "Todas"
+                            ""
+                            if filtro_situacao == "Todas"
                             else filtro_situacao
+                        ),
+                        base_cruzada=(
+                            ""
+                            if filtro_base_cruzada == "Todas"
+                            else filtro_base_cruzada
+                        ),
+                        resultado_cruzamento=(
+                            ""
+                            if filtro_resultado_cruzamento == "Todos"
+                            else filtro_resultado_cruzamento
                         )
                     )
                 )
 
-        resultado_cruzamentos = st.session_state.get(
-            "relatorio_cruzamentos_gerado"
-        )
-
-        if resultado_cruzamentos is not None:
-            total = resultado_cruzamentos.get("total", 0)
-            total_com = resultado_cruzamentos.get(
-                "total_com_cruzamento",
-                0
-            )
-            total_sem = resultado_cruzamentos.get(
-                "total_sem_cruzamento",
-                0
-            )
-            bases_cruzamento = resultado_cruzamentos.get("bases", [])
-
-            st.markdown(
-                f"""
-                <div style="
-                    background:#ffffff;
-                    border:1px solid #d9e1e8;
-                    border-radius:10px;
-                    padding:10px 14px;
-                    margin:14px 0 12px 0;
-                    font-size:0.95rem;
-                ">
-                    <b>🔀 Relatório de Cruzamentos</b>
-                    &nbsp;&nbsp; <b>{total}</b> registro(s)
-                    &nbsp;&nbsp; <b>{total_com}</b> com cruzamento
-                    &nbsp;&nbsp; <b>{total_sem}</b> sem cruzamento
-                </div>
-                """,
-                unsafe_allow_html=True
+            resultado_cruzamentos = st.session_state.get(
+                "relatorio_cruzamentos_gerado"
             )
 
-            if total == 0:
-                st.info(
-                    "Nenhum cadastro encontrado para os filtros selecionados."
+            if resultado_cruzamentos is not None:
+                total = resultado_cruzamentos.get("total", 0)
+                total_com = resultado_cruzamentos.get(
+                    "total_com_cruzamento",
+                    0
                 )
-            else:
-                for grupo in resultado_cruzamentos.get("grupos", []):
-                    nome_supervisor = str(
-                        grupo.get("supervisor", "SEM SUPERVISOR")
-                    ).strip()
+                total_sem = resultado_cruzamentos.get(
+                    "total_sem_cruzamento",
+                    0
+                )
 
-                    nome_subsupervisor = str(
-                        grupo.get("subsupervisor", "SEM SUBSUPERVISOR")
-                    ).strip()
+                st.markdown(
+                    f"""
+                    <div style="
+                        background:#ffffff;
+                        border:1px solid #d9e1e8;
+                        border-radius:10px;
+                        padding:10px 14px;
+                        margin:14px 0 12px 0;
+                        font-size:0.95rem;
+                    ">
+                        <b>🔀 Relatório de Cruzamentos</b>
+                        &nbsp;&nbsp; <b>{total}</b> registro(s)
+                        &nbsp;&nbsp; <b>{total_com}</b> com cruzamento
+                        &nbsp;&nbsp; <b>{total_sem}</b> sem cruzamento
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
-                    registros_grupo = grupo.get("registros", [])
-
-                    st.markdown(
-                        f"""
-                        <div style="
-                            background:#f7f9fb;
-                            border-left:4px solid #0056b3;
-                            padding:8px 12px;
-                            margin-top:12px;
-                            margin-bottom:6px;
-                            border-radius:6px;
-                        ">
-                            <b>Supervisor:</b> {nome_supervisor}
-                            &nbsp;&nbsp;&nbsp;
-                            <b>Subsupervisor:</b> {nome_subsupervisor}
-                            &nbsp;&nbsp;&nbsp;
-                            <b>Total:</b> {len(registros_grupo)}
-                        </div>
-                        """,
-                        unsafe_allow_html=True
+                if total == 0:
+                    st.info(
+                        "Nenhum cadastro encontrado para os filtros selecionados."
                     )
 
-                    linhas = []
+                else:
+                    for grupo in resultado_cruzamentos.get("grupos", []):
+                        nome_supervisor = str(
+                            grupo.get("supervisor", "SEM SUPERVISOR")
+                        ).strip()
 
-                    for numero, registro in enumerate(
-                        registros_grupo,
-                        start=1
-                    ):
-                        linha = {
-                            "Nº": numero,
-                            "Nome": registro.get("nome", ""),
-                            "Comunidade": registro.get("comunidade", ""),
-                            "Telefone": registro.get("telefone", "")
-                        }
+                        nome_subsupervisor = str(
+                            grupo.get("subsupervisor", "SEM SUBSUPERVISOR")
+                        ).strip()
 
-                        cruzamentos_registro = registro.get(
-                            "cruzamentos",
-                            {}
+                        registros_grupo = grupo.get("registros", [])
+
+                        st.markdown(
+                            f"""
+                            <div style="
+                                background:#f7f9fb;
+                                border-left:4px solid #0056b3;
+                                padding:8px 12px;
+                                margin-top:12px;
+                                margin-bottom:6px;
+                                border-radius:6px;
+                            ">
+                                <b>Supervisor:</b> {nome_supervisor}
+                                &nbsp;&nbsp;&nbsp;
+                                <b>Subsupervisor:</b> {nome_subsupervisor}
+                                &nbsp;&nbsp;&nbsp;
+                                <b>Total:</b> {len(registros_grupo)}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
                         )
 
-                        for nome_base in bases_cruzamento:
-                            linha[nome_base] = (
-                                "✓"
-                                if cruzamentos_registro.get(nome_base)
-                                else ""
+                        linhas_tabela = []
+
+                        for numero, registro in enumerate(
+                            registros_grupo,
+                            start=1
+                        ):
+                            cruzou = bool(
+                                registro.get("cruzou_alguma")
                             )
 
-                        linhas.append(linha)
+                            numero_exibido = (
+                                f"●   {numero}"
+                                if cruzou
+                                else str(numero)
+                            )
+
+                            cruzamentos_texto = (
+                                registro.get(
+                                    "cruzamentos_texto",
+                                    ""
+                                )
+                                or "—"
+                            )
+
+                            linhas_tabela.append(
+                                {
+                                    "Nº": numero_exibido,
+                                    "Nome": registro.get("nome", ""),
+                                    "Comunidade": registro.get(
+                                        "comunidade",
+                                        ""
+                                    ),
+                                    "Telefone": registro.get(
+                                        "telefone",
+                                        ""
+                                    ),
+                                    "Cruzamentos": cruzamentos_texto
+                                }
+                            )
+
+                        st.dataframe(
+                            pd.DataFrame(linhas_tabela),
+                            use_container_width=True,
+                            hide_index=True,
+                            height=min(
+                                38 * len(linhas_tabela) + 38,
+                                600
+                            ),
+                            column_config={
+                                "Nº": st.column_config.TextColumn(
+                                    "Nº",
+                                    width="small"
+                                ),
+                                "Nome": st.column_config.TextColumn(
+                                    "Nome",
+                                    width="large"
+                                ),
+                                "Comunidade": st.column_config.TextColumn(
+                                    "Comunidade",
+                                    width="medium"
+                                ),
+                                "Telefone": st.column_config.TextColumn(
+                                    "Telefone",
+                                    width="medium"
+                                ),
+                                "Cruzamentos": st.column_config.TextColumn(
+                                    "Cruzamentos",
+                                    width="large"
+                                )
+                            }
+                        )
+
+                    st.markdown("#### Resumo dos Cruzamentos")
+
+                    resumo_linhas = []
+
+                    for item in resultado_cruzamentos.get(
+                        "resumo_bases",
+                        []
+                    ):
+                        resumo_linhas.append(
+                            {
+                                "Base": item.get("base", ""),
+                                "Cruzaram": item.get("cruzaram", 0),
+                                "Não cruzaram": item.get(
+                                    "nao_cruzaram",
+                                    0
+                                )
+                            }
+                        )
 
                     st.dataframe(
-                        pd.DataFrame(linhas),
+                        pd.DataFrame(resumo_linhas),
                         use_container_width=True,
-                        hide_index=True,
-                        height=min(
-                            38 * len(linhas) + 38,
-                            600
+                        hide_index=True
+                    )
+
+                    st.caption(
+                        f"Com cruzamento em pelo menos uma base: {total_com} | "
+                        f"Sem cruzamento em nenhuma base: {total_sem} | "
+                        f"Total: {total}"
+                    )
+
+                    try:
+                        pdf_cruzamentos = (
+                            relatorios.gerar_pdf_relatorio_cruzamentos(
+                                resultado_cruzamentos
+                            )
                         )
-                    )
 
-                st.markdown("#### Resumo dos Cruzamentos")
+                        coluna_imprimir, coluna_pdf = st.columns(2)
 
-                resumo_linhas = []
+                        with coluna_imprimir:
+                            pdf_base64_cruzamentos = base64.b64encode(
+                                pdf_cruzamentos
+                            ).decode("utf-8")
 
-                for item in resultado_cruzamentos.get(
-                    "resumo_bases",
-                    []
-                ):
-                    resumo_linhas.append(
-                        {
-                            "Base": item.get("base", ""),
-                            "Cruzaram": item.get("cruzaram", 0),
-                            "Não cruzaram": item.get("nao_cruzaram", 0)
-                        }
-                    )
+                            components.html(
+                                f"""
+                                <button onclick="imprimirPDFCruzamentos()" style="
+                                    width: 100%;
+                                    height: 38px;
+                                    background: #0056b3;
+                                    color: white;
+                                    border: 2px solid #0056b3;
+                                    border-radius: 12px;
+                                    font-weight: bold;
+                                    cursor: pointer;
+                                    font-family: sans-serif;
+                                ">🖨️ Imprimir</button>
 
-                st.dataframe(
-                    pd.DataFrame(resumo_linhas),
-                    use_container_width=True,
-                    hide_index=True
-                )
+                                <script>
+                                function imprimirPDFCruzamentos() {{
+                                    const base64 = "{pdf_base64_cruzamentos}";
+                                    const binario = atob(base64);
+                                    const bytes = new Uint8Array(binario.length);
 
-                st.caption(
-                    f"Com cruzamento em pelo menos uma base: {total_com} | "
-                    f"Sem cruzamento em nenhuma base: {total_sem} | "
-                    f"Total: {total}"
-                )
-
-                try:
-                    pdf_cruzamentos = (
-                        relatorios.gerar_pdf_relatorio_cruzamentos(
-                            resultado_cruzamentos
-                        )
-                    )
-
-                    coluna_imprimir, coluna_pdf = st.columns(2)
-
-                    with coluna_imprimir:
-                        pdf_base64_cruzamentos = base64.b64encode(
-                            pdf_cruzamentos
-                        ).decode("utf-8")
-
-                        components.html(
-                            f"""
-                            <button onclick="imprimirPDFCruzamentos()" style="
-                                width: 100%;
-                                height: 38px;
-                                background: #0056b3;
-                                color: white;
-                                border: 2px solid #0056b3;
-                                border-radius: 12px;
-                                font-weight: bold;
-                                cursor: pointer;
-                                font-family: sans-serif;
-                            ">🖨️ Imprimir</button>
-
-                            <script>
-                            function imprimirPDFCruzamentos() {{
-                                const base64 = "{pdf_base64_cruzamentos}";
-                                const binario = atob(base64);
-                                const bytes = new Uint8Array(binario.length);
-
-                                for (let i = 0; i < binario.length; i++) {{
-                                    bytes[i] = binario.charCodeAt(i);
-                                }}
-
-                                const blob = new Blob(
-                                    [bytes],
-                                    {{type: "application/pdf"}}
-                                );
-
-                                const url = URL.createObjectURL(blob);
-                                const janela = window.open(
-                                    url,
-                                    "_blank",
-                                    "width=1000,height=800"
-                                );
-
-                                if (!janela) {{
-                                    alert(
-                                        "O navegador bloqueou o pop-up. "
-                                        + "Permita pop-ups para este site."
-                                    );
-                                    return;
-                                }}
-
-                                setTimeout(function() {{
-                                    try {{
-                                        janela.focus();
-                                        janela.print();
-                                    }} catch (e) {{
+                                    for (let i = 0; i < binario.length; i++) {{
+                                        bytes[i] = binario.charCodeAt(i);
                                     }}
-                                }}, 1200);
-                            }}
-                            </script>
-                            """,
-                            height=45,
-                            scrolling=False
-                        )
 
-                    with coluna_pdf:
-                        st.download_button(
-                            label="📄 Baixar PDF",
-                            data=pdf_cruzamentos,
-                            file_name="relatorio_de_cruzamentos.pdf",
-                            mime="application/pdf",
-                            use_container_width=True,
-                            key="baixar_pdf_relatorio_cruzamentos"
-                        )
+                                    const blob = new Blob(
+                                        [bytes],
+                                        {{type: "application/pdf"}}
+                                    );
 
-                except Exception as erro_pdf:
-                    st.error(
-                        f"Não foi possível gerar o PDF: {erro_pdf}"
-                    )
+                                    const url = URL.createObjectURL(blob);
+                                    const janela = window.open(
+                                        url,
+                                        "_blank",
+                                        "width=1000,height=800"
+                                    );
+
+                                    if (!janela) {{
+                                        alert(
+                                            "O navegador bloqueou o pop-up. "
+                                            + "Permita pop-ups para este site."
+                                        );
+                                        return;
+                                    }}
+
+                                    setTimeout(function() {{
+                                        try {{
+                                            janela.focus();
+                                            janela.print();
+                                        }} catch (e) {{
+                                        }}
+                                    }}, 1200);
+                                }}
+                                </script>
+                                """,
+                                height=45,
+                                scrolling=False
+                            )
+
+                        with coluna_pdf:
+                            st.download_button(
+                                label="📄 Baixar PDF",
+                                data=pdf_cruzamentos,
+                                file_name="relatorio_de_cruzamentos.pdf",
+                                mime="application/pdf",
+                                use_container_width=True,
+                                key="baixar_pdf_relatorio_cruzamentos"
+                            )
+
+                    except Exception as erro_pdf:
+                        st.error(
+                            f"Não foi possível gerar o PDF: {erro_pdf}"
+                        )
