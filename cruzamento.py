@@ -16,13 +16,17 @@ def somente_numeros(valor):
 
 def normalizar_titulo(valor):
     """
-    Normaliza o título para comparação.
-
-    Remove qualquer caractere não numérico
-    e desconsidera zeros à esquerda.
+    Normaliza o título para comparação de forma segura,
+    removendo qualquer parte decimal (.0) que o Excel/Sheets adicione.
     """
-
-    titulo = somente_numeros(valor)
+    if valor is None:
+        return ""
+    
+    # Converte para string e remove ponto decimal indesejado (ex: 123.0 vira 123)
+    texto = str(valor).strip().split('.')[0]
+    
+    # Extrai apenas os números
+    titulo = re.sub(r"\D", "", texto)
 
     if not titulo:
         return ""
