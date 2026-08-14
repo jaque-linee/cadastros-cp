@@ -2033,7 +2033,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 )
 
                 marcador_pdf = (
-                    '<font size="15"><b>●</b></font>'
+                    '<font size="7"><b>●</b></font>'
                     if cruzou
                     else ""
                 )
