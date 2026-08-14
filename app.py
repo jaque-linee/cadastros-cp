@@ -4435,7 +4435,7 @@ elif menu == "📊 Relatórios":
 
         else:
             bases_concorrentes = consulta_concorrentes.get(
-                "dados",
+                "bases",
                 {}
             )
 
