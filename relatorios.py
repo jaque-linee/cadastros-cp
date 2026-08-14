@@ -1684,8 +1684,34 @@ def _normalizar_titulo_cruzamento(valor):
     return titulo.lstrip("0")
 
 
-def obter_filtros_cruzamentos(dados_base):
-    return obter_filtros_nome(dados_base)
+def obter_filtros_cruzamentos(
+    dados_base,
+    bases_concorrentes=None
+):
+    filtros = obter_filtros_nome(
+        dados_base
+    )
+
+    bases = []
+
+    for nome_base in (
+        bases_concorrentes or {}
+    ).keys():
+        nome = limpar_texto(
+            nome_base
+        ).upper()
+
+        if nome:
+            bases.append(
+                nome
+            )
+
+    filtros["bases"] = sorted(
+        set(bases),
+        key=str.upper
+    )
+
+    return filtros
 
 
 def filtrar_relatorio_cruzamentos(
@@ -1734,7 +1760,9 @@ def gerar_relatorio_cruzamentos(
     bases_concorrentes,
     supervisor="",
     subsupervisor="",
-    situacao=""
+    situacao="",
+    base_cruzada="",
+    resultado_cruzamento=""
 ):
     registros = filtrar_relatorio_cruzamentos(
         dados_base, supervisor, subsupervisor, situacao
@@ -1752,39 +1780,118 @@ def gerar_relatorio_cruzamentos(
         }
 
     nomes_bases = sorted(bases, key=str.upper)
+
+    for r in registros:
+        cruzamentos = {}
+        bases_encontradas = []
+        algum = False
+
+        for b in nomes_bases:
+            cruzou = bool(r["titulo"] and r["titulo"] in bases[b])
+            cruzamentos[b] = cruzou
+
+            if cruzou:
+                bases_encontradas.append(
+                    b
+                )
+                algum = True
+
+        r["cruzamentos"] = cruzamentos
+        r["bases_cruzadas"] = bases_encontradas
+        r["cruzamentos_texto"] = ", ".join(
+            bases_encontradas
+        )
+        r["cruzou_alguma"] = algum
+
+    base_filtro = normalizar_filtro(
+        base_cruzada
+    )
+
+    resultado_filtro = normalizar_filtro(
+        resultado_cruzamento
+    )
+
+    registros_filtrados = []
+
+    for r in registros:
+        if base_filtro:
+            cruzou_base = bool(
+                r.get(
+                    "cruzamentos",
+                    {}
+                ).get(
+                    base_filtro
+                )
+            )
+
+            if (
+                resultado_filtro == "CRUZOU"
+                and not cruzou_base
+            ):
+                continue
+
+            if (
+                resultado_filtro in (
+                    "NÃO CRUZOU",
+                    "NAO CRUZOU"
+                )
+                and cruzou_base
+            ):
+                continue
+
+        else:
+            if (
+                resultado_filtro == "CRUZOU"
+                and not r["cruzou_alguma"]
+            ):
+                continue
+
+            if (
+                resultado_filtro in (
+                    "NÃO CRUZOU",
+                    "NAO CRUZOU"
+                )
+                and r["cruzou_alguma"]
+            ):
+                continue
+
+        registros_filtrados.append(
+            r
+        )
+
     resumo = {
-        b: {"base": b, "cruzaram": 0, "nao_cruzaram": 0}
+        b: {
+            "base": b,
+            "cruzaram": 0,
+            "nao_cruzaram": 0
+        }
         for b in nomes_bases
     }
 
     total_com = 0
     total_sem = 0
 
-    for r in registros:
-        cruzamentos = {}
-        algum = False
-
-        for b in nomes_bases:
-            cruzou = bool(r["titulo"] and r["titulo"] in bases[b])
-            cruzamentos[b] = cruzou
-            if cruzou:
-                resumo[b]["cruzaram"] += 1
-                algum = True
-            else:
-                resumo[b]["nao_cruzaram"] += 1
-
-        r["cruzamentos"] = cruzamentos
-        r["cruzou_alguma"] = algum
-
-        if algum:
+    for r in registros_filtrados:
+        if r["cruzou_alguma"]:
             total_com += 1
         else:
             total_sem += 1
 
+        for b in nomes_bases:
+            if r.get(
+                "cruzamentos",
+                {}
+            ).get(
+                b
+            ):
+                resumo[b]["cruzaram"] += 1
+            else:
+                resumo[b]["nao_cruzaram"] += 1
+
     return {
         "tipo": "cruzamentos",
         "titulo": "Relatório de Cruzamentos",
-        "total": len(registros),
+        "total": len(registros_filtrados),
         "total_com_cruzamento": total_com,
         "total_sem_cruzamento": total_sem,
         "bases": nomes_bases,
@@ -1792,10 +1899,14 @@ def gerar_relatorio_cruzamentos(
         "filtros": {
             "supervisor": limpar_texto(supervisor),
             "subsupervisor": limpar_texto(subsupervisor),
-            "situacao": limpar_texto(situacao)
+            "situacao": limpar_texto(situacao),
+            "base_cruzada": limpar_texto(base_cruzada).upper(),
+            "resultado_cruzamento": limpar_texto(resultado_cruzamento)
         },
-        "registros": registros,
-        "grupos": agrupar_relatorio_nome(registros)
+        "registros": registros_filtrados,
+        "grupos": agrupar_relatorio_nome(
+            registros_filtrados
+        )
     }
 
 
@@ -1825,7 +1936,9 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
     for rotulo, chave in (
         ("Supervisor", "supervisor"),
         ("Subsupervisor", "subsupervisor"),
-        ("Situação", "situacao")
+        ("Situação", "situacao"),
+        ("Base", "base_cruzada"),
+        ("Resultado", "resultado_cruzamento")
     ):
         valor = limpar_texto(filtros.get(chave, ""))
         if valor:
@@ -1840,7 +1953,6 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
         Spacer(1, 0.35*cm)
     ]
 
-    bases = resultado_relatorio.get("bases", [])
     grupos = resultado_relatorio.get("grupos", [])
 
     if grupos:
@@ -1848,12 +1960,14 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
             supervisor = limpar_texto(
                 grupo.get("supervisor", "")
             ) or "SEM SUPERVISOR"
+
             subsupervisor = limpar_texto(
                 grupo.get("subsupervisor", "")
             ) or "SEM SUBSUPERVISOR"
+
             registros = grupo.get("registros", [])
 
-            total_colunas = 4 + len(bases)
+            total_colunas = 5
 
             identificacao = Paragraph(
                 f"<b>Supervisor:</b> {supervisor}"
@@ -1868,11 +1982,8 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 Paragraph("<b>Nº</b>", estilos["texto_centro"]),
                 Paragraph("<b>NOME</b>", estilos["texto"]),
                 Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
-                Paragraph("<b>TELEFONE</b>", estilos["texto"])
-            ]
-            cabecalho += [
-                Paragraph(f"<b>{b}</b>", estilos["texto_centro"])
-                for b in bases
+                Paragraph("<b>TELEFONE</b>", estilos["texto"]),
+                Paragraph("<b>CRUZAMENTOS</b>", estilos["texto"])
             ]
 
             dados = [
@@ -1881,27 +1992,102 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
             ]
 
             for numero, r in enumerate(registros, 1):
-                linha = [
-                    Paragraph(str(numero), estilos["texto_centro"]),
-                    Paragraph(r.get("nome", "") or "—", estilos["texto"]),
-                    Paragraph(r.get("comunidade", "") or "—", estilos["texto"]),
-                    Paragraph(r.get("telefone", "") or "—", estilos["texto"])
-                ]
-                cruz = r.get("cruzamentos", {})
-                linha += [
-                    Paragraph(
-                        "X" if cruz.get(b) else "",
-                        estilos["texto_centro"]
+                cruzou = bool(
+                    r.get(
+                        "cruzou_alguma"
                     )
-                    for b in bases
-                ]
-                dados.append(linha)
+                )
 
-            largura_util = landscape(A4)[0] - 1.4*cm
-            fixas = [0.7*cm, 6.0*cm, 3.6*cm, 2.8*cm]
-            restante = largura_util - sum(fixas)
-            largura_base = restante / len(bases) if bases else 0
-            colunas = fixas + [largura_base for _ in bases]
+                nome = (
+                    r.get(
+                        "nome",
+                        ""
+                    )
+                    or "—"
+                )
+
+                comunidade = (
+                    r.get(
+                        "comunidade",
+                        ""
+                    )
+                    or "—"
+                )
+
+                telefone = (
+                    r.get(
+                        "telefone",
+                        ""
+                    )
+                    or "—"
+                )
+
+                cruzamentos_texto = (
+                    r.get(
+                        "cruzamentos_texto",
+                        ""
+                    )
+                    or "—"
+                )
+
+                if cruzou:
+                    numero_pdf = (
+                        '<font size="15">'
+                        '<b>●</b>'
+                        '</font>'
+                        f'&nbsp;&nbsp;<b>{numero}</b>'
+                    )
+
+                    nome_pdf = (
+                        f"<b>{nome}</b>"
+                    )
+
+                    cruzamentos_pdf = (
+                        f"<b>{cruzamentos_texto}</b>"
+                    )
+                else:
+                    numero_pdf = str(
+                        numero
+                    )
+
+                    nome_pdf = nome
+
+                    cruzamentos_pdf = "—"
+
+                linha = [
+                    Paragraph(
+                        numero_pdf,
+                        estilos["texto_centro"]
+                    ),
+                    Paragraph(
+                        nome_pdf,
+                        estilos["texto"]
+                    ),
+                    Paragraph(
+                        comunidade,
+                        estilos["texto"]
+                    ),
+                    Paragraph(
+                        telefone,
+                        estilos["texto"]
+                    ),
+                    Paragraph(
+                        cruzamentos_pdf,
+                        estilos["texto"]
+                    )
+                ]
+
+                dados.append(
+                    linha
+                )
+
+            colunas = [
+                1.7*cm,
+                7.2*cm,
+                4.5*cm,
+                3.2*cm,
+                9.5*cm
+            ]
 
             tabela = Table(
                 dados,
@@ -1909,6 +2095,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 repeatRows=2,
                 hAlign="CENTER"
             )
+
             tabela.setStyle(TableStyle([
                 ("SPAN", (0,0), (-1,0)),
                 ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#EAF2F8")),
@@ -1921,6 +2108,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 ("TOPPADDING", (0,0), (-1,-1), 3),
                 ("BOTTOMPADDING", (0,0), (-1,-1), 3)
             ]))
+
             elementos.append(tabela)
 
             if indice_grupo < len(grupos) - 1:
@@ -1950,11 +2138,13 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
             colWidths=[7.0*cm, 4.0*cm, 4.0*cm],
             repeatRows=1
         )
+
         tr.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#F2F4F7")),
             ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#D9DEE5")),
             ("VALIGN", (0,0), (-1,-1), "MIDDLE")
         ]))
+
         elementos.append(tr)
         elementos.append(Spacer(1, 0.25*cm))
 
@@ -1970,6 +2160,7 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
                 estilos["texto"]
             )
         )
+
     else:
         elementos.append(
             Paragraph("Nenhum registro encontrado.", estilos["texto"])
