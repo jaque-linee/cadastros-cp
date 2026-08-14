@@ -1904,7 +1904,6 @@ def gerar_relatorio_cruzamentos(
         "resumo_bases": [
             resumo[b]
             for b in nomes_bases
-            if resumo[b]["cruzaram"] > 0
         ],
         "filtros": {
             "supervisor": limpar_texto(supervisor),
@@ -2141,6 +2140,9 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
         ]]
 
         for item in resultado_relatorio.get("resumo_bases", []):
+            if item.get("cruzaram", 0) <= 0:
+                continue
+
             rd.append([
                 Paragraph(item["base"], estilos["texto"]),
                 Paragraph(str(item["cruzaram"]), estilos["texto_centro"])
