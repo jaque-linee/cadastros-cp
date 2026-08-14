@@ -14,6 +14,7 @@ import fitz
 import sheets
 import cruzamento
 import relatorios
+st.write("RELATORIOS CARREGADO DE:", relatorios.__file__)
 from validacoes import (
     somente_numeros,
     normalizar_texto,
