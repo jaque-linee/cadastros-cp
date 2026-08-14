@@ -1904,6 +1904,7 @@ def gerar_relatorio_cruzamentos(
         "resumo_bases": [
             resumo[b]
             for b in nomes_bases
+            if resumo[b]["cruzaram"] > 0
         ],
         "filtros": {
             "supervisor": limpar_texto(supervisor),
@@ -2135,20 +2136,18 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
 
         rd = [[
             Paragraph("<b>BASE</b>", estilos["texto"]),
-            Paragraph("<b>CRUZARAM</b>", estilos["texto_centro"]),
-            Paragraph("<b>NÃO CRUZARAM</b>", estilos["texto_centro"])
+            Paragraph("<b>CRUZARAM</b>", estilos["texto_centro"])
         ]]
 
         for item in resultado_relatorio.get("resumo_bases", []):
             rd.append([
                 Paragraph(item["base"], estilos["texto"]),
-                Paragraph(str(item["cruzaram"]), estilos["texto_centro"]),
-                Paragraph(str(item["nao_cruzaram"]), estilos["texto_centro"])
+                Paragraph(str(item["cruzaram"]), estilos["texto_centro"])
             ])
 
         tr = Table(
             rd,
-            colWidths=[7.0*cm, 4.0*cm, 4.0*cm],
+            colWidths=[9.0*cm, 4.0*cm],
             repeatRows=1
         )
 
@@ -2163,13 +2162,15 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
 
         elementos.append(
             Paragraph(
-                f"<b>Com cruzamento em pelo menos uma base:</b> "
-                f"{resultado_relatorio.get('total_com_cruzamento', 0)}"
-                f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-                f"<b>Sem cruzamento em nenhuma base:</b> "
-                f"{resultado_relatorio.get('total_sem_cruzamento', 0)}"
-                f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-                f"<b>Total:</b> {total}",
+                f"<b>{total} registros exibidos</b>"
+                f"&nbsp;&nbsp;•&nbsp;&nbsp;"
+                f"{resultado_relatorio.get('total_com_cruzamento', 0)} com cruzamento"
+                + (
+                    f"&nbsp;&nbsp;•&nbsp;&nbsp;"
+                    f"{resultado_relatorio.get('total_sem_cruzamento', 0)} sem cruzamento"
+                    if resultado_relatorio.get('total_sem_cruzamento', 0) > 0
+                    else ""
+                ),
                 estilos["texto"]
             )
         )
