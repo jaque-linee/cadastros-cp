@@ -434,21 +434,8 @@ def extrair_dados_tesseract(texto, imagem_original=None):
             if dados["data_nascimento"]:
                 break
 
-    if not dados["data_nascimento"]:
-        datas = []
-        for match in re.finditer(padrao_data, texto):
-            valor = (
-                f"{match.group(1)}/"
-                f"{match.group(2)}/"
-                f"{match.group(3)}"
-            )
-            if data_valida(valor) and valor not in datas:
-                datas.append(valor)
-
-        # Em identidade podem existir emissão e validade.
-        # Só usa fallback global quando houver uma única data.
-        if len(datas) == 1:
-            dados["data_nascimento"] = datas[0]
+    # Sem rótulo de nascimento, não usa uma data solta do documento.
+    # Ela pode ser emissão, validade ou outro campo.
 
     # Mãe com rótulo explícito no texto linear
     for i, linha in enumerate(linhas):
@@ -1119,7 +1106,11 @@ def parece_nome(texto):
         "FILIACAO",
         "ASSINATURA",
         "PERMISSAO",
-        "CATEGORIA"
+        "CATEGORIA",
+        "POLEGAR",
+        "CHREITA",
+        "IMPRESSAO",
+        "DIGITAL"
     ]
 
     for termo in ignorar:
@@ -1289,23 +1280,7 @@ def extrair_dados_pdf_digital(texto):
                 dados["data_nascimento"] = candidatos[0]
                 break
 
-    if not dados["data_nascimento"]:
-        for linha in linhas:
-            match = re.search(
-                r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b",
-                linha
-            )
-
-            if match:
-                valor = (
-                    f"{match.group(1)}/"
-                    f"{match.group(2)}/"
-                    f"{match.group(3)}"
-                )
-
-                if data_valida(valor):
-                    dados["data_nascimento"] = valor
-                    break
+    # Sem rótulo explícito de nascimento, não usa data solta.
 
     # 3. CPF
     for i, linha in enumerate(linhas):
@@ -1730,19 +1705,7 @@ def encontrar_nascimento_ocr(itens):
             candidatos.sort()
             return candidatos[0][2]
 
-    # Fallback conservador: se só houver uma data válida no documento,
-    # ela pode ser usada como nascimento. Com várias datas, não adivinha.
-    datas = []
-
-    for item in itens:
-        for match in re.finditer(padrao_data, str(item["texto"])):
-            valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
-            if data_valida(valor) and valor not in datas:
-                datas.append(valor)
-
-    if len(datas) == 1:
-        return datas[0]
-
+    # Sem rótulo de nascimento, não adivinha usando data isolada.
     return ""
 
 
@@ -2988,6 +2951,11 @@ if menu == "📸 Envio de Documentos":
                     )
                     continue
 
+                # Garante os campos complementares mesmo quando o OCR
+                # daquele tipo de documento ainda não os reconheceu.
+                for campo_extra in ("rg", "endereco", "numero", "bairro", "cidade"):
+                    dados_item.setdefault(campo_extra, "")
+
                 arquivo_item = str(
                     item.get("Arquivo", "Documento") or "Documento"
                 ).strip()
@@ -3090,6 +3058,54 @@ if menu == "📸 Envio de Documentos":
                 dados_item["secao"] = somente_numeros(
                     secao_editada
                 )
+
+                # ------------------------------------------------
+                # DADOS COMPLEMENTARES
+                # ------------------------------------------------
+                col_rg, col_endereco, col_numero = st.columns([1, 2.4, 0.7])
+
+                with col_rg:
+                    rg_editado = st.text_input(
+                        "RG",
+                        value=str(dados_item.get("rg", "") or "").strip(),
+                        key=f"{prefixo_chave}_rg"
+                    )
+
+                with col_endereco:
+                    endereco_editado = st.text_input(
+                        "Endereço",
+                        value=str(dados_item.get("endereco", "") or "").strip(),
+                        key=f"{prefixo_chave}_endereco"
+                    )
+
+                with col_numero:
+                    numero_editado = st.text_input(
+                        "Nº",
+                        value=str(dados_item.get("numero", "") or "").strip(),
+                        key=f"{prefixo_chave}_numero"
+                    )
+
+                col_bairro, col_cidade = st.columns([1.5, 1.5])
+
+                with col_bairro:
+                    bairro_editado = st.text_input(
+                        "Bairro",
+                        value=str(dados_item.get("bairro", "") or "").strip(),
+                        key=f"{prefixo_chave}_bairro"
+                    )
+
+                with col_cidade:
+                    cidade_editada = st.text_input(
+                        "Cidade",
+                        value=str(dados_item.get("cidade", "") or "").strip(),
+                        key=f"{prefixo_chave}_cidade"
+                    )
+
+                dados_item["rg"] = somente_numeros(rg_editado)
+                dados_item["endereco"] = str(endereco_editado or "").strip().upper()
+                dados_item["numero"] = str(numero_editado or "").strip().upper()
+                dados_item["bairro"] = str(bairro_editado or "").strip().upper()
+                dados_item["cidade"] = str(cidade_editada or "").strip().upper()
 
                 # ------------------------------------------------
                 # NOME DA MÃE + TELEFONE
