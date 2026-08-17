@@ -2151,36 +2151,31 @@ def extrair_dados_ocr(
                     break
 
     # --------------------------------------------------------
-    # NASCIMENTO - procura SOMENTE junto ao rótulo de nascimento.
-    # Dá prioridade ao RG/CIN, evitando DATA DE EMISSÃO.
+    # NASCIMENTO - busca robusta com validação de ano plausível
+    # (Evita datas de contas de consumo/vencimento recentes)
     # --------------------------------------------------------
     if not nascimento:
         candidatos_nasc = []
 
         for i, linha in enumerate(linhas):
             rot = normalizar_rotulo(linha)
-            if "NASC" not in rot and "BIRTH" not in rot:
-                continue
-
-            bloco = " ".join(linhas[i:min(i + 3, len(linhas))])
+            # Varre linhas próximas a chaves de nascimento
+            bloco = " ".join(linhas[max(0, i-1):min(i + 4, len(linhas))])
             for m in re.finditer(
-                r"(?<!\d)(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})(?!\d)",
+                r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b",
                 bloco
             ):
-                valor = f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
-                if data_valida(valor):
-                    candidatos_nasc.append(valor)
+                dia, mes, ano_str = m.group(1), m.group(2), m.group(3)
+                ano = int(ano_str)
+                # Ignora anos de faturas recentes (ex: 2026) e foca em nascimento (1900-2012)
+                if 1900 <= ano <= 2012:
+                    valor = f"{int(dia):02d}/{int(mes):02d}/{ano_str}"
+                    if data_valida(valor):
+                        candidatos_nasc.append(valor)
 
-        # Se houver mais de um documento, prefere a data repetida; se não,
-        # prefere a primeira data ligada explicitamente a NASCIMENTO.
         if candidatos_nasc:
-            contagem = {}
-            for valor in candidatos_nasc:
-                contagem[valor] = contagem.get(valor, 0) + 1
-            nascimento = sorted(
-                candidatos_nasc,
-                key=lambda v: (-contagem[v], candidatos_nasc.index(v))
-            )[0]
+            # Pega a primeira data válida encontrada que pertença ao histórico de nascimento
+            nascimento = candidatos_nasc[0]
 
     # --------------------------------------------------------
     # NOME - fallback textual baseado em rótulos confiáveis
@@ -2206,32 +2201,37 @@ def extrair_dados_ocr(
             nome = max(candidatos_nome, key=lambda x: len(x))
 
     # --------------------------------------------------------
-    # MÃE - no RG, FILIAÇÃO costuma trazer pai e mãe em sequência.
-    # Usa o segundo nome completo do bloco quando não houver rótulo MÃE.
+    # MÃE - varredura melhorada para capturar o nome da mãe
+    # mesmo quando separado do pai ou em linhas quebradas
     # --------------------------------------------------------
     if not nome_mae:
+        nomes_filiacao = []
+        capturando_filiacao = False
         for i, linha in enumerate(linhas):
-            if "FILIACAO" not in normalizar_rotulo(linha):
+            rot = normalizar_rotulo(linha)
+            if "FILIACAO" in rot or "FILIAÇÃO" in linha.upper():
+                capturando_filiacao = True
                 continue
-
-            nomes_filiacao = []
-            for pos in range(i + 1, min(i + 7, len(linhas))):
+            
+            if capturando_filiacao:
+                if "DATA" in rot or "NATURALIDADE" in rot or "CPF" in rot or "REGISTRO" in rot or "EMISSAO" in rot:
+                    capturando_filiacao = False
+                    break
+                
                 candidato = re.sub(
                     r"^[^A-Za-zÀ-ÿ]+",
                     "",
-                    linhas[pos]
+                    linha
                 ).strip()
                 if parece_nome(candidato):
                     valor = candidato.upper()
                     if valor != nome and valor not in nomes_filiacao:
                         nomes_filiacao.append(valor)
 
-            if len(nomes_filiacao) >= 2:
-                nome_mae = nomes_filiacao[1]
-                break
-            if len(nomes_filiacao) == 1:
-                nome_mae = nomes_filiacao[0]
-                break
+        if len(nomes_filiacao) >= 2:
+            nome_mae = nomes_filiacao[1]  # Geralmente a segunda linha na filiação padrão (Pai, Mãe)
+        elif len(nomes_filiacao) == 1:
+            nome_mae = nomes_filiacao[0]
 
     # --------------------------------------------------------
     # ZONA E SEÇÃO - fallback pelo trecho do título eleitoral
@@ -2286,7 +2286,6 @@ def extrair_dados_ocr(
     bairro = ""
     cidade = ""
 
-    # Cidade explícita em documentos: MUNICÍPIO/UF ou linha "ARAPIRACA - AL".
     m_cidade = re.search(
         r"MUNIC[IÍ]PIO\s*/?\s*UF[\s\-:|]*([A-ZÀ-Ÿ ]{3,40})[/\-]\s*([A-Z]{2})",
         texto_original,
@@ -2299,7 +2298,6 @@ def extrair_dados_ocr(
         if m_cidade:
             cidade = m_cidade.group(1).strip().upper()
 
-    # Linha típica da conta: R. ANA ROSA DE OLIVEIRA 225 SAO LUIZ II CEP: 57301-706
     for linha in linhas:
         linha_limpa = re.sub(r"\s+", " ", linha).strip()
         if "CEP" not in linha_limpa.upper():
@@ -2333,8 +2331,6 @@ def extrair_dados_ocr(
         "bairro": bairro,
         "cidade": cidade
     }
-
-
 # ============================================================
 # 24. EXTRAÇÃO GERAL
 # ============================================================
