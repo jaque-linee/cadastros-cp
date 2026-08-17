@@ -14,6 +14,7 @@ import fitz
 import sheets
 import cruzamento
 import relatorios
+st.write("RELATORIOS CARREGADO DE:", relatorios.__file__)
 from validacoes import (
     somente_numeros,
     normalizar_texto,
@@ -152,36 +153,19 @@ def encontrar_telefone_em_texto(texto):
             if not telefone:
                 continue
 
+            # Evita classificar CPF válido como telefone.
             if len(telefone) == 11 and cpf_valido(telefone):
-                continue
-
-            if telefone.startswith("0800"):
                 continue
 
             if telefone not in candidatos:
                 candidatos.append(telefone)
 
-    if not candidatos:
-        return ""
-
-    # Prioriza DDD + celular.
-    celulares = [
-        n for n in candidatos
-        if len(n) == 11
-        and n[2] == "9"
-        and n[0] != "0"
-    ]
-
-    if len(celulares) == 1:
-        return celulares[0]
-
-    if len(celulares) > 1:
-        return ""
-
+    # Se houver mais de um número plausível, não adivinha.
     if len(candidatos) == 1:
         return candidatos[0]
 
     return ""
+
 
 def encontrar_telefone_documento(texto, itens):
     telefone = encontrar_telefone_em_texto(texto)
@@ -450,21 +434,8 @@ def extrair_dados_tesseract(texto, imagem_original=None):
             if dados["data_nascimento"]:
                 break
 
-    if not dados["data_nascimento"]:
-        datas = []
-        for match in re.finditer(padrao_data, texto):
-            valor = (
-                f"{match.group(1)}/"
-                f"{match.group(2)}/"
-                f"{match.group(3)}"
-            )
-            if data_valida(valor) and valor not in datas:
-                datas.append(valor)
-
-        # Em identidade podem existir emissão e validade.
-        # Só usa fallback global quando houver uma única data.
-        if len(datas) == 1:
-            dados["data_nascimento"] = datas[0]
+    # Sem rótulo de nascimento, não usa uma data solta do documento.
+    # Ela pode ser emissão, validade ou outro campo.
 
     # Mãe com rótulo explícito no texto linear
     for i, linha in enumerate(linhas):
@@ -904,49 +875,72 @@ def pdf_tem_texto_util(texto):
 
 def executar_ocr_pdf(arquivo):
     arquivo.seek(0)
+
     bytes_pdf = arquivo.getvalue()
-    documento = fitz.open(stream=bytes_pdf, filetype="pdf")
+
+    documento = fitz.open(
+        stream=bytes_pdf,
+        filetype="pdf"
+    )
 
     textos = []
     todos_itens = []
 
-    for numero_pagina in range(len(documento)):
-        pagina = documento[numero_pagina]
+    for numero_pagina in range(
+        len(documento)
+    ):
+        pagina = documento[
+            numero_pagina
+        ]
 
-        # Resolução maior para RG, título, comprovante e manuscritos.
         pix = pagina.get_pixmap(
-            matrix=fitz.Matrix(2.0, 2.0),
+            matrix=fitz.Matrix(
+                1.25,
+                1.25
+            ),
             alpha=False
         )
 
-        bytes_imagem = pix.tobytes("jpeg")
-        imagem = Image.open(
-            io.BytesIO(bytes_imagem)
-        ).convert("RGB")
+        bytes_imagem = pix.tobytes(
+            "jpeg"
+        )
 
-        texto, itens = executar_ocr_imagem(imagem)
+        imagem = Image.open(
+            io.BytesIO(
+                bytes_imagem
+            )
+        ).convert(
+            "RGB"
+        )
+
+        texto, itens = executar_ocr_imagem(
+            imagem
+        )
 
         if texto:
             textos.append(
-                f"--- PAGINA {numero_pagina + 1} OCR ---\n{texto}"
+                texto
             )
 
-        # Separa as coordenadas de cada página para impedir
-        # associação de rótulo da pág. 1 com valor da pág. 2.
-        for item in itens:
-            item = dict(item)
-            item["pagina"] = numero_pagina + 1
-            item["y"] = float(item.get("y", 0)) + numero_pagina * 10000
-            todos_itens.append(item)
+        todos_itens.extend(
+            itens
+        )
 
         del imagem
         del pix
         del bytes_imagem
+
         gc.collect()
 
     documento.close()
 
-    return "\n".join(textos), todos_itens
+    return (
+        "\n".join(
+            textos
+        ),
+        todos_itens
+    )
+
 
 # ============================================================
 # 11. LER DOCUMENTO
@@ -955,35 +949,44 @@ def executar_ocr_pdf(arquivo):
 def ler_documento(arquivo):
     nome = arquivo.name.lower()
 
-    if nome.endswith(".pdf"):
-        # PDF passa a ser HÍBRIDO:
-        # camada de texto + OCR de TODAS as páginas.
-        texto_nativo = extrair_texto_pdf(arquivo)
-        texto_ocr, itens = executar_ocr_pdf(arquivo)
+    if nome.endswith(
+        ".pdf"
+    ):
+        texto_nativo = extrair_texto_pdf(
+            arquivo
+        )
 
-        partes = []
-
-        if texto_nativo:
-            partes.append(
-                "--- TEXTO NATIVO DO PDF ---\n" + texto_nativo
+        if pdf_tem_texto_util(
+            texto_nativo
+        ):
+            return (
+                texto_nativo,
+                [],
+                "PDF — texto digital"
             )
 
-        if texto_ocr:
-            partes.append(
-                "--- TEXTO RECONHECIDO POR OCR ---\n" + texto_ocr
-            )
+        texto, itens = executar_ocr_pdf(
+            arquivo
+        )
 
         return (
-            "\n".join(partes),
+            texto,
             itens,
-            "PDF — híbrido"
+            "PDF — OCR"
         )
 
     arquivo.seek(0)
-    imagem = Image.open(arquivo)
-    texto, itens = executar_ocr_imagem(imagem)
+
+    imagem = Image.open(
+        arquivo
+    )
+
+    texto, itens = executar_ocr_imagem(
+        imagem
+    )
 
     del imagem
+
     gc.collect()
 
     return (
@@ -991,6 +994,7 @@ def ler_documento(arquivo):
         itens,
         "Imagem — OCR"
     )
+
 
 # ============================================================
 # 12. LINHAS DO TEXTO
@@ -1102,7 +1106,11 @@ def parece_nome(texto):
         "FILIACAO",
         "ASSINATURA",
         "PERMISSAO",
-        "CATEGORIA"
+        "CATEGORIA",
+        "POLEGAR",
+        "CHREITA",
+        "IMPRESSAO",
+        "DIGITAL"
     ]
 
     for termo in ignorar:
@@ -1272,23 +1280,7 @@ def extrair_dados_pdf_digital(texto):
                 dados["data_nascimento"] = candidatos[0]
                 break
 
-    if not dados["data_nascimento"]:
-        for linha in linhas:
-            match = re.search(
-                r"\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b",
-                linha
-            )
-
-            if match:
-                valor = (
-                    f"{match.group(1)}/"
-                    f"{match.group(2)}/"
-                    f"{match.group(3)}"
-                )
-
-                if data_valida(valor):
-                    dados["data_nascimento"] = valor
-                    break
+    # Sem rótulo explícito de nascimento, não usa data solta.
 
     # 3. CPF
     for i, linha in enumerate(linhas):
@@ -1713,19 +1705,7 @@ def encontrar_nascimento_ocr(itens):
             candidatos.sort()
             return candidatos[0][2]
 
-    # Fallback conservador: se só houver uma data válida no documento,
-    # ela pode ser usada como nascimento. Com várias datas, não adivinha.
-    datas = []
-
-    for item in itens:
-        for match in re.finditer(padrao_data, str(item["texto"])):
-            valor = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
-            if data_valida(valor) and valor not in datas:
-                datas.append(valor)
-
-    if len(datas) == 1:
-        return datas[0]
-
+    # Sem rótulo de nascimento, não adivinha usando data isolada.
     return ""
 
 
@@ -2107,422 +2087,252 @@ def extrair_dados_ocr(
     texto,
     itens
 ):
-    titulo = encontrar_titulo_ocr(
-        itens
-    )
+    """
+    Extrai os dados combinando a posição dos blocos do OCR com o texto
+    completo do documento. O fallback textual é importante para PDFs com
+    vários documentos na mesma página, nos quais o OCR separa números e
+    rótulos em blocos diferentes.
+    """
 
-    nome = encontrar_nome_ocr(
-        itens
-    )
+    texto_original = str(texto or "")
+    linhas = linhas_texto(texto_original)
+    texto_sem_acentos = remover_acentos(texto_original).upper()
 
-    cpf = encontrar_cpf_ocr(
-        itens
-    )
+    titulo = encontrar_titulo_ocr(itens)
+    nome = encontrar_nome_ocr(itens)
+    cpf = encontrar_cpf_ocr(itens)
+    nascimento = encontrar_nascimento_ocr(itens)
+    nome_mae = encontrar_mae_ocr(itens)
+    zona, secao = encontrar_zona_secao_ocr(itens, titulo)
 
-    nascimento = encontrar_nascimento_ocr(
-        itens
-    )
+    # --------------------------------------------------------
+    # LIMPEZA DO NOME LIDO PELO OCR
+    # --------------------------------------------------------
+    if nome:
+        nome = re.sub(
+            r"^[^A-Za-zÀ-ÿ]+",
+            "",
+            str(nome)
+        ).strip().upper()
 
-    nome_mae = encontrar_mae_ocr(
-        itens
-    )
+        # Remove lixo curto que às vezes fica antes do nome real.
+        partes = nome.split()
+        while partes and len(re.sub(r"[^A-ZÀ-Ÿ]", "", partes[0])) <= 1:
+            partes.pop(0)
+        nome = " ".join(partes).strip()
 
-    zona, secao = encontrar_zona_secao_ocr(
-        itens,
-        titulo
+    # --------------------------------------------------------
+    # CPF - fallback no texto completo
+    # --------------------------------------------------------
+    if not cpf:
+        for match in re.finditer(
+            r"(?<!\d)(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})[-\s]?(\d{2})(?!\d)",
+            texto_original
+        ):
+            numero = "".join(match.groups())
+            if cpf_valido(numero):
+                cpf = formatar_cpf(numero)
+                break
+
+    # --------------------------------------------------------
+    # TÍTULO - aceita número fragmentado em grupos 4-4-4
+    # --------------------------------------------------------
+    if not titulo:
+        padroes_titulo = [
+            r"(?:N[°º]?\s*INSCRI[CÇ][AÃ]O|INSCRI[CÇ][AÃ]O|T[IÍ]TULO)[\s\S]{0,120}?(\d{4})\D{0,8}(\d{4})\D{0,8}(\d{4})",
+            r"(?<!\d)(\d{4})\s+(\d{4})\s+(\d{4})(?!\d)"
+        ]
+        for padrao in padroes_titulo:
+            m = re.search(padrao, texto_original, re.I)
+            if m:
+                candidato = "".join(m.groups())
+                if len(candidato) == 12:
+                    titulo = candidato
+                    break
+
+    # --------------------------------------------------------
+    # NASCIMENTO - procura SOMENTE junto ao rótulo de nascimento.
+    # Dá prioridade ao RG/CIN, evitando DATA DE EMISSÃO.
+    # --------------------------------------------------------
+    if not nascimento:
+        candidatos_nasc = []
+
+        for i, linha in enumerate(linhas):
+            rot = normalizar_rotulo(linha)
+            if "NASC" not in rot and "BIRTH" not in rot:
+                continue
+
+            bloco = " ".join(linhas[i:min(i + 3, len(linhas))])
+            for m in re.finditer(
+                r"(?<!\d)(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})(?!\d)",
+                bloco
+            ):
+                valor = f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
+                if data_valida(valor):
+                    candidatos_nasc.append(valor)
+
+        # Se houver mais de um documento, prefere a data repetida; se não,
+        # prefere a primeira data ligada explicitamente a NASCIMENTO.
+        if candidatos_nasc:
+            contagem = {}
+            for valor in candidatos_nasc:
+                contagem[valor] = contagem.get(valor, 0) + 1
+            nascimento = sorted(
+                candidatos_nasc,
+                key=lambda v: (-contagem[v], candidatos_nasc.index(v))
+            )[0]
+
+    # --------------------------------------------------------
+    # NOME - fallback textual baseado em rótulos confiáveis
+    # --------------------------------------------------------
+    if not nome or not parece_nome(nome):
+        candidatos_nome = []
+        for i, linha in enumerate(linhas):
+            rot = normalizar_rotulo(linha)
+            if (
+                "NOMEDOELEITOR" in rot
+                or rot in ("NOME", "NOMECOMPLETO")
+            ):
+                for pos in range(i + 1, min(i + 4, len(linhas))):
+                    candidato = re.sub(
+                        r"^[^A-Za-zÀ-ÿ]+",
+                        "",
+                        linhas[pos]
+                    ).strip()
+                    if parece_nome(candidato):
+                        candidatos_nome.append(candidato.upper())
+                        break
+        if candidatos_nome:
+            nome = max(candidatos_nome, key=lambda x: len(x))
+
+    # --------------------------------------------------------
+    # MÃE - no RG, FILIAÇÃO costuma trazer pai e mãe em sequência.
+    # Usa o segundo nome completo do bloco quando não houver rótulo MÃE.
+    # --------------------------------------------------------
+    if not nome_mae:
+        for i, linha in enumerate(linhas):
+            if "FILIACAO" not in normalizar_rotulo(linha):
+                continue
+
+            nomes_filiacao = []
+            for pos in range(i + 1, min(i + 7, len(linhas))):
+                candidato = re.sub(
+                    r"^[^A-Za-zÀ-ÿ]+",
+                    "",
+                    linhas[pos]
+                ).strip()
+                if parece_nome(candidato):
+                    valor = candidato.upper()
+                    if valor != nome and valor not in nomes_filiacao:
+                        nomes_filiacao.append(valor)
+
+            if len(nomes_filiacao) >= 2:
+                nome_mae = nomes_filiacao[1]
+                break
+            if len(nomes_filiacao) == 1:
+                nome_mae = nomes_filiacao[0]
+                break
+
+    # --------------------------------------------------------
+    # ZONA E SEÇÃO - fallback pelo trecho do título eleitoral
+    # --------------------------------------------------------
+    if not zona or not secao:
+        m = re.search(
+            r"ZONA[\s\S]{0,80}?(\d{1,3})[\s\S]{0,80}?SE[CÇ][AÃ]O[\s\S]{0,80}?(\d{1,4})",
+            texto_original,
+            re.I
+        )
+        if m:
+            if not zona:
+                zona = somente_numeros(m.group(1)).zfill(3)
+            if not secao:
+                secao = somente_numeros(m.group(2)).zfill(4)
+
+    # Caso os números apareçam na mesma linha, como "... 022 0538".
+    if not zona or not secao:
+        for linha in linhas:
+            nums = re.findall(r"(?<!\d)\d{2,4}(?!\d)", linha)
+            if len(nums) >= 2 and ("ZONA" in texto_sem_acentos and "SECAO" in texto_sem_acentos):
+                for a, b in zip(nums, nums[1:]):
+                    if len(a) <= 3 and len(b) <= 4:
+                        if not zona:
+                            zona = a.zfill(3)
+                        if not secao:
+                            secao = b.zfill(4)
+                        break
+            if zona and secao:
+                break
+
+    # --------------------------------------------------------
+    # RG - procura número junto de REGISTRO GERAL / RG.
+    # --------------------------------------------------------
+    rg = ""
+    padroes_rg = [
+        r"REGISTRO\s+GERAL\s*[:\-]?\s*([0-9.\-]{4,20})",
+        r"\bRG\s*[:\-]?\s*([0-9.\-]{4,20})"
+    ]
+    for padrao in padroes_rg:
+        m = re.search(padrao, texto_original, re.I)
+        if m:
+            rg = somente_numeros(m.group(1))
+            if rg:
+                break
+
+    # --------------------------------------------------------
+    # ENDEREÇO / Nº / BAIRRO / CIDADE - aproveita comprovante de residência.
+    # --------------------------------------------------------
+    endereco = ""
+    numero = ""
+    bairro = ""
+    cidade = ""
+
+    # Cidade explícita em documentos: MUNICÍPIO/UF ou linha "ARAPIRACA - AL".
+    m_cidade = re.search(
+        r"MUNIC[IÍ]PIO\s*/?\s*UF[\s\-:|]*([A-ZÀ-Ÿ ]{3,40})[/\-]\s*([A-Z]{2})",
+        texto_original,
+        re.I
     )
+    if m_cidade:
+        cidade = m_cidade.group(1).strip().upper()
+    else:
+        m_cidade = re.search(r"\b([A-ZÀ-Ÿ ]{3,35})\s*-\s*AL\b", texto_original, re.I)
+        if m_cidade:
+            cidade = m_cidade.group(1).strip().upper()
+
+    # Linha típica da conta: R. ANA ROSA DE OLIVEIRA 225 SAO LUIZ II CEP: 57301-706
+    for linha in linhas:
+        linha_limpa = re.sub(r"\s+", " ", linha).strip()
+        if "CEP" not in linha_limpa.upper():
+            continue
+
+        m_end = re.search(
+            r"^(?:R\.?|RUA|AV\.?|AVENIDA|TRAV\.?|TRAVESSA)\s+(.+?)\s+(\d+[A-Z]?)\s+(.+?)\s+CEP\s*[:\-]?\s*\d{5}[-\s]?\d{3}",
+            linha_limpa,
+            re.I
+        )
+        if m_end:
+            prefixo = re.match(r"^(R\.?|RUA|AV\.?|AVENIDA|TRAV\.?|TRAVESSA)", linha_limpa, re.I)
+            tipo = prefixo.group(1).upper() if prefixo else ""
+            endereco = f"{tipo} {m_end.group(1)}".strip().upper()
+            numero = m_end.group(2).strip().upper()
+            bairro = m_end.group(3).strip().upper()
+            break
 
     return {
         "nome": nome,
         "cpf": cpf,
-        "rg": "",
         "titulo": titulo,
         "data_nascimento": nascimento,
         "nome_mae": nome_mae,
-        "endereco": "",
-        "numero": "",
-        "bairro": "",
-        "cidade": "",
         "zona": zona,
         "secao": secao,
-        "comunidade": "",
-        "domicilio": "",
-        "telefone": encontrar_telefone_documento(
-            texto,
-            itens
-        )
+        "telefone": encontrar_telefone_documento(texto_original, itens),
+        "rg": rg,
+        "endereco": endereco,
+        "numero": numero,
+        "bairro": bairro,
+        "cidade": cidade
     }
-
-
-
-# ============================================================
-# 23A. EXTRAÇÃO COMPLEMENTAR DO TEXTO COMPLETO
-# ============================================================
-
-def _limpar_nome_extraido(valor):
-    valor = str(valor or "").strip()
-    valor = re.sub(r"^[^A-Za-zÀ-ÿ]+", "", valor)
-    valor = re.sub(r"\s+", " ", valor).strip()
-
-    valor = re.sub(
-        r"^(?:NOME(?:\s+DO\s+ELEITOR)?|ELEITOR)\s*[:\-]*\s*",
-        "",
-        valor,
-        flags=re.I
-    ).strip()
-
-    return valor.upper() if parece_nome(valor) else ""
-
-
-def _texto_numerico_ocr(valor):
-    # Correções só em contexto numérico.
-    valor = str(valor or "").upper()
-    valor = valor.replace("O", "0").replace("Q", "0")
-    valor = valor.replace("I", "1").replace("L", "1")
-    return valor
-
-
-def extrair_dados_texto_completo(texto):
-    linhas = linhas_texto(texto)
-
-    dados = {
-        "nome": "",
-        "cpf": "",
-        "rg": "",
-        "data_nascimento": "",
-        "nome_mae": "",
-        "endereco": "",
-        "numero": "",
-        "bairro": "",
-        "cidade": "",
-        "titulo": "",
-        "zona": "",
-        "secao": "",
-        "comunidade": "",
-        "domicilio": "",
-        "telefone": ""
-    }
-
-    texto_total = "\n".join(linhas)
-    texto_norm = remover_acentos(texto_total).upper()
-
-    # CPF válido.
-    for match in re.finditer(
-        r"(?<!\d)(\d{3})[.\s-]?(\d{3})[.\s-]?(\d{3})[-.\s]?(\d{2})(?!\d)",
-        texto_total
-    ):
-        numero = "".join(match.groups())
-
-        if cpf_valido(numero):
-            dados["cpf"] = formatar_cpf(numero)
-            break
-
-    # Nome associado ao rótulo.
-    for i, linha in enumerate(linhas):
-        rot = normalizar_rotulo(linha)
-
-        if "NOMEDOELEITOR" in rot or rot in ("NOME", "NOMECOMPLETO"):
-            candidatos = [
-                linha,
-                linhas[i + 1] if i + 1 < len(linhas) else "",
-                linhas[i + 2] if i + 2 < len(linhas) else "",
-                linhas[i - 1] if i > 0 else ""
-            ]
-
-            for candidato in candidatos:
-                limpo = _limpar_nome_extraido(candidato)
-
-                if limpo:
-                    dados["nome"] = limpo
-                    break
-
-        if dados["nome"]:
-            break
-
-    # Nascimento: somente perto de rótulo de nascimento.
-    for i, linha in enumerate(linhas):
-        rot = normalizar_rotulo(linha)
-
-        if "NASC" not in rot:
-            continue
-
-        janela = " ".join(
-            linhas[max(0, i - 1):min(len(linhas), i + 3)]
-        )
-
-        # Corrige "1 8/06/1957" -> "18/06/1957".
-        janela = re.sub(
-            r"(?<!\d)(\d)\s+(\d)(?=[/.\-]\d{1,2}[/.\-]\d{4})",
-            r"\1\2",
-            janela
-        )
-
-        match = re.search(
-            r"(?<!\d)(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})(?!\d)",
-            janela
-        )
-
-        if match:
-            valor = (
-                f"{int(match.group(1)):02d}/"
-                f"{int(match.group(2)):02d}/"
-                f"{match.group(3)}"
-            )
-
-            if data_valida(valor):
-                dados["data_nascimento"] = valor
-                break
-
-    # Mãe explícita.
-    for i, linha in enumerate(linhas):
-        rot = normalizar_rotulo(linha)
-
-        if rot in ("MAE", "NOMEDAMAE", "NOMEMAE"):
-            for pos in range(i + 1, min(len(linhas), i + 5)):
-                cand = _limpar_nome_extraido(linhas[pos])
-
-                if cand and cand != dados["nome"]:
-                    dados["nome_mae"] = cand
-                    break
-
-        if dados["nome_mae"]:
-            break
-
-    # Filiação: quando há dois nomes completos, usa o segundo como mãe.
-    if not dados["nome_mae"]:
-        for i, linha in enumerate(linhas):
-            rot = normalizar_rotulo(linha)
-
-            if "FILIACAO" not in rot and "FILIATION" not in rot:
-                continue
-
-            nomes = []
-
-            for pos in range(i + 1, min(len(linhas), i + 8)):
-                cand = _limpar_nome_extraido(linhas[pos])
-
-                if (
-                    cand
-                    and cand != dados["nome"]
-                    and cand not in nomes
-                ):
-                    nomes.append(cand)
-
-            if len(nomes) >= 2:
-                dados["nome_mae"] = nomes[1]
-
-            elif len(nomes) == 1:
-                dados["_candidatos_mae"] = nomes
-
-            break
-
-    # Título eleitoral: sequência 4-4-4.
-    if "TITULO" in texto_norm or "ELEITOR" in texto_norm:
-        for linha in linhas:
-            numtxt = _texto_numerico_ocr(linha)
-
-            match = re.search(
-                r"(?<!\d)([0-9]{4})\s+([0-9]{4})\s+([0-9]{4})(?!\d)",
-                numtxt
-            )
-
-            if match:
-                dados["titulo"] = "".join(match.groups())
-                break
-
-    # Linha conjunta: título + zona + seção.
-    for linha in linhas:
-        numtxt = _texto_numerico_ocr(linha)
-        grupos = re.findall(r"\d+", numtxt)
-
-        if len(grupos) < 5:
-            continue
-
-        combinado = "".join(grupos[:3])
-
-        if len(combinado) != 12:
-            continue
-
-        if not dados["titulo"]:
-            dados["titulo"] = combinado
-
-        if len(grupos[3]) <= 3:
-            dados["zona"] = grupos[3].zfill(3)
-
-        sec = grupos[4][-4:]
-
-        if sec:
-            dados["secao"] = sec.zfill(4)
-
-        break
-
-    # Zona e seção por rótulo.
-    for i, linha in enumerate(linhas):
-        rot = normalizar_rotulo(linha)
-
-        janela = " ".join(
-            linhas[i:min(len(linhas), i + 3)]
-        )
-
-        nums = re.findall(
-            r"\d{1,6}",
-            _texto_numerico_ocr(janela)
-        )
-
-        if "ZONA" in rot and not dados["zona"]:
-            for n in nums:
-                if len(n) <= 3:
-                    dados["zona"] = n.zfill(3)
-                    break
-
-        if "SECAO" in rot and not dados["secao"]:
-            for n in nums:
-                if len(n) <= 4:
-                    dados["secao"] = n.zfill(4)
-                    break
-
-    # Cidade / município.
-    for i, linha in enumerate(linhas):
-        if "MUNICIPIO" not in normalizar_rotulo(linha):
-            continue
-
-        for cand in linhas[i:min(len(linhas), i + 4)]:
-            m = re.search(
-                r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s]{2,})\s*/\s*([A-Z]{2})",
-                cand
-            )
-
-            if m:
-                dados["cidade"] = m.group(1).strip().upper()
-                break
-
-        if dados["cidade"]:
-            break
-
-    # Endereço / número / bairro: tenta a região de CEP/endereço.
-    candidatos_endereco = []
-
-    for i, linha in enumerate(linhas):
-        rot = normalizar_rotulo(linha)
-
-        if (
-            "ENDERECO" in rot
-            or "LOGRADOURO" in rot
-            or "CEP" in rot
-        ):
-            candidatos_endereco.extend(
-                linhas[max(0, i - 3):min(len(linhas), i + 2)]
-            )
-
-    for linha in candidatos_endereco:
-        limpa = re.sub(
-            r"\bCEP\s*:?\s*\d{5}-?\d{3}\b",
-            "",
-            linha,
-            flags=re.I
-        ).strip(" -|")
-
-        numeros = re.findall(r"\b\d{1,5}\b", limpa)
-
-        if numeros:
-            numero = numeros[-1]
-            antes = limpa.rsplit(numero, 1)[0].strip(" ,-")
-
-            if (
-                len(antes) >= 5
-                and re.search(r"[A-Za-zÀ-ÿ]", antes)
-            ):
-                dados["endereco"] = antes.upper()
-                dados["numero"] = numero
-                break
-
-    # RG somente com rótulo explícito.
-    for i, linha in enumerate(linhas):
-        rot = normalizar_rotulo(linha)
-
-        if (
-            rot not in ("RG", "REGISTROGERAL")
-            and "REGISTROGERAL" not in rot
-        ):
-            continue
-
-        janela = " ".join(
-            linhas[i:min(len(linhas), i + 3)]
-        )
-
-        candidatos = re.findall(
-            r"(?<!\d)\d[\d.\-]{4,13}\d(?!\d)",
-            janela
-        )
-
-        if candidatos:
-            dados["rg"] = candidatos[0]
-            break
-
-    dados["telefone"] = encontrar_telefone_documento(
-        texto_total,
-        []
-    )
-
-    return dados
-
-
-def combinar_dados_documento(*fontes):
-    campos = [
-        "nome",
-        "cpf",
-        "rg",
-        "data_nascimento",
-        "nome_mae",
-        "endereco",
-        "numero",
-        "bairro",
-        "cidade",
-        "titulo",
-        "zona",
-        "secao",
-        "comunidade",
-        "domicilio",
-        "telefone"
-    ]
-
-    resultado = {
-        campo: ""
-        for campo in campos
-    }
-
-    candidatos_mae = []
-
-    for fonte in fontes:
-        if not isinstance(fonte, dict):
-            continue
-
-        for campo in campos:
-            valor = fonte.get(campo, "")
-
-            if valor and not resultado[campo]:
-                resultado[campo] = valor
-
-        for candidato in (
-            fonte.get("_candidatos_mae", [])
-            or []
-        ):
-            candidato = str(
-                candidato or ""
-            ).strip().upper()
-
-            if (
-                candidato
-                and candidato not in candidatos_mae
-            ):
-                candidatos_mae.append(candidato)
-
-    if candidatos_mae:
-        resultado["_candidatos_mae"] = (
-            candidatos_mae
-        )
-
-    return resultado
 
 
 # ============================================================
@@ -2534,29 +2344,19 @@ def extrair_dados(
     itens,
     tipo_leitura
 ):
-    dados_texto = extrair_dados_texto_completo(
-        texto
-    )
-
-    if tipo_leitura == "PDF — texto digital":
-        dados_base = extrair_dados_pdf_digital(
+    if (
+        tipo_leitura
+        == "PDF — texto digital"
+    ):
+        return extrair_dados_pdf_digital(
             texto
         )
 
-        return combinar_dados_documento(
-            dados_texto,
-            dados_base
-        )
-
-    dados_ocr = extrair_dados_ocr(
+    return extrair_dados_ocr(
         texto,
         itens
     )
 
-    return combinar_dados_documento(
-        dados_texto,
-        dados_ocr
-    )
 
 # ============================================================
 # 25. CARREGAR BASE DO SHEETS
@@ -3359,6 +3159,11 @@ if menu == "📸 Envio de Documentos":
                     )
                     continue
 
+                # Garante os campos complementares mesmo quando o OCR
+                # daquele tipo de documento ainda não os reconheceu.
+                for campo_extra in ("rg", "endereco", "numero", "bairro", "cidade"):
+                    dados_item.setdefault(campo_extra, "")
+
                 arquivo_item = str(
                     item.get("Arquivo", "Documento") or "Documento"
                 ).strip()
@@ -3463,6 +3268,54 @@ if menu == "📸 Envio de Documentos":
                 )
 
                 # ------------------------------------------------
+                # DADOS COMPLEMENTARES
+                # ------------------------------------------------
+                col_rg, col_endereco, col_numero = st.columns([1, 2.4, 0.7])
+
+                with col_rg:
+                    rg_editado = st.text_input(
+                        "RG",
+                        value=str(dados_item.get("rg", "") or "").strip(),
+                        key=f"{prefixo_chave}_rg"
+                    )
+
+                with col_endereco:
+                    endereco_editado = st.text_input(
+                        "Endereço",
+                        value=str(dados_item.get("endereco", "") or "").strip(),
+                        key=f"{prefixo_chave}_endereco"
+                    )
+
+                with col_numero:
+                    numero_editado = st.text_input(
+                        "Nº",
+                        value=str(dados_item.get("numero", "") or "").strip(),
+                        key=f"{prefixo_chave}_numero"
+                    )
+
+                col_bairro, col_cidade = st.columns([1.5, 1.5])
+
+                with col_bairro:
+                    bairro_editado = st.text_input(
+                        "Bairro",
+                        value=str(dados_item.get("bairro", "") or "").strip(),
+                        key=f"{prefixo_chave}_bairro"
+                    )
+
+                with col_cidade:
+                    cidade_editada = st.text_input(
+                        "Cidade",
+                        value=str(dados_item.get("cidade", "") or "").strip(),
+                        key=f"{prefixo_chave}_cidade"
+                    )
+
+                dados_item["rg"] = somente_numeros(rg_editado)
+                dados_item["endereco"] = str(endereco_editado or "").strip().upper()
+                dados_item["numero"] = str(numero_editado or "").strip().upper()
+                dados_item["bairro"] = str(bairro_editado or "").strip().upper()
+                dados_item["cidade"] = str(cidade_editada or "").strip().upper()
+
+                # ------------------------------------------------
                 # NOME DA MÃE + TELEFONE
                 # ------------------------------------------------
                 nome_item = str(
@@ -3560,110 +3413,6 @@ if menu == "📸 Envio de Documentos":
                     ) if str(telefone_editado).strip() else ""
 
                     item["Telefone"] = dados_item["telefone"]
-
-                # ------------------------------------------------
-                # DEMAIS CAMPOS PREENCHÍVEIS DA TABELA
-                # ------------------------------------------------
-                col_rg, col_cidade = st.columns([1, 2])
-
-                with col_rg:
-                    rg_editado = st.text_input(
-                        "RG",
-                        value=str(
-                            dados_item.get("rg", "") or ""
-                        ).strip(),
-                        key=f"{prefixo_chave}_rg"
-                    )
-
-                with col_cidade:
-                    cidade_editada = st.text_input(
-                        "Cidade",
-                        value=str(
-                            dados_item.get("cidade", "") or ""
-                        ).strip(),
-                        key=f"{prefixo_chave}_cidade"
-                    )
-
-                col_endereco, col_numero, col_bairro = st.columns(
-                    [2.2, 0.6, 1.4]
-                )
-
-                with col_endereco:
-                    endereco_editado = st.text_input(
-                        "Endereço",
-                        value=str(
-                            dados_item.get("endereco", "") or ""
-                        ).strip(),
-                        key=f"{prefixo_chave}_endereco"
-                    )
-
-                with col_numero:
-                    numero_editado = st.text_input(
-                        "Nº",
-                        value=str(
-                            dados_item.get("numero", "") or ""
-                        ).strip(),
-                        key=f"{prefixo_chave}_numero"
-                    )
-
-                with col_bairro:
-                    bairro_editado = st.text_input(
-                        "Bairro",
-                        value=str(
-                            dados_item.get("bairro", "") or ""
-                        ).strip(),
-                        key=f"{prefixo_chave}_bairro"
-                    )
-
-                col_comunidade, col_domicilio = st.columns(2)
-
-                with col_comunidade:
-                    comunidade_editada = st.text_input(
-                        "Comunidade",
-                        value=str(
-                            dados_item.get("comunidade", "")
-                            or comunidade
-                            or ""
-                        ).strip(),
-                        key=f"{prefixo_chave}_comunidade"
-                    )
-
-                with col_domicilio:
-                    domicilio_editado = st.text_input(
-                        "Domicílio",
-                        value=str(
-                            dados_item.get("domicilio", "") or ""
-                        ).strip(),
-                        key=f"{prefixo_chave}_domicilio"
-                    )
-
-                dados_item["rg"] = str(
-                    rg_editado or ""
-                ).strip().upper()
-
-                dados_item["cidade"] = str(
-                    cidade_editada or ""
-                ).strip().upper()
-
-                dados_item["endereco"] = str(
-                    endereco_editado or ""
-                ).strip().upper()
-
-                dados_item["numero"] = str(
-                    numero_editado or ""
-                ).strip()
-
-                dados_item["bairro"] = str(
-                    bairro_editado or ""
-                ).strip().upper()
-
-                dados_item["comunidade"] = str(
-                    comunidade_editada or ""
-                ).strip().upper()
-
-                dados_item["domicilio"] = str(
-                    domicilio_editado or ""
-                ).strip().upper()
 
                 # ------------------------------------------------
                 # RECALCULAR DUPLICIDADE + CRUZAMENTO + STATUS
@@ -3800,8 +3549,9 @@ if menu == "📸 Envio de Documentos":
                             None
                         )
 
-                        if not dados_salvar.get("comunidade"):
-                            dados_salvar["comunidade"] = comunidade
+                        dados_salvar[
+                            "comunidade"
+                        ] = comunidade
 
                         retorno = sheets.salvar_cadastro(
                             WEBHOOK_URL,
