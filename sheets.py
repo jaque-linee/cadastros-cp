@@ -320,15 +320,6 @@ def preparar_payload(
         ),
         "telefone": normalizar_texto(
             dados.get("telefone", "")
-        ),
-        "nis": somente_numeros(
-            dados.get("nis", "")
-        ),
-        "dap": normalizar_texto(
-            dados.get("dap", "")
-        ),
-        "sus": somente_numeros(
-            dados.get("sus", "")
         )
     }
 
