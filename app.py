@@ -4727,3 +4727,325 @@ elif menu == "📊 Relatórios":
                         st.error(
                             f"Não foi possível gerar o PDF: {erro_pdf}"
                         )
+
+
+# ============================================================
+# TESTE TEMPORÁRIO — DIAGNÓSTICO TESSERACT
+# Não altera o fluxo normal do cadastro.
+# ============================================================
+
+def preparar_imagem_tesseract_diagnostico(imagem, modo="cinza"):
+    imagem = ImageOps.exif_transpose(imagem).convert("RGB")
+
+    largura, altura = imagem.size
+
+    # Mantém boa resolução para documentos sem criar imagens gigantes.
+    alvo = 2400
+    if largura < alvo:
+        escala = alvo / largura
+        imagem = imagem.resize(
+            (alvo, int(altura * escala)),
+            Image.Resampling.LANCZOS
+        )
+    elif largura > 3200:
+        escala = 3200 / largura
+        imagem = imagem.resize(
+            (3200, int(altura * escala)),
+            Image.Resampling.LANCZOS
+        )
+
+    cinza = ImageOps.grayscale(imagem)
+    cinza = ImageOps.autocontrast(cinza)
+
+    if modo == "cinza":
+        saida = ImageEnhance.Contrast(cinza).enhance(1.45)
+        saida = saida.filter(ImageFilter.SHARPEN)
+
+    elif modo == "limiar":
+        cinza = ImageEnhance.Contrast(cinza).enhance(1.55)
+        saida = cinza.point(
+            lambda p: 255 if p > 175 else 0
+        )
+
+    else:
+        saida = cinza
+
+    return saida
+
+
+def executar_tesseract_diagnostico(imagem):
+    testes = [
+        ("PSM 6 — bloco", "cinza", "--oem 3 --psm 6"),
+        ("PSM 11 — texto espalhado", "cinza", "--oem 3 --psm 11"),
+        ("PSM 12 — texto espalhado + orientação", "cinza", "--oem 3 --psm 12"),
+        ("PSM 11 — alto contraste", "limiar", "--oem 3 --psm 11"),
+    ]
+
+    resultados = []
+
+    for nome_teste, modo, config in testes:
+        imagem_processada = preparar_imagem_tesseract_diagnostico(
+            imagem,
+            modo=modo
+        )
+
+        try:
+            dados = pytesseract.image_to_data(
+                imagem_processada,
+                lang="por+eng",
+                config=config,
+                output_type=pytesseract.Output.DICT
+            )
+
+            palavras = []
+            confiancas = []
+
+            total = len(dados.get("text", []))
+
+            for i in range(total):
+                texto = str(dados["text"][i] or "").strip()
+
+                try:
+                    conf = float(dados["conf"][i])
+                except Exception:
+                    conf = -1
+
+                if not texto:
+                    continue
+
+                palavras.append(texto)
+
+                if conf >= 0:
+                    confiancas.append(conf)
+
+            texto_bruto = pytesseract.image_to_string(
+                imagem_processada,
+                lang="por+eng",
+                config=config
+            ).strip()
+
+            media_conf = (
+                sum(confiancas) / len(confiancas)
+                if confiancas
+                else 0
+            )
+
+            # Pontuação serve apenas para ordenar os testes na tela.
+            pontuacao = (
+                media_conf
+                + min(len(palavras), 120) * 0.12
+                + min(len(texto_bruto), 2500) * 0.002
+            )
+
+            resultados.append(
+                {
+                    "nome": nome_teste,
+                    "texto": texto_bruto,
+                    "media_conf": media_conf,
+                    "palavras": len(palavras),
+                    "pontuacao": pontuacao,
+                    "imagem": imagem_processada
+                }
+            )
+
+        except Exception as erro:
+            resultados.append(
+                {
+                    "nome": nome_teste,
+                    "texto": "",
+                    "media_conf": 0,
+                    "palavras": 0,
+                    "pontuacao": -1,
+                    "imagem": imagem_processada,
+                    "erro": str(erro)
+                }
+            )
+
+    resultados.sort(
+        key=lambda item: item.get("pontuacao", -1),
+        reverse=True
+    )
+
+    return resultados
+
+
+def imagens_para_teste_tesseract(arquivo):
+    nome = arquivo.name.lower()
+    imagens = []
+
+    if nome.endswith(".pdf"):
+        arquivo.seek(0)
+        documento = fitz.open(
+            stream=arquivo.getvalue(),
+            filetype="pdf"
+        )
+
+        try:
+            for numero_pagina in range(len(documento)):
+                pagina = documento[numero_pagina]
+
+                pix = pagina.get_pixmap(
+                    matrix=fitz.Matrix(2.5, 2.5),
+                    alpha=False
+                )
+
+                bytes_imagem = pix.tobytes("png")
+
+                imagem = Image.open(
+                    io.BytesIO(bytes_imagem)
+                ).convert("RGB")
+
+                imagens.append(
+                    (numero_pagina + 1, imagem.copy())
+                )
+
+                del imagem
+                del bytes_imagem
+                del pix
+                gc.collect()
+
+        finally:
+            documento.close()
+
+    else:
+        arquivo.seek(0)
+        imagem = Image.open(arquivo).convert("RGB")
+        imagens.append((1, imagem.copy()))
+        del imagem
+
+    return imagens
+
+
+st.divider()
+
+with st.expander(
+    "🧪 TESTE OCR — Tesseract (temporário)",
+    expanded=False
+):
+    st.info(
+        "Esta área é somente para diagnóstico. "
+        "Ela NÃO envia nada para a planilha e NÃO altera o leitor atual."
+    )
+
+    arquivos_teste_tesseract = st.file_uploader(
+        "Envie PDF, JPG, JPEG ou PNG para testar a leitura bruta",
+        type=["pdf", "jpg", "jpeg", "png"],
+        accept_multiple_files=True,
+        key="arquivos_teste_tesseract"
+    )
+
+    if arquivos_teste_tesseract:
+        st.caption(
+            f"{len(arquivos_teste_tesseract)} arquivo(s) selecionado(s)."
+        )
+
+        if st.button(
+            "🔎 TESTAR TESSERACT",
+            type="primary",
+            use_container_width=True,
+            key="botao_teste_tesseract"
+        ):
+            for indice_arquivo, arquivo_teste in enumerate(
+                arquivos_teste_tesseract,
+                start=1
+            ):
+                st.markdown(
+                    f"### {indice_arquivo}. {arquivo_teste.name}"
+                )
+
+                try:
+                    paginas_teste = imagens_para_teste_tesseract(
+                        arquivo_teste
+                    )
+
+                    for numero_pagina, imagem_pagina in paginas_teste:
+                        st.markdown(
+                            f"#### Página {numero_pagina}"
+                        )
+
+                        with st.spinner(
+                            f"Lendo página {numero_pagina} com Tesseract..."
+                        ):
+                            resultados_teste = executar_tesseract_diagnostico(
+                                imagem_pagina
+                            )
+
+                        if not resultados_teste:
+                            st.warning(
+                                "O Tesseract não retornou resultado."
+                            )
+                            continue
+
+                        melhor = resultados_teste[0]
+
+                        st.success(
+                            "Melhor configuração desta página: "
+                            f"{melhor['nome']} | "
+                            f"confiança média: "
+                            f"{melhor['media_conf']:.1f}%"
+                        )
+
+                        st.text_area(
+                            "TEXTO BRUTO — melhor resultado",
+                            value=melhor.get("texto", ""),
+                            height=420,
+                            key=(
+                                f"texto_tess_{indice_arquivo}_"
+                                f"{numero_pagina}"
+                            )
+                        )
+
+                        with st.expander(
+                            "Comparar as 4 configurações"
+                        ):
+                            for indice_teste, resultado_teste in enumerate(
+                                resultados_teste,
+                                start=1
+                            ):
+                                st.markdown(
+                                    f"**{indice_teste}. "
+                                    f"{resultado_teste['nome']}**"
+                                )
+
+                                if resultado_teste.get("erro"):
+                                    st.error(
+                                        resultado_teste["erro"]
+                                    )
+                                    continue
+
+                                st.caption(
+                                    f"Confiança média: "
+                                    f"{resultado_teste['media_conf']:.1f}% | "
+                                    f"Palavras detectadas: "
+                                    f"{resultado_teste['palavras']}"
+                                )
+
+                                st.text_area(
+                                    "Texto",
+                                    value=resultado_teste.get(
+                                        "texto",
+                                        ""
+                                    ),
+                                    height=260,
+                                    key=(
+                                        f"comparacao_tess_"
+                                        f"{indice_arquivo}_"
+                                        f"{numero_pagina}_"
+                                        f"{indice_teste}"
+                                    )
+                                )
+
+                        del imagem_pagina
+                        gc.collect()
+
+                except Exception as erro_teste:
+                    st.error(
+                        f"Erro no teste de {arquivo_teste.name}: "
+                        f"{erro_teste}"
+                    )
+
+                    st.exception(erro_teste)
+
+                finally:
+                    gc.collect()
+
