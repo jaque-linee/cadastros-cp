@@ -14,6 +14,12 @@ import fitz
 import sheets
 import cruzamento
 import relatorios
+
+# Novos módulos de leitura — conectados, mas ainda não usados no fluxo atual
+import leitor_documentos
+import leitor_pdf
+import leitor_imagem
+import extrator_documentos
 st.write("RELATORIOS CARREGADO DE:", relatorios.__file__)
 from validacoes import (
     somente_numeros,
