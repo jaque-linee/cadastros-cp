@@ -9,6 +9,3 @@ opencv-python-headless==4.10.0.84
 pandas
 pytesseract
 reportlab
-paddlepaddle==3.2.0
-paddleocr==3.2.0
-paddlex[ocr]==3.2.0
