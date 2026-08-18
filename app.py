@@ -637,9 +637,47 @@ def ler_documento(arquivo):
     """
     nome = str(getattr(arquivo, "name", "") or "").lower()
 
-    # JPG/JPEG/PNG continuam exatamente no fluxo anterior nesta etapa.
+    # JPG/JPEG/PNG passam agora pelo módulo leitor_imagem.
+    # O OCR e a extração de campos continuam preservados.
+    if nome.endswith((".jpg", ".jpeg", ".png")):
+        try:
+            arquivo.seek(0)
+
+            imagem = leitor_imagem.preparar_arquivo_imagem(
+                arquivo.getvalue()
+            )
+
+            try:
+                texto, itens = executar_ocr_imagem(
+                    imagem
+                )
+
+                return (
+                    texto,
+                    itens,
+                    "IMAGEM — OCR"
+                )
+
+            finally:
+                leitor_imagem.liberar_imagem(
+                    imagem
+                )
+
+        except Exception:
+            try:
+                arquivo.seek(0)
+            except Exception:
+                pass
+
+            return _ler_documento_legado(
+                arquivo
+            )
+
+    # Outros formatos permanecem no fluxo anterior.
     if not nome.endswith(".pdf"):
-        return _ler_documento_legado(arquivo)
+        return _ler_documento_legado(
+            arquivo
+        )
 
     try:
         arquivo.seek(0)
