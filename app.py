@@ -1060,6 +1060,19 @@ def parece_nome(texto):
     if not texto:
         return False
 
+    # CORREÇÃO: antes o texto só era rejeitado se tivesse dígito. Ruído do
+    # OCR (símbolos soltos como » # * ? lidos de QR code, foto ou textura do
+    # documento) passava despercebido porque os símbolos eram removidos só
+    # na hora de CONTAR letras, sem exigir que o texto original fosse limpo.
+    # Isso fazia lixo do tipo "ÍTOR» SOEU? I &»#FTO**" ser aceito como nome.
+    # Agora exigimos que o texto inteiro seja composto apenas por letras,
+    # espaços, apóstrofos e hífens (formato válido para nomes próprios).
+    if not re.fullmatch(
+        r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]*(?:\s[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]*)*",
+        texto
+    ):
+        return False
+
     if re.search(
         r"\d",
         texto
@@ -1123,6 +1136,14 @@ def parece_nome(texto):
         2 <= len(palavras) <= 8
     ):
         return False
+
+    # CORREÇÃO: nome de verdade não tem "palavra" de uma letra só (isso é
+    # sinal de OCR quebrado/ruído colado ao texto, como o "I" isolado do
+    # exemplo defeituoso). Preposições curtas de nomes (de/da/do/dos/das)
+    # têm 2+ letras e continuam permitidas.
+    for palavra in palavras:
+        if len(palavra) < 2:
+            return False
 
     letras = re.sub(
         r"[^A-Za-zÀ-ÿ]",
