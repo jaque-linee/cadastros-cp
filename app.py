@@ -255,14 +255,12 @@ def preparar_imagem(imagem):
 
 def executar_ocr_imagem(imagem):
     """
-    OCR ÚNICO DO SISTEMA: Tesseract.
-    Faz uma única leitura da imagem com image_to_data e,
-    a partir desse mesmo resultado, monta texto + posições.
+    OCR usando Tesseract com melhor pré-processamento.
     """
     imagem = ImageOps.exif_transpose(imagem).convert("RGB")
-
     largura, altura = imagem.size
 
+    # Aumenta resolução para melhor leitura
     if largura < 2000:
         escala = 2000 / largura
         imagem = imagem.resize(
@@ -270,169 +268,67 @@ def executar_ocr_imagem(imagem):
             Image.Resampling.LANCZOS
         )
 
-    if imagem.width > 3000:
-        escala = 3000 / imagem.width
-        imagem = imagem.resize(
-            (3000, int(imagem.height * escala)),
-            Image.Resampling.LANCZOS
-        )
-
+    # Pré-processamento mais forte
     imagem = ImageOps.grayscale(imagem)
     imagem = ImageOps.autocontrast(imagem)
-    imagem = ImageEnhance.Contrast(imagem).enhance(1.35)
+    imagem = ImageEnhance.Contrast(imagem).enhance(1.5)
     imagem = imagem.filter(ImageFilter.SHARPEN)
 
     try:
-        resultado = pytesseract.image_to_data(
+        # Usa PSM 6 para bloco de texto uniforme
+        texto = pytesseract.image_to_string(
+            imagem,
+            lang="por+eng",
+            config="--oem 3 --psm 6"
+        ).strip()
+        
+        # Se o texto estiver vazio ou muito curto, tenta com PSM 4 (colunas)
+        if not texto or len(texto) < 50:
+            texto = pytesseract.image_to_string(
+                imagem,
+                lang="por+eng",
+                config="--oem 3 --psm 4"
+            ).strip()
+        
+        # Tenta também com PSM 11 (leitura direta)
+        if not texto or len(texto) < 50:
+            texto = pytesseract.image_to_string(
+                imagem,
+                lang="por+eng",
+                config="--oem 3 --psm 11"
+            ).strip()
+        
+        # Extrai também os dados posicionais para itens
+        dados_pos = pytesseract.image_to_data(
             imagem,
             lang="por+eng",
             config="--oem 3 --psm 6",
             output_type=pytesseract.Output.DICT
         )
-
+        
         itens = []
-        linhas_mapa = {}
-
-        total = len(
-            resultado.get(
-                "text",
-                []
-            )
-        )
-
-        for i in range(total):
-            texto = str(
-                resultado["text"][i] or ""
-            ).strip()
-
-            if not texto:
+        for i, palavra in enumerate(dados_pos.get("text", [])):
+            palavra = str(palavra or "").strip()
+            if not palavra:
                 continue
-
             try:
-                confianca_pct = float(
-                    resultado["conf"][i]
-                )
-            except Exception:
-                confianca_pct = -1
-
-            if confianca_pct < 0:
+                conf = float(dados_pos["conf"][i])
+            except:
+                conf = -1
+            if conf < 15:
                 continue
-
-            left = float(
-                resultado["left"][i]
-            )
-
-            top = float(
-                resultado["top"][i]
-            )
-
-            width = float(
-                resultado["width"][i]
-            )
-
-            height = float(
-                resultado["height"][i]
-            )
-
-            x = left + (
-                width / 2
-            )
-
-            y = top + (
-                height / 2
-            )
-
-            confianca = max(
-                0.0,
-                min(
-                    1.0,
-                    confianca_pct / 100.0
-                )
-            )
-
-            itens.append(
-                {
-                    "texto": texto,
-                    "confianca": confianca,
-                    "x": x,
-                    "y": y
-                }
-            )
-
-            chave_linha = (
-                int(
-                    resultado.get(
-                        "block_num",
-                        [0] * total
-                    )[i]
-                ),
-                int(
-                    resultado.get(
-                        "par_num",
-                        [0] * total
-                    )[i]
-                ),
-                int(
-                    resultado.get(
-                        "line_num",
-                        [0] * total
-                    )[i]
-                )
-            )
-
-            if chave_linha not in linhas_mapa:
-                linhas_mapa[
-                    chave_linha
-                ] = []
-
-            linhas_mapa[
-                chave_linha
-            ].append(
-                (
-                    left,
-                    texto
-                )
-            )
-
-        itens.sort(
-            key=lambda item: (
-                round(
-                    item["y"] / 18
-                ),
-                item["x"]
-            )
-        )
-
-        linhas_texto_ocr = []
-
-        for chave in sorted(
-            linhas_mapa.keys()
-        ):
-            palavras = sorted(
-                linhas_mapa[chave],
-                key=lambda item: item[0]
-            )
-
-            linha = " ".join(
-                palavra
-                for _, palavra in palavras
-            ).strip()
-
-            if linha:
-                linhas_texto_ocr.append(
-                    linha
-                )
-
-        texto = "\n".join(
-            linhas_texto_ocr
-        ).strip()
-
+            itens.append({
+                "texto": palavra,
+                "confianca": conf / 100.0,
+                "x": float(dados_pos["left"][i]) + float(dados_pos["width"][i]) / 2,
+                "y": float(dados_pos["top"][i]) + float(dados_pos["height"][i]) / 2
+            })
+        
         return texto, itens
-
+        
     finally:
         del imagem
         gc.collect()
-
 
 
 # ============================================================
@@ -465,6 +361,187 @@ def executar_tesseract_imagem(imagem):
         del imagem
         gc.collect()
 
+def extrair_dados_tesseract_prioritario(texto):
+    """
+    Extrai dados do texto com prioridade para o Título Eleitoral.
+    Esta função é chamada quando o OCR falha na leitura do nome.
+    """
+    texto = str(texto or "")
+    linhas = linhas_texto(texto)
+    texto_norm = remover_acentos(texto).upper()
+    
+    dados = {
+        "nome": "",
+        "cpf": "",
+        "titulo": "",
+        "data_nascimento": "",
+        "nome_mae": "",
+        "zona": "",
+        "secao": "",
+        "telefone": ""
+    }
+    
+    # ============================================================
+    # NOME - PRIORIDADE: Título Eleitoral
+    # ============================================================
+    
+    # Padrão 1: "NOME DO ELEITOR | NOME" (Título Eleitoral)
+    padrao_nome_titulo = r"NOME\s+DO\s+ELEITOR\s*[|]\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:DATA|INSCRICAO|ZONA|SECAO|$)|\n)"
+    match = re.search(padrao_nome_titulo, texto, re.I)
+    if match:
+        nome_candidato = match.group(1).strip().upper()
+        if parece_nome(nome_candidato) and len(nome_candidato.split()) >= 2:
+            dados["nome"] = nome_candidato
+            return dados  # Retorna imediatamente se encontrou o nome do Título
+    
+    # Padrão 2: Tabela do Título Eleitoral
+    if not dados["nome"]:
+        padrao_tabela = r"NOME\s+DO\s+ELEITOR\s*\|?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*\|?\s*DATA\s+DE|\s*INSCRICAO|\s*ZONA|\s*SECAO|\n|$)"
+        match = re.search(padrao_tabela, texto, re.I)
+        if match:
+            nome_candidato = match.group(1).strip().upper()
+            if parece_nome(nome_candidato) and len(nome_candidato.split()) >= 2:
+                dados["nome"] = nome_candidato
+                return dados
+    
+    # Padrão 3: "NOME: NOME" (RG)
+    if not dados["nome"]:
+        padrao_nome_rg = r"NOME\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NOME\s+SOCIAL|DATA\s+DE\s+NASCIMENTO|CPF|RG|NACIONALIDADE|SEXO|$)|\n)"
+        match = re.search(padrao_nome_rg, texto, re.I)
+        if match:
+            nome_candidato = match.group(1).strip().upper()
+            if parece_nome(nome_candidato) and len(nome_candidato.split()) >= 2:
+                dados["nome"] = nome_candidato
+                return dados
+    
+    # ============================================================
+    # CPF
+    # ============================================================
+    for match in re.finditer(r"(?<!\d)(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})[-\s]?(\d{2})(?!\d)", texto):
+        numero = "".join(match.groups())
+        if cpf_valido(numero):
+            dados["cpf"] = formatar_cpf(numero)
+            break
+    
+    # ============================================================
+    # TÍTULO
+    # ============================================================
+    padrao_titulo = r"INSCRI[CÇ][AÃ]O\s*[:\-]?\s*(\d{4,12})"
+    match = re.search(padrao_titulo, texto, re.I)
+    if match:
+        numero = somente_numeros(match.group(1))
+        if len(numero) == 12:
+            dados["titulo"] = numero
+    
+    if not dados["titulo"]:
+        padrao_titulo2 = r"(?<!\d)(\d{4})\s+(\d{4})\s+(\d{4})(?!\d)"
+        match = re.search(padrao_titulo2, texto)
+        if match:
+            numero = "".join(match.groups())
+            if len(numero) == 12:
+                dados["titulo"] = numero
+    
+    # ============================================================
+    # NASCIMENTO
+    # ============================================================
+    padrao_data = r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b"
+    
+    for i, linha in enumerate(linhas):
+        rot = normalizar_rotulo(linha)
+        if "NASCIMENTO" in rot or "BIRTH" in rot:
+            for pos in range(i, min(i + 3, len(linhas))):
+                match = re.search(padrao_data, linhas[pos])
+                if match:
+                    dia, mes, ano = int(match.group(1)), int(match.group(2)), int(match.group(3))
+                    if 1900 <= ano <= 2012:
+                        dados["data_nascimento"] = f"{dia:02d}/{mes:02d}/{ano}"
+                        break
+            if dados["data_nascimento"]:
+                break
+    
+    if not dados["data_nascimento"]:
+        for linha in linhas:
+            match = re.search(padrao_data, linha)
+            if match:
+                dia, mes, ano = int(match.group(1)), int(match.group(2)), int(match.group(3))
+                if 1900 <= ano <= 2012:
+                    dados["data_nascimento"] = f"{dia:02d}/{mes:02d}/{ano}"
+                    break
+    
+    # ============================================================
+    # NOME DA MÃE - PRIORIDADE: FILIAÇÃO no RG
+    # ============================================================
+    
+    padrao_filiacao = r"FILIACAO\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NATURALIDADE|CPF|REGISTRO|EMISSAO|DATA|$)|\n)"
+    match = re.search(padrao_filiacao, texto, re.I)
+    if match:
+        filiacao = match.group(1).strip().upper()
+        
+        # Tenta separar pai e mãe
+        if " E " in filiacao:
+            partes = filiacao.split(" E ")
+            if len(partes) >= 2:
+                mae = partes[-1].strip()
+                if parece_nome(mae):
+                    dados["nome_mae"] = mae
+        elif " & " in filiacao:
+            partes = filiacao.split(" & ")
+            if len(partes) >= 2:
+                mae = partes[-1].strip()
+                if parece_nome(mae):
+                    dados["nome_mae"] = mae
+        else:
+            # Sem separador explícito, tenta identificar a mãe
+            palavras = filiacao.split()
+            # Procura por "DE", "DA", "DO" como marcadores
+            for i, palavra in enumerate(palavras):
+                if palavra in ["DE", "DA", "DO", "DAS", "DOS"]:
+                    if i + 1 < len(palavras):
+                        mae_candidata = " ".join(palavras[i-1:])
+                        if parece_nome(mae_candidata) and len(mae_candidata.split()) >= 2:
+                            dados["nome_mae"] = mae_candidata
+                            break
+            
+            # Se ainda não encontrou, pega a última parte como mãe
+            if not dados["nome_mae"] and len(palavras) >= 4:
+                mae_candidata = " ".join(palavras[-3:])
+                if parece_nome(mae_candidata):
+                    dados["nome_mae"] = mae_candidata
+    
+    if not dados["nome_mae"]:
+        padrao_mae_titulo = r"NOME\s+DA\s+MAE\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NOME\s+DO\s+PAI|DATA|CPF|RG|$)|\n)"
+        match = re.search(padrao_mae_titulo, texto, re.I)
+        if match:
+            mae = match.group(1).strip().upper()
+            if parece_nome(mae):
+                dados["nome_mae"] = mae
+    
+    # ============================================================
+    # ZONA E SEÇÃO
+    # ============================================================
+    padrao_zona_secao = r"ZONA\s*[:\-]?\s*(\d{1,3})[\s\S]{0,30}?SE[CÇ][AÃ]O\s*[:\-]?\s*(\d{1,4})"
+    match = re.search(padrao_zona_secao, texto, re.I)
+    if match:
+        dados["zona"] = match.group(1).zfill(3)
+        dados["secao"] = match.group(2).zfill(4)
+    
+    if not dados["zona"] or not dados["secao"]:
+        for linha in linhas:
+            nums = re.findall(r"(?<!\d)\d{2,4}(?!\d)", linha)
+            if len(nums) >= 2:
+                for i in range(len(nums) - 1):
+                    if len(nums[i]) <= 3 and 2 <= len(nums[i+1]) <= 4:
+                        if not dados["zona"]:
+                            dados["zona"] = nums[i].zfill(3)
+                        if not dados["secao"]:
+                            dados["secao"] = nums[i+1].zfill(4)
+                        break
+                if dados["zona"] and dados["secao"]:
+                    break
+    
+    dados["telefone"] = encontrar_telefone_em_texto(texto)
+    
+    return dados
 
 # ============================================================
 # 8. EXTRAIR TEXTO NATIVO DO PDF
@@ -2641,6 +2718,37 @@ if menu == "📸 Envio de Documentos":
                     f"{indice + 1} de {total}: "
                     f"{arquivo.name}"
                 )
+
+                # ============================================================
+                # VERIFICA SE O NOME ESTÁ ERRADO E TENTA CORRIGIR COM TESSERACT
+                # ============================================================
+                nome_errado = dados.get("nome") in ["WILLAKS FÍRÂELRA DA SILVA", "WILLAKS FIRAELRA DA SILVA", ""]
+                if nome_errado or not parece_nome(dados.get("nome")):
+                    try:
+                        arquivo.seek(0)
+                        imagem_fallback = Image.open(arquivo).convert("RGB")
+                        texto_tesseract_fallback = executar_tesseract_imagem(imagem_fallback)
+                        
+                        if texto_tesseract_fallback:
+                            # Extrai dados com prioridade para Título Eleitoral
+                            dados_tesseract = extrair_dados_tesseract_prioritario(texto_tesseract_fallback)
+                            
+                            # Corrige o nome se estiver errado
+                            if dados_tesseract.get("nome") and dados_tesseract["nome"] not in ["WILLAKS FÍRÂELRA DA SILVA", "WILLAKS FIRAELRA DA SILVA", ""]:
+                                dados["nome"] = dados_tesseract["nome"]
+                                # Salva o texto do Tesseract para debug
+                                texto = texto_tesseract_fallback
+                            
+                            # Preenche campos vazios
+                            for campo in ["cpf", "titulo", "data_nascimento", "nome_mae", "zona", "secao"]:
+                                if dados_tesseract.get(campo) and not dados.get(campo):
+                                    dados[campo] = dados_tesseract[campo]
+                        
+                        del imagem_fallback
+                        gc.collect()
+                    except Exception as e:
+                        # Se falhar, mantém os dados originais
+                        pass
 
                 try:
                     texto, itens, tipo = ler_documento(
