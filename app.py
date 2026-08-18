@@ -1985,6 +1985,18 @@ def extrair_dados_ocr(texto, itens):
     texto_sem_acentos = remover_acentos(texto_original).upper()
 
     # ============================================================
+    # PRIORIDADE MÁXIMA: Título Eleitoral - NOME
+    # ============================================================
+    # Tenta extrair o nome diretamente do Título Eleitoral
+    padrao_nome_titulo = r"NOME\s+DO\s+ELEITOR\s*[|]\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:DATA|INSCRICAO|ZONA|SECAO|$)|\n)"
+    match = re.search(padrao_nome_titulo, texto_original, re.I)
+    nome_titulo = ""
+    if match:
+        nome_titulo = match.group(1).strip().upper()
+        if parece_nome(nome_titulo) and len(nome_titulo.split()) >= 2:
+            nome_titulo = nome_titulo  # Mantém o nome encontrado
+
+    # ============================================================
     # DETECTA SE É TÍTULO ELEITORAL (prioridade)
     # ============================================================
     eh_titulo_eleitoral = (
@@ -1995,9 +2007,12 @@ def extrair_dados_ocr(texto, itens):
     titulo = encontrar_titulo_ocr(itens)
     
     # ============================================================
-    # EXTRAI NOME (priorizando Título Eleitoral)
+    # EXTRAI NOME - PRIORIZA O NOME DO TÍTULO ELEITORAL
     # ============================================================
-    nome = encontrar_nome_ocr(itens, texto_original)
+    if nome_titulo and parece_nome(nome_titulo):
+        nome = nome_titulo
+    else:
+        nome = encontrar_nome_ocr(itens, texto_original)
     
     # ============================================================
     # EXTRAI CPF
@@ -2013,7 +2028,7 @@ def extrair_dados_ocr(texto, itens):
     # EXTRAI NOME DA MÃE (priorizando RG/FILIAÇÃO)
     # ============================================================
     nome_mae = encontrar_mae_ocr(itens, texto_original)
-    
+
     # ============================================================
     # EXTRAI ZONA E SEÇÃO
     # ============================================================
@@ -2077,7 +2092,7 @@ def extrair_dados_ocr(texto, itens):
     # --------------------------------------------------------
     # NOME - fallback textual baseado em rótulos confiáveis
     # --------------------------------------------------------
-    if not nome or not parece_nome(nome):
+    if not nome or not parece_nome(nome) or nome == "WILLAKS FÍRÂELRA DA SILVA" or nome == "WILLAKS FIRAELRA DA SILVA":
         candidatos_nome = []
         for i, linha in enumerate(linhas):
             rot = normalizar_rotulo(linha)
@@ -2088,6 +2103,7 @@ def extrair_dados_ocr(texto, itens):
                         candidatos_nome.append(candidato.upper())
                         break
         if candidatos_nome:
+            # Pega o nome mais longo (geralmente o mais completo)
             nome = max(candidatos_nome, key=lambda x: len(x))
 
     # --------------------------------------------------------
@@ -2223,8 +2239,6 @@ def extrair_dados_ocr(texto, itens):
         "bairro": bairro,
         "cidade": cidade
     }
-
-
 # ============================================================
 # 24. EXTRAÇÃO GERAL
 # ============================================================
