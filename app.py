@@ -579,7 +579,7 @@ def executar_ocr_pdf(arquivo):
 # 11. LER DOCUMENTO
 # ============================================================
 
-def ler_documento(arquivo):
+def _ler_documento_legado(arquivo):
     nome = arquivo.name.lower()
 
     if nome.endswith(
@@ -627,6 +627,88 @@ def ler_documento(arquivo):
         itens,
         "Imagem — OCR"
     )
+
+
+def ler_documento(arquivo):
+    """
+    Etapa 7B: somente o tratamento estrutural de PDF passa pelo leitor_pdf.
+    O OCR e os parsers atuais continuam preservados.
+    Em caso de falha, volta automaticamente ao leitor legado.
+    """
+    nome = str(getattr(arquivo, "name", "") or "").lower()
+
+    # JPG/JPEG/PNG continuam exatamente no fluxo anterior nesta etapa.
+    if not nome.endswith(".pdf"):
+        return _ler_documento_legado(arquivo)
+
+    try:
+        arquivo.seek(0)
+        pdf_bytes = arquivo.getvalue()
+        analise = leitor_pdf.analisar_pdf(pdf_bytes)
+        tipo_pdf = analise.get("tipo", "PDF_ESCANEADO")
+
+        if tipo_pdf == "PDF_DIGITAL":
+            return (
+                str(analise.get("texto", "") or "").strip(),
+                [],
+                "PDF — texto digital"
+            )
+
+        textos = []
+        todos_itens = []
+
+        # Em PDF misto, preserva o texto nativo das páginas digitais.
+        paginas_info = {
+            int(p.get("pagina", 0)): p
+            for p in analise.get("paginas", [])
+        }
+
+        for numero in analise.get("paginas_digitais", []):
+            info = paginas_info.get(int(numero), {})
+            texto_pagina = str(info.get("texto", "") or "").strip()
+            if texto_pagina:
+                textos.append(texto_pagina)
+
+        # Só as páginas escaneadas são convertidas em imagem.
+        paginas_ocr = leitor_pdf.converter_paginas_escaneadas(pdf_bytes)
+
+        for item in paginas_ocr:
+            imagem = item.get("imagem")
+            if imagem is None:
+                continue
+
+            try:
+                # Mantém o OCR atual do app nesta etapa.
+                texto_pagina, itens_pagina = executar_ocr_imagem(imagem)
+
+                if str(texto_pagina or "").strip():
+                    textos.append(str(texto_pagina).strip())
+
+                if itens_pagina:
+                    todos_itens.extend(itens_pagina)
+            finally:
+                try:
+                    imagem.close()
+                except Exception:
+                    pass
+                gc.collect()
+
+        texto_final = "\n\n".join(textos).strip()
+
+        if tipo_pdf == "PDF_MISTO":
+            tipo_leitura = "PDF — texto digital + OCR"
+        else:
+            tipo_leitura = "PDF — OCR"
+
+        return texto_final, todos_itens, tipo_leitura
+
+    except Exception:
+        # Fallback de segurança: nada fica inutilizado se o módulo novo falhar.
+        try:
+            arquivo.seek(0)
+        except Exception:
+            pass
+        return _ler_documento_legado(arquivo)
 
 
 # ============================================================
