@@ -106,20 +106,6 @@ except Exception:
 # 4. FUNÇÕES BÁSICAS
 # ============================================================
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ============================================================
 # 4A. TELEFONE
 # ============================================================
@@ -375,399 +361,6 @@ def executar_tesseract_imagem(imagem):
     finally:
         del imagem
         gc.collect()
-
-
-def extrair_dados_tesseract(texto, imagem_original=None):
-    linhas = linhas_texto(texto)
-
-    dados = {
-        "nome": "",
-        "cpf": "",
-        "titulo": "",
-        "data_nascimento": "",
-        "nome_mae": "",
-        "zona": "",
-        "secao": "",
-        "telefone": "",
-        "_candidatos_mae": []
-    }
-
-    texto_norm = remover_acentos(texto).upper()
-
-    # CPF
-    for match in re.finditer(
-        r"(?<!\d)(\d{3})[.\s-]?(\d{3})[.\s-]?(\d{3})[-.\s]?(\d{2})(?!\d)",
-        texto
-    ):
-        numero = "".join(match.groups())
-        if cpf_valido(numero):
-            dados["cpf"] = formatar_cpf(numero)
-            break
-
-    # Nascimento
-    padrao_data = r"(?<!\d)(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})(?!\d)"
-
-    for i, linha in enumerate(linhas):
-        rotulo = normalizar_rotulo(linha)
-        if (
-            "NASCIMENTO" in rotulo
-            or "DATEOFBIRTH" in rotulo
-            or rotulo == "BIRTH"
-        ):
-            candidatos = [linha]
-            for deslocamento in (1, 2, -1):
-                pos = i + deslocamento
-                if 0 <= pos < len(linhas):
-                    candidatos.append(linhas[pos])
-
-            for candidato in candidatos:
-                match = re.search(padrao_data, candidato)
-                if match:
-                    valor = (
-                        f"{match.group(1)}/"
-                        f"{match.group(2)}/"
-                        f"{match.group(3)}"
-                    )
-                    if data_valida(valor):
-                        dados["data_nascimento"] = valor
-                        break
-            if dados["data_nascimento"]:
-                break
-
-    # Sem rótulo de nascimento, não usa uma data solta do documento.
-    # Ela pode ser emissão, validade ou outro campo.
-
-    # Mãe com rótulo explícito no texto linear
-    for i, linha in enumerate(linhas):
-        rotulo = normalizar_rotulo(linha)
-        if (
-            rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE")
-            or "NOMEDAMAE" in rotulo
-        ):
-            for deslocamento in (1, 2, 3):
-                pos = i + deslocamento
-                if pos < len(linhas) and parece_nome(linhas[pos]):
-                    dados["nome_mae"] = linhas[pos].strip().upper()
-                    break
-            if dados["nome_mae"]:
-                break
-
-    # Se FILIAÇÃO foi reconhecida no texto linear, usa os nomes próximos,
-    # mas não assume automaticamente que o primeiro é a mãe.
-    # A identificação segura é feita abaixo pelo OCR posicional.
-    #
-    # Para CIN/RG, usa pytesseract.image_to_data para recuperar caixas e linhas.
-    # Isso evita depender da ordem embaralhada do texto corrido.
-    if (
-        not dados["nome_mae"]
-        and imagem_original is not None
-    ):
-        try:
-            imagem_pos = ImageOps.exif_transpose(
-                imagem_original
-            ).convert("RGB")
-
-            largura, altura = imagem_pos.size
-
-            if largura < 1800:
-                escala = 1800 / largura
-                imagem_pos = imagem_pos.resize(
-                    (
-                        1800,
-                        int(altura * escala)
-                    ),
-                    Image.Resampling.LANCZOS
-                )
-
-            dados_pos = pytesseract.image_to_data(
-                imagem_pos,
-                lang="por+eng",
-                config="--oem 3 --psm 11",
-                output_type=pytesseract.Output.DICT
-            )
-
-            palavras = []
-
-            for idx, palavra in enumerate(dados_pos.get("text", [])):
-                palavra = str(palavra or "").strip()
-
-                if not palavra:
-                    continue
-
-                try:
-                    conf = float(dados_pos["conf"][idx])
-                except Exception:
-                    conf = -1
-
-                if conf < 15:
-                    continue
-
-                palavras.append({
-                    "texto": palavra,
-                    "left": int(dados_pos["left"][idx]),
-                    "top": int(dados_pos["top"][idx]),
-                    "width": int(dados_pos["width"][idx]),
-                    "height": int(dados_pos["height"][idx]),
-                    "block": int(dados_pos["block_num"][idx]),
-                    "par": int(dados_pos["par_num"][idx]),
-                    "line": int(dados_pos["line_num"][idx])
-                })
-
-            # Reconstrói linhas físicas do documento.
-            grupos = {}
-
-            for p in palavras:
-                chave = (
-                    p["block"],
-                    p["par"],
-                    p["line"]
-                )
-                grupos.setdefault(chave, []).append(p)
-
-            linhas_pos = []
-
-            for grupo in grupos.values():
-                grupo = sorted(
-                    grupo,
-                    key=lambda x: x["left"]
-                )
-
-                texto_linha = " ".join(
-                    p["texto"]
-                    for p in grupo
-                ).strip()
-
-                if not texto_linha:
-                    continue
-
-                linhas_pos.append({
-                    "texto": texto_linha,
-                    "norm": remover_acentos(
-                        texto_linha
-                    ).upper(),
-                    "top": min(
-                        p["top"]
-                        for p in grupo
-                    ),
-                    "bottom": max(
-                        p["top"] + p["height"]
-                        for p in grupo
-                    ),
-                    "left": min(
-                        p["left"]
-                        for p in grupo
-                    )
-                })
-
-            linhas_pos.sort(
-                key=lambda x: (
-                    x["top"],
-                    x["left"]
-                )
-            )
-
-            # Primeiro tenta localizar FILIAÇÃO/FILIATION fisicamente.
-            indice_filiacao = None
-
-            for idx, linha_pos in enumerate(linhas_pos):
-                norm = normalizar_rotulo(
-                    linha_pos["texto"]
-                )
-
-                if (
-                    "FILIACAO" in norm
-                    or "FILIATION" in norm
-                ):
-                    indice_filiacao = idx
-                    break
-
-            candidatos_filiacao = []
-
-            if indice_filiacao is not None:
-                topo_rotulo = linhas_pos[
-                    indice_filiacao
-                ]["top"]
-
-                # Examina somente uma faixa abaixo do rótulo.
-                limite = topo_rotulo + int(
-                    imagem_pos.size[1] * 0.20
-                )
-
-                for linha_pos in linhas_pos[
-                    indice_filiacao + 1:
-                ]:
-                    if linha_pos["top"] > limite:
-                        break
-
-                    candidato = linha_pos[
-                        "texto"
-                    ].strip()
-
-                    if parece_nome(candidato):
-                        candidatos_filiacao.append(
-                            candidato.upper()
-                        )
-
-            # Caso o rótulo FILIAÇÃO não tenha sido reconhecido,
-            # usa a geometria do CIN: nomes da filiação aparecem
-            # acima da linha do titular e antes dos campos de emissão.
-            if not candidatos_filiacao:
-                nomes_pos = []
-
-                termos_excluir = (
-                    "REPUBLICA", "FEDERATIVA",
-                    "BRASIL", "GOVERNO",
-                    "FEDERAL", "ESTADO",
-                    "SECRETARIA", "SEGURANCA",
-                    "PUBLICA", "INSTITUTO",
-                    "IDENTIFICACAO", "DELEGADO",
-                    "REGISTRO", "GERAL",
-                    "PERSONAL", "NUMBER",
-                    "NOME SOCIAL", "SOCIAL NAME",
-                    "CARD ISSUER", "LOCAL",
-                    "PLACE", "ISSUE", "EMISSAO",
-                    "NASCIMENTO", "BIRTH",
-                    "NACIONALIDADE", "NATIONALITY",
-                    "NATURALIDADE", "VALIDADE",
-                    "EXPIRY", "ASSINATURA",
-                    "SIGNATURE", "SUPERINTENDENTE"
-                )
-
-                for linha_pos in linhas_pos:
-                    candidato = linha_pos[
-                        "texto"
-                    ].strip()
-
-                    norm = remover_acentos(
-                        candidato
-                    ).upper()
-
-                    if not parece_nome(candidato):
-                        continue
-
-                    if any(
-                        termo in norm
-                        for termo in termos_excluir
-                    ):
-                        continue
-
-                    quantidade = len(
-                        candidato.split()
-                    )
-
-                    if 3 <= quantidade <= 7:
-                        nomes_pos.append(
-                            linha_pos
-                        )
-
-                # Guarda nomes reconhecidos fisicamente como possíveis
-                # candidatos de filiação. Isso será usado apenas para
-                # conferência manual quando o OCR não conseguir distinguir
-                # automaticamente qual deles é a mãe.
-                candidatos_manuais = []
-
-                for linha_nome in nomes_pos:
-                    nome_candidato = (
-                        str(linha_nome.get("texto", ""))
-                        .strip()
-                        .upper()
-                    )
-
-                    if (
-                        nome_candidato
-                        and nome_candidato not in candidatos_manuais
-                    ):
-                        candidatos_manuais.append(
-                            nome_candidato
-                        )
-
-                dados["_candidatos_mae"] = candidatos_manuais
-
-                # Procura o titular conhecido pelo OCR principal/texto.
-                # Em CIN, os dois nomes imediatamente acima dele formam
-                # o bloco de filiação. A linha mais próxima do titular
-                # costuma ser a mãe no layout vertical; se a geometria
-                # não for clara, não preenche.
-                titular_idx = None
-
-                for idx, linha_pos in enumerate(
-                    nomes_pos
-                ):
-                    norm_nome = remover_acentos(
-                        linha_pos["texto"]
-                    ).upper()
-
-                    # Nome do titular tende a aparecer depois dos dois pais
-                    # e próximo dos rótulos Nome/Nome Social.
-                    proximos = [
-                        l["norm"]
-                        for l in linhas_pos
-                        if (
-                            l["top"]
-                            <= linha_pos["top"]
-                            <= l["bottom"] + 10
-                        )
-                    ]
-
-                    if any(
-                        "NOME" in p
-                        for p in proximos
-                    ):
-                        titular_idx = idx
-                        break
-
-                # Se a linha do titular não foi localizada pelo rótulo,
-                # usa três nomes completos consecutivos no topo da área
-                # de dados, mas só quando a separação vertical confirma
-                # que os dois primeiros pertencem ao mesmo bloco.
-                if (
-                    titular_idx is not None
-                    and titular_idx >= 2
-                ):
-                    pais = nomes_pos[
-                        titular_idx - 2:
-                        titular_idx
-                    ]
-
-                    if len(pais) == 2:
-                        # No CIN brasileiro o campo Filiação não identifica
-                        # sexo do genitor no texto OCR. Sem o rótulo individual,
-                        # não é seguro decidir qual dos dois é a mãe.
-                        # Portanto não inventa.
-                        candidatos_filiacao = []
-
-            # Só preenche automaticamente quando há um único candidato
-            # inequivocamente associado ao campo Mãe.
-            if len(candidatos_filiacao) == 1:
-                dados["nome_mae"] = (
-                    candidatos_filiacao[0]
-                )
-
-            del imagem_pos
-            gc.collect()
-
-        except Exception:
-            pass
-
-    if not dados["telefone"]:
-        dados["telefone"] = encontrar_telefone_em_texto(
-            texto
-        )
-
-    return dados
-
-
-def combinar_dados_ocr(principal, fallback):
-    resultado = dict(principal)
-
-    for campo in (
-        "nome", "cpf", "titulo", "data_nascimento",
-        "nome_mae", "zona", "secao", "telefone"
-    ):
-        if not resultado.get(campo) and fallback.get(campo):
-            resultado[campo] = fallback[campo]
-
-    return resultado
 
 
 # ============================================================
@@ -1796,10 +1389,31 @@ def encontrar_cpf_ocr(itens):
 
 
 # ============================================================
-# 20. EXTRAÇÃO OCR - NOME
+# 20. EXTRAÇÃO OCR - NOME (MELHORADO)
 # ============================================================
 
-def encontrar_nome_ocr(itens):
+def encontrar_nome_ocr(itens, texto_completo=""):
+    """
+    Extrai o nome do documento com prioridade para o Título Eleitoral.
+    """
+    texto_completo = str(texto_completo or "")
+    texto_norm = remover_acentos(texto_completo).upper()
+    
+    # ============================================================
+    # PRIORIDADE 1: NOME DO ELEITOR (Título Eleitoral)
+    # ============================================================
+    if "JUSTICA ELEITORAL" in texto_norm or "TITULO ELEITORAL" in texto_norm:
+        # Procura o padrão "NOME DO ELEITOR | NOME" no texto
+        padrao_titulo = r"NOME\s+DO\s+ELEITOR\s*[|]\s*([A-ZÀ-Ÿ\s]+)"
+        match = re.search(padrao_titulo, texto_completo, re.I)
+        if match:
+            nome = match.group(1).strip().upper()
+            if parece_nome(nome):
+                return nome
+    
+    # ============================================================
+    # PRIORIDADE 2: Rótulo NOME / NOMEDOELEITOR no OCR
+    # ============================================================
     for item_rotulo in itens:
         rotulo = normalizar_rotulo(
             item_rotulo["texto"]
@@ -1856,6 +1470,24 @@ def encontrar_nome_ocr(itens):
                     .upper()
                 )
 
+    # ============================================================
+    # PRIORIDADE 3: Primeiro nome válido no texto que não seja um rótulo
+    # ============================================================
+    # Extrai nomes do texto completo usando padrões comuns
+    padroes_nome = [
+        r"NOME\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NASCIMENTO|CPF|RG|DATA|FILIACAO|ZONA|SECAO|INSCRICAO|TITULO|$)|\n)",
+        r"NOME\s+DO\s+ELEITOR\s*[|]\s*([A-ZÀ-Ÿ\s]+)",
+        r"NOME\s+COMPLETO\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NASCIMENTO|CPF|RG|DATA|FILIACAO|$)|\n)"
+    ]
+    
+    for padrao in padroes_nome:
+        match = re.search(padrao, texto_completo, re.I)
+        if match:
+            nome = match.group(1).strip().upper()
+            if parece_nome(nome):
+                return nome
+
+    # Fallback: procura por nomes no texto
     candidatos = []
 
     for item in itens:
@@ -1893,11 +1525,66 @@ def encontrar_nome_ocr(itens):
 
 
 # ============================================================
-# 21. EXTRAÇÃO OCR - NOME DA MÃE
+# 21. EXTRAÇÃO OCR - NOME DA MÃE (MELHORADO)
 # ============================================================
 
-def encontrar_mae_ocr(itens):
-    # 1. Prioridade máxima: documento que identifica explicitamente a mãe.
+def encontrar_mae_ocr(itens, texto_completo=""):
+    """
+    Extrai o nome da mãe com prioridade para FILIAÇÃO no RG e no Título.
+    """
+    texto_completo = str(texto_completo or "")
+    texto_norm = remover_acentos(texto_completo).upper()
+    
+    # ============================================================
+    # PRIORIDADE 1: FILIAÇÃO no RG / Carteira de Identidade
+    # ============================================================
+    # Procura o padrão "FILIACAO" seguido de nomes
+    padrao_filiacao = r"FILIACAO\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?:\s+[A-ZÀ-Ÿ\s]+)?"
+    match = re.search(padrao_filiacao, texto_completo, re.I)
+    
+    if match:
+        filiacao = match.group(1).strip().upper()
+        # Verifica se tem dois nomes (pai e mãe)
+        partes = filiacao.split()
+        if len(partes) >= 4:  # Nome completo do pai + nome completo da mãe
+            # Tenta separar pai e mãe
+            # Normalmente a mãe vem depois do pai
+            palavras = filiacao.split()
+            # Procura por "E" ou "e" separando os nomes
+            for i, palavra in enumerate(palavras):
+                if palavra.upper() in ["E", "&", ","]:
+                    mae = " ".join(palavras[i+1:]).strip()
+                    if mae and parece_nome(mae):
+                        return mae
+            # Se não encontrar separador, pega a última parte como mãe
+            # (geralmente a mãe é o último nome)
+            if len(partes) >= 2:
+                # Tenta identificar se tem "DA", "DE", "DO", "DAS", "DOS"
+                # A mãe geralmente é o nome mais próximo do final
+                for i in range(len(partes) - 1, -1, -1):
+                    if len(partes[i]) >= 3:
+                        mae_candidata = " ".join(partes[max(0, i-1):i+1])
+                        if parece_nome(mae_candidata):
+                            return mae_candidata
+                        # Se não funcionou, tenta com mais palavras
+                        if i >= 2:
+                            mae_candidata = " ".join(partes[i-2:i+1])
+                            if parece_nome(mae_candidata):
+                                return mae_candidata
+    
+    # ============================================================
+    # PRIORIDADE 2: NOME DA MÃE no Título Eleitoral
+    # ============================================================
+    padrao_mae_titulo = r"NOME\s+DA\s+MAE\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NOME|DATA|CPF|RG|FILIACAO|ZONA|SECAO|$)|\n)"
+    match = re.search(padrao_mae_titulo, texto_completo, re.I)
+    if match:
+        mae = match.group(1).strip().upper()
+        if parece_nome(mae):
+            return mae
+    
+    # ============================================================
+    # PRIORIDADE 3: Rótulo MAE / NOMEDAMAE no OCR
+    # ============================================================
     rotulos_mae = []
 
     for item in itens:
@@ -1937,9 +1624,9 @@ def encontrar_mae_ocr(itens):
             candidatos.sort()
             return candidatos[0][2]
 
-    # 2. RG/CIN e outros documentos podem trazer apenas FILIAÇÃO/FILIATION.
-    # Nesses documentos, captura o primeiro nome completo associado ao campo,
-    # sem usar lista de nomes próprios nem inventar conteúdo.
+    # ============================================================
+    # PRIORIDADE 4: FILIAÇÃO no OCR
+    # ============================================================
     rotulos_filiacao = []
 
     for item in itens:
@@ -1976,6 +1663,10 @@ def encontrar_mae_ocr(itens):
 
         if candidatos:
             candidatos.sort()
+            # Se tiver mais de um candidato, pode ser pai e mãe
+            if len(candidatos) >= 2:
+                # O último candidato (mais abaixo) geralmente é a mãe
+                return candidatos[-1][4]
             return candidatos[0][4]
 
     return ""
@@ -2101,7 +1792,7 @@ def encontrar_zona_secao_ocr(
 
 
 # ============================================================
-# 23. EXTRAIR DADOS OCR
+# 23. EXTRAIR DADOS OCR (MELHORADO)
 # ============================================================
 
 def extrair_dados_ocr(texto, itens):
@@ -2113,11 +1804,39 @@ def extrair_dados_ocr(texto, itens):
     linhas = linhas_texto(texto_original)
     texto_sem_acentos = remover_acentos(texto_original).upper()
 
+    # ============================================================
+    # DETECTA SE É TÍTULO ELEITORAL (prioridade)
+    # ============================================================
+    eh_titulo_eleitoral = (
+        "JUSTICA ELEITORAL" in texto_sem_acentos or 
+        "TITULO ELEITORAL" in texto_sem_acentos
+    )
+    
     titulo = encontrar_titulo_ocr(itens)
-    nome = encontrar_nome_ocr(itens)
+    
+    # ============================================================
+    # EXTRAI NOME (priorizando Título Eleitoral)
+    # ============================================================
+    nome = encontrar_nome_ocr(itens, texto_original)
+    
+    # ============================================================
+    # EXTRAI CPF
+    # ============================================================
     cpf = encontrar_cpf_ocr(itens)
+    
+    # ============================================================
+    # EXTRAI NASCIMENTO
+    # ============================================================
     nascimento = encontrar_nascimento_ocr(itens)
-    nome_mae = encontrar_mae_ocr(itens)
+    
+    # ============================================================
+    # EXTRAI NOME DA MÃE (priorizando RG/FILIAÇÃO)
+    # ============================================================
+    nome_mae = encontrar_mae_ocr(itens, texto_original)
+    
+    # ============================================================
+    # EXTRAI ZONA E SEÇÃO
+    # ============================================================
     zona, secao = encontrar_zona_secao_ocr(itens, titulo)
 
     # --------------------------------------------------------
@@ -2212,13 +1931,37 @@ def extrair_dados_ocr(texto, itens):
                     if valor != nome and valor not in nomes_filiacao:
                         nomes_filiacao.append(valor)
         if len(nomes_filiacao) >= 2:
-            nome_mae = nomes_filiacao[1]
+            # No RG, a mãe geralmente é o último nome da filiação
+            # Mas pode ser o segundo se tiver "E" ou "&" separando
+            filiacao_texto = " ".join(nomes_filiacao)
+            if " E " in filiacao_texto or " & " in filiacao_texto:
+                # Pega o último nome após o separador
+                separadores = [" E ", " & ", ", "]
+                for sep in separadores:
+                    if sep in filiacao_texto:
+                        mae = filiacao_texto.split(sep)[-1].strip()
+                        if parece_nome(mae):
+                            nome_mae = mae
+                            break
+            if not nome_mae:
+                # Pega o último nome da lista (geralmente a mãe)
+                nome_mae = nomes_filiacao[-1]
         elif len(nomes_filiacao) == 1:
             nome_mae = nomes_filiacao[0]
 
     # --------------------------------------------------------
-    # ZONA E SEÇÃO
+    # ZONA E SEÇÃO - melhora para Título Eleitoral
     # --------------------------------------------------------
+    if not zona or not secao:
+        # Procura padrão específico do Título Eleitoral
+        padrao_zona_secao = r"ZONA\s*(\d{1,3})[\s\S]{0,50}?SE[CÇ][AÃ]O\s*(\d{1,4})"
+        match = re.search(padrao_zona_secao, texto_original, re.I)
+        if match:
+            if not zona:
+                zona = somente_numeros(match.group(1)).zfill(3)
+            if not secao:
+                secao = somente_numeros(match.group(2)).zfill(4)
+    
     if not zona or not secao:
         m = re.search(r"ZONA[\s\S]{0,80}?(\d{1,3})[\s\S]{0,80}?SE[CÇ][AÃ]O[\s\S]{0,80}?(\d{1,4})", texto_original, re.I)
         if m:
@@ -2300,6 +2043,8 @@ def extrair_dados_ocr(texto, itens):
         "bairro": bairro,
         "cidade": cidade
     }
+
+
 # ============================================================
 # 24. EXTRAÇÃO GERAL
 # ============================================================
@@ -2827,33 +2572,20 @@ if menu == "📸 Envio de Documentos":
                         )
 
                         if texto_tesseract:
-                            dados_tesseract = extrair_dados_tesseract(
+                            # Usa o Tesseract para melhorar a extração
+                            dados_tesseract = extrair_dados_ocr(
                                 texto_tesseract,
-                                imagem_original=imagem_fallback
+                                []
                             )
-
-                            dados = combinar_dados_ocr(
-                                dados,
-                                dados_tesseract
-                            )
-
-                            candidatos_mae = (
-                                dados_tesseract.get(
-                                    "_candidatos_mae",
-                                    []
-                                )
-                            )
-
-                            if candidatos_mae:
-                                dados[
-                                    "_candidatos_mae"
-                                ] = candidatos_mae
+                            
+                            # Combina os dados (prioriza o que já foi extraído)
+                            for campo in ["nome", "cpf", "titulo", "data_nascimento", "nome_mae", "zona", "secao"]:
+                                if not dados.get(campo) and dados_tesseract.get(campo):
+                                    dados[campo] = dados_tesseract[campo]
 
                         del imagem_fallback
                         gc.collect()
 
-                        if False:
-                            dados_tesseract = {}
                     # Telefone: tenta o conteúdo do documento primeiro.
                     # O nome do arquivo é apenas fallback.
                     if not dados.get("telefone"):
