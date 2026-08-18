@@ -2083,17 +2083,11 @@ def encontrar_zona_secao_ocr(
 # 23. EXTRAIR DADOS OCR
 # ============================================================
 
-def extrair_dados_ocr(
-    texto,
-    itens
-):
+def extrair_dados_ocr(texto, itens):
     """
     Extrai os dados combinando a posição dos blocos do OCR com o texto
-    completo do documento. O fallback textual é importante para PDFs com
-    vários documentos na mesma página, nos quais o OCR separa números e
-    rótulos em blocos diferentes.
+    completo do documento, ignorando faturas de consumo anexadas.
     """
-
     texto_original = str(texto or "")
     linhas = linhas_texto(texto_original)
     texto_sem_acentos = remover_acentos(texto_original).upper()
@@ -2109,26 +2103,17 @@ def extrair_dados_ocr(
     # LIMPEZA DO NOME LIDO PELO OCR
     # --------------------------------------------------------
     if nome:
-        nome = re.sub(
-            r"^[^A-Za-zÀ-ÿ]+",
-            "",
-            str(nome)
-        ).strip().upper()
-
-        # Remove lixo curto que às vezes fica antes do nome real.
+        nome = re.sub(r"^[^A-Za-zÀ-ÿ]+", "", str(nome)).strip().upper()
         partes = nome.split()
         while partes and len(re.sub(r"[^A-ZÀ-Ÿ]", "", partes[0])) <= 1:
             partes.pop(0)
         nome = " ".join(partes).strip()
 
     # --------------------------------------------------------
-    # CPF - fallback no texto completo
+    # CPF - fallback no texto completo com validação rigorosa
     # --------------------------------------------------------
     if not cpf:
-        for match in re.finditer(
-            r"(?<!\d)(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})[-\s]?(\d{2})(?!\d)",
-            texto_original
-        ):
+        for match in re.finditer(r"(?<!\d)(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})[-\s]?(\d{2})(?!\d)", texto_original):
             numero = "".join(match.groups())
             if cpf_valido(numero):
                 cpf = formatar_cpf(numero)
@@ -2151,30 +2136,22 @@ def extrair_dados_ocr(
                     break
 
     # --------------------------------------------------------
-    # NASCIMENTO - busca robusta com validação de ano plausível
-    # (Evita datas de contas de consumo/vencimento recentes)
+    # NASCIMENTO - busca rigorosa ignorando datas de faturas recentes (2025/2026)
     # --------------------------------------------------------
     if not nascimento:
         candidatos_nasc = []
-
         for i, linha in enumerate(linhas):
             rot = normalizar_rotulo(linha)
-            # Varre linhas próximas a chaves de nascimento
             bloco = " ".join(linhas[max(0, i-1):min(i + 4, len(linhas))])
-            for m in re.finditer(
-                r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b",
-                bloco
-            ):
+            for m in re.finditer(r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b", bloco):
                 dia, mes, ano_str = m.group(1), m.group(2), m.group(3)
                 ano = int(ano_str)
-                # Ignora anos de faturas recentes (ex: 2026) e foca em nascimento (1900-2012)
+                # Garante que seja um ano de nascimento real (ex: entre 1900 e 2012)
                 if 1900 <= ano <= 2012:
                     valor = f"{int(dia):02d}/{int(mes):02d}/{ano_str}"
                     if data_valida(valor):
                         candidatos_nasc.append(valor)
-
         if candidatos_nasc:
-            # Pega a primeira data válida encontrada que pertença ao histórico de nascimento
             nascimento = candidatos_nasc[0]
 
     # --------------------------------------------------------
@@ -2184,16 +2161,9 @@ def extrair_dados_ocr(
         candidatos_nome = []
         for i, linha in enumerate(linhas):
             rot = normalizar_rotulo(linha)
-            if (
-                "NOMEDOELEITOR" in rot
-                or rot in ("NOME", "NOMECOMPLETO")
-            ):
+            if "NOMEDOELEITOR" in rot or rot in ("NOME", "NOMECOMPLETO"):
                 for pos in range(i + 1, min(i + 4, len(linhas))):
-                    candidato = re.sub(
-                        r"^[^A-Za-zÀ-ÿ]+",
-                        "",
-                        linhas[pos]
-                    ).strip()
+                    candidato = re.sub(r"^[^A-Za-zÀ-ÿ]+", "", linhas[pos]).strip()
                     if parece_nome(candidato):
                         candidatos_nome.append(candidato.upper())
                         break
@@ -2201,8 +2171,7 @@ def extrair_dados_ocr(
             nome = max(candidatos_nome, key=lambda x: len(x))
 
     # --------------------------------------------------------
-    # MÃE - varredura melhorada para capturar o nome da mãe
-    # mesmo quando separado do pai ou em linhas quebradas
+    # MÃE - varredura segura para filiação
     # --------------------------------------------------------
     if not nome_mae:
         nomes_filiacao = []
@@ -2212,43 +2181,31 @@ def extrair_dados_ocr(
             if "FILIACAO" in rot or "FILIAÇÃO" in linha.upper():
                 capturando_filiacao = True
                 continue
-            
             if capturando_filiacao:
                 if "DATA" in rot or "NATURALIDADE" in rot or "CPF" in rot or "REGISTRO" in rot or "EMISSAO" in rot:
                     capturando_filiacao = False
                     break
-                
-                candidato = re.sub(
-                    r"^[^A-Za-zÀ-ÿ]+",
-                    "",
-                    linha
-                ).strip()
+                candidato = re.sub(r"^[^A-Za-zÀ-ÿ]+", "", linha).strip()
                 if parece_nome(candidato):
                     valor = candidato.upper()
                     if valor != nome and valor not in nomes_filiacao:
                         nomes_filiacao.append(valor)
-
         if len(nomes_filiacao) >= 2:
-            nome_mae = nomes_filiacao[1]  # Geralmente a segunda linha na filiação padrão (Pai, Mãe)
+            nome_mae = nomes_filiacao[1]
         elif len(nomes_filiacao) == 1:
             nome_mae = nomes_filiacao[0]
 
     # --------------------------------------------------------
-    # ZONA E SEÇÃO - fallback pelo trecho do título eleitoral
+    # ZONA E SEÇÃO
     # --------------------------------------------------------
     if not zona or not secao:
-        m = re.search(
-            r"ZONA[\s\S]{0,80}?(\d{1,3})[\s\S]{0,80}?SE[CÇ][AÃ]O[\s\S]{0,80}?(\d{1,4})",
-            texto_original,
-            re.I
-        )
+        m = re.search(r"ZONA[\s\S]{0,80}?(\d{1,3})[\s\S]{0,80}?SE[CÇ][AÃ]O[\s\S]{0,80}?(\d{1,4})", texto_original, re.I)
         if m:
             if not zona:
                 zona = somente_numeros(m.group(1)).zfill(3)
             if not secao:
                 secao = somente_numeros(m.group(2)).zfill(4)
 
-    # Caso os números apareçam na mesma linha, como "... 022 0538".
     if not zona or not secao:
         for linha in linhas:
             nums = re.findall(r"(?<!\d)\d{2,4}(?!\d)", linha)
@@ -2264,7 +2221,7 @@ def extrair_dados_ocr(
                 break
 
     # --------------------------------------------------------
-    # RG - procura número junto de REGISTRO GERAL / RG.
+    # RG
     # --------------------------------------------------------
     rg = ""
     padroes_rg = [
@@ -2279,18 +2236,14 @@ def extrair_dados_ocr(
                 break
 
     # --------------------------------------------------------
-    # ENDEREÇO / Nº / BAIRRO / CIDADE - aproveita comprovante de residência.
+    # ENDEREÇO / Nº / BAIRRO / CIDADE
     # --------------------------------------------------------
     endereco = ""
     numero = ""
     bairro = ""
     cidade = ""
 
-    m_cidade = re.search(
-        r"MUNIC[IÍ]PIO\s*/?\s*UF[\s\-:|]*([A-ZÀ-Ÿ ]{3,40})[/\-]\s*([A-Z]{2})",
-        texto_original,
-        re.I
-    )
+    m_cidade = re.search(r"MUNIC[IÍ]PIO\s*/?\s*UF[\s\-:|]*([A-ZÀ-Ÿ ]{3,40})[/\-]\s*([A-Z]{2})", texto_original, re.I)
     if m_cidade:
         cidade = m_cidade.group(1).strip().upper()
     else:
@@ -2302,12 +2255,7 @@ def extrair_dados_ocr(
         linha_limpa = re.sub(r"\s+", " ", linha).strip()
         if "CEP" not in linha_limpa.upper():
             continue
-
-        m_end = re.search(
-            r"^(?:R\.?|RUA|AV\.?|AVENIDA|TRAV\.?|TRAVESSA)\s+(.+?)\s+(\d+[A-Z]?)\s+(.+?)\s+CEP\s*[:\-]?\s*\d{5}[-\s]?\d{3}",
-            linha_limpa,
-            re.I
-        )
+        m_end = re.search(r"^(?:R\.?|RUA|AV\.?|AVENIDA|TRAV\.?|TRAVESSA)\s+(.+?)\s+(\d+[A-Z]?)\s+(.+?)\s+CEP\s*[:\-]?\s*\d{5}[-\s]?\d{3}", linha_limpa, re.I)
         if m_end:
             prefixo = re.match(r"^(R\.?|RUA|AV\.?|AVENIDA|TRAV\.?|TRAVESSA)", linha_limpa, re.I)
             tipo = prefixo.group(1).upper() if prefixo else ""
