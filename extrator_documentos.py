@@ -34,7 +34,6 @@ def resultado_vazio():
 
 def remover_acentos(texto):
     texto = str(texto or "")
-
     return "".join(
         c
         for c in unicodedata.normalize("NFD", texto)
@@ -44,25 +43,18 @@ def remover_acentos(texto):
 
 def normalizar_texto(texto):
     texto = remover_acentos(texto).upper()
-
     texto = texto.replace("º", "O")
     texto = texto.replace("°", "O")
-
-    texto = re.sub(
-        r"[ \t]+",
-        " ",
-        texto
-    )
-
+    texto = re.sub(r"[ \t]+", " ", texto)
     return texto.strip()
 
 
+def normalizar_linha(texto):
+    return normalizar_texto(texto)
+
+
 def somente_numeros(valor):
-    return re.sub(
-        r"\D",
-        "",
-        str(valor or "")
-    )
+    return re.sub(r"\D", "", str(valor or ""))
 
 
 def obter_linhas(texto):
@@ -79,65 +71,37 @@ def obter_linhas(texto):
 
 def cpf_valido(cpf):
     cpf = somente_numeros(cpf)
-
     if len(cpf) != 11:
         return False
-
     if cpf == cpf[0] * 11:
         return False
-
     try:
-        soma = sum(
-            int(cpf[i]) * (10 - i)
-            for i in range(9)
-        )
-
+        soma = sum(int(cpf[i]) * (10 - i) for i in range(9))
         digito = 11 - soma % 11
-
         if digito >= 10:
             digito = 0
-
         if digito != int(cpf[9]):
             return False
-
-        soma = sum(
-            int(cpf[i]) * (11 - i)
-            for i in range(10)
-        )
-
+        soma = sum(int(cpf[i]) * (11 - i) for i in range(10))
         digito = 11 - soma % 11
-
         if digito >= 10:
             digito = 0
-
         return digito == int(cpf[10])
-
     except Exception:
         return False
 
 
 def formatar_cpf(cpf):
     cpf = somente_numeros(cpf)
-
     if len(cpf) != 11:
         return cpf
-
-    return (
-        f"{cpf[:3]}."
-        f"{cpf[3:6]}."
-        f"{cpf[6:9]}-"
-        f"{cpf[9:]}"
-    )
+    return f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
 
 
 def data_valida(data):
     try:
-        datetime.strptime(
-            data,
-            "%d/%m/%Y"
-        )
+        datetime.strptime(data, "%d/%m/%Y")
         return True
-
     except Exception:
         return False
 
@@ -147,103 +111,41 @@ def data_valida(data):
 # ============================================================
 
 PALAVRAS_INVALIDAS_NOME = {
-    "REPUBLICA",
-    "FEDERATIVA",
-    "BRASIL",
-    "ESTADO",
-    "SECRETARIA",
-    "SEGURANCA",
-    "PUBLICA",
-    "PERICIA",
-    "OFICIAL",
-    "INSTITUTO",
-    "IDENTIFICACAO",
-    "CARTEIRA",
-    "IDENTIDADE",
-    "JUSTICA",
-    "ELEITORAL",
-    "TITULO",
-    "REGISTRO",
-    "GERAL",
-    "NASCIMENTO",
-    "NATURALIDADE",
-    "MUNICIPIO",
-    "INSCRICAO",
-    "SECAO",
-    "ZONA",
-    "CPF",
-    "ORGAO",
-    "EXPEDIDOR",
-    "DATA",
-    "EMISSAO",
-    "EXPEDICAO",
-    "ASSINATURA",
-    "VALIDADE",
-    "POLEGAR",
-    "DIREITO"
+    "REPUBLICA", "FEDERATIVA", "BRASIL", "ESTADO",
+    "SECRETARIA", "SEGURANCA", "PUBLICA", "PERICIA",
+    "OFICIAL", "INSTITUTO", "IDENTIFICACAO", "CARTEIRA",
+    "IDENTIDADE", "JUSTICA", "ELEITORAL", "TITULO",
+    "REGISTRO", "GERAL", "NASCIMENTO", "NATURALIDADE",
+    "MUNICIPIO", "INSCRICAO", "SECAO", "ZONA",
+    "CPF", "ORGAO", "EXPEDIDOR", "DATA",
+    "EMISSAO", "EXPEDICAO", "ASSINATURA", "VALIDADE",
+    "POLEGAR", "DIREITO"
 }
 
 
 def limpar_nome(valor):
     valor = str(valor or "")
-
-    # OCR frequentemente mistura caracteres nas bordas.
-    valor = re.sub(
-        r"^[^A-Za-zÀ-ÿ]+",
-        "",
-        valor
-    )
-
-    valor = re.sub(
-        r"[^A-Za-zÀ-ÿ'\s]",
-        " ",
-        valor
-    )
-
-    valor = re.sub(
-        r"\s+",
-        " ",
-        valor
-    )
-
+    valor = re.sub(r"^[^A-Za-zÀ-ÿ]+", "", valor)
+    valor = re.sub(r"[^A-Za-zÀ-ÿ'\s]", " ", valor)
+    valor = re.sub(r"\s+", " ", valor)
     return valor.strip().upper()
 
 
 def parece_nome(valor):
     valor = limpar_nome(valor)
-
     if not valor:
         return False
-
     palavras = valor.split()
-
     if len(palavras) < 2:
         return False
-
     if len(valor) < 7:
         return False
-
-    normalizadas = [
-        normalizar_texto(p)
-        for p in palavras
-    ]
-
-    invalidas = sum(
-        p in PALAVRAS_INVALIDAS_NOME
-        for p in normalizadas
-    )
-
+    normalizadas = [normalizar_texto(p) for p in palavras]
+    invalidas = sum(p in PALAVRAS_INVALIDAS_NOME for p in normalizadas)
     if invalidas >= 2:
         return False
-
-    # Não aceita linha formada majoritariamente
-    # por rótulos do documento.
-    if invalidas >= max(
-        1,
-        len(palavras) - 1
-    ):
+    if invalidas >= max(1, len(palavras) - 1):
         return False
-
     return True
 
 
@@ -253,90 +155,44 @@ def parece_nome(valor):
 
 def identificar_documentos(texto):
     t = normalizar_texto(texto)
-
     documentos = []
 
     titulo_pontos = sum(
         termo in t
         for termo in [
-            "TITULO ELEITORAL",
-            "JUSTICA ELEITORAL",
-            "NOME DO ELEITOR",
-            "INSCRICAO",
-            "ZONA",
-            "SECAO"
+            "TITULO ELEITORAL", "JUSTICA ELEITORAL",
+            "NOME DO ELEITOR", "INSCRICAO", "ZONA", "SECAO"
         ]
     )
-
     if titulo_pontos >= 2:
-        documentos.append(
-            "TITULO_ELEITORAL"
-        )
+        documentos.append("TITULO_ELEITORAL")
 
     identidade_pontos = sum(
         termo in t
         for termo in [
-            "CARTEIRA DE IDENTIDADE",
-            "REGISTRO GERAL",
-            "REGISTRO CIVIL",
-            "INSTITUTO DE IDENTIFICACAO",
-            "FILIACAO",
-            "NATURALIDADE",
-            "ORGAO EXPEDIDOR"
+            "CARTEIRA DE IDENTIDADE", "REGISTRO GERAL",
+            "REGISTRO CIVIL", "INSTITUTO DE IDENTIFICACAO",
+            "FILIACAO", "NATURALIDADE", "ORGAO EXPEDIDOR"
         ]
     )
-
     if identidade_pontos >= 2:
-        documentos.append(
-            "IDENTIDADE"
-        )
+        documentos.append("IDENTIDADE")
 
-    if (
-        "CARTEIRA NACIONAL DE HABILITACAO" in t
-        or (
-            "HABILITACAO" in t
-            and "CATEGORIA" in t
-        )
-    ):
-        documentos.append(
-            "CNH"
-        )
+    if "CARTEIRA NACIONAL DE HABILITACAO" in t or ("HABILITACAO" in t and "CATEGORIA" in t):
+        documentos.append("CNH")
 
     endereco_pontos = sum(
         termo in t
-        for termo in [
-            "CEP",
-            "ENDERECO",
-            "RUA",
-            "AVENIDA",
-            "BAIRRO",
-            "VENCIMENTO",
-            "FATURA"
-        ]
+        for termo in ["CEP", "ENDERECO", "RUA", "AVENIDA", "BAIRRO", "VENCIMENTO", "FATURA"]
     )
-
     if endereco_pontos >= 3:
-        documentos.append(
-            "COMPROVANTE_ENDERECO"
-        )
+        documentos.append("COMPROVANTE_ENDERECO")
 
-    if any(
-        termo in t
-        for termo in [
-            "CARTAO NACIONAL DE SAUDE",
-            "CARTAO SUS",
-            "SISTEMA UNICO DE SAUDE",
-            "CNS"
-        ]
-    ):
-        documentos.append(
-            "CARTAO_SUS"
-        )
+    if any(termo in t for termo in ["CARTAO NACIONAL DE SAUDE", "CARTAO SUS", "SISTEMA UNICO DE SAUDE", "CNS"]):
+        documentos.append("CARTAO_SUS")
 
     if not documentos:
-        documentos.append(
-            "DOCUMENTO_NAO_IDENTIFICADO"
-        )
+        documentos.append("DOCUMENTO_NAO_IDENTIFICADO")
 
     return documentos
 
@@ -347,42 +203,18 @@ def identificar_documentos(texto):
 
 def localizar_indice(linhas, termos):
     for i, linha in enumerate(linhas):
-
-        n = normalizar_texto(
-            linha
-        )
-
-        if any(
-            termo in n
-            for termo in termos
-        ):
+        n = normalizar_texto(linha)
+        if any(termo in n for termo in termos):
             return i
-
     return None
 
 
-def trecho_proximo(
-    linhas,
-    indice,
-    antes=0,
-    depois=4
-):
+def trecho_proximo(linhas, indice, antes=0, depois=4):
     if indice is None:
         return ""
-
-    inicio = max(
-        0,
-        indice - antes
-    )
-
-    fim = min(
-        len(linhas),
-        indice + depois + 1
-    )
-
-    return "\n".join(
-        linhas[inicio:fim]
-    )
+    inicio = max(0, indice - antes)
+    fim = min(len(linhas), indice + depois + 1)
+    return "\n".join(linhas[inicio:fim])
 
 
 # ============================================================
@@ -391,62 +223,17 @@ def trecho_proximo(
 
 def extrair_cpf(texto):
     texto = str(texto or "")
-
-    # --------------------------------------------------------
-    # CPF formatado
-    # --------------------------------------------------------
-
-    padrao = re.compile(
-        r"(?<!\d)"
-        r"(\d{3})"
-        r"[\.\s]?"
-        r"(\d{3})"
-        r"[\.\s]?"
-        r"(\d{3})"
-        r"[\-\s]?"
-        r"(\d{2})"
-        r"(?!\d)"
-    )
-
+    padrao = re.compile(r"(?<!\d)(\d{3})[\.\s]?(\d{3})[\.\s]?(\d{3})[\-\s]?(\d{2})(?!\d)")
     for m in padrao.finditer(texto):
-
-        cpf = "".join(
-            m.groups()
-        )
-
+        cpf = "".join(m.groups())
         if cpf_valido(cpf):
             return formatar_cpf(cpf)
-
-    # --------------------------------------------------------
-    # CPF contínuo
-    # --------------------------------------------------------
-
-    for numero in re.findall(
-        r"(?<!\d)\d{11}(?!\d)",
-        texto
-    ):
-
+    for numero in re.findall(r"(?<!\d)\d{11}(?!\d)", texto):
         if cpf_valido(numero):
-            return formatar_cpf(
-                numero
-            )
-
-    # --------------------------------------------------------
-    # MRZ da CIN
-    # Exemplo:
-    # 1DBRA114269904211426990480<<<8
-    # --------------------------------------------------------
-
-    for numero in re.findall(
-        r"\d{11}",
-        texto
-    ):
-
+            return formatar_cpf(numero)
+    for numero in re.findall(r"\d{11}", texto):
         if cpf_valido(numero):
-            return formatar_cpf(
-                numero
-            )
-
+            return formatar_cpf(numero)
     return ""
 
 
@@ -456,131 +243,71 @@ def extrair_cpf(texto):
 
 def extrair_data_nascimento(texto):
     linhas = obter_linhas(texto)
+    padrao = re.compile(r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b")
 
-    padrao = re.compile(
-        r"\b"
-        r"(\d{1,2})"
-        r"[/.\-]"
-        r"(\d{1,2})"
-        r"[/.\-]"
-        r"(\d{4})"
-        r"\b"
-    )
-
-    # Primeiro procura próximo de NASCIMENTO.
     for i, linha in enumerate(linhas):
-
-        n = normalizar_texto(
-            linha
-        )
-
-        if not any(
-            termo in n
-            for termo in [
-                "NASCIMENTO",
-                "DATA NASC",
-                "DATE OF BIRTH"
-            ]
-        ):
+        n = normalizar_texto(linha)
+        if not any(termo in n for termo in ["NASCIMENTO", "DATA NASC", "DATE OF BIRTH"]):
             continue
-
-        bloco = trecho_proximo(
-            linhas,
-            i,
-            antes=0,
-            depois=3
-        )
-
-        for m in padrao.finditer(
-            bloco
-        ):
-
-            data = (
-                f"{int(m.group(1)):02d}/"
-                f"{int(m.group(2)):02d}/"
-                f"{m.group(3)}"
-            )
-
+        bloco = trecho_proximo(linhas, i, antes=0, depois=3)
+        for m in padrao.finditer(bloco):
+            data = f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
             if data_valida(data):
                 return data
 
-    # Fallback.
     candidatos = []
-
     for m in padrao.finditer(texto):
-
-        data = (
-            f"{int(m.group(1)):02d}/"
-            f"{int(m.group(2)):02d}/"
-            f"{m.group(3)}"
-        )
-
+        data = f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
         if not data_valida(data):
             continue
-
-        ano = int(
-            m.group(3)
-        )
-
-        # Evita datas de emissão/validade futuras.
+        ano = int(m.group(3))
         if 1900 <= ano <= 2015:
-            candidatos.append(
-                data
-            )
-
-    return (
-        candidatos[0]
-        if candidatos
-        else ""
-    )
+            candidatos.append(data)
+    return candidatos[0] if candidatos else ""
 
 
 # ============================================================
-# NOME DO TÍTULO
+# NOME DO TÍTULO (PRIORITÁRIO)
 # ============================================================
 
 def extrair_nome_titulo(texto):
+    """
+    Extrai o nome do Título Eleitoral com prioridade máxima.
+    PRIORIDADE 1: Padrão "NOME DO ELEITOR | NOME"
+    """
     linhas = obter_linhas(texto)
-
-    indice = localizar_indice(
-        linhas,
-        [
-            "NOME DO ELEITOR"
-        ]
-    )
-
+    
+    # PRIORIDADE 1: Padrão "NOME DO ELEITOR | NOME"
+    padrao_barra = r"NOME\s+DO\s+ELEITOR\s*[|]\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:DATA|INSCRICAO|ZONA|SECAO|$)|\n)"
+    match = re.search(padrao_barra, texto, re.I)
+    if match:
+        nome = match.group(1).strip().upper()
+        nome = re.sub(r"[^A-ZÀ-Ÿ\s]", "", nome).strip()
+        if parece_nome(nome) and len(nome.split()) >= 2:
+            return nome
+    
+    # PRIORIDADE 2: Tabela com barra vertical
+    padrao_tabela = r"NOME\s+DO\s+ELEITOR\s*\|?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*\|?\s*DATA\s+DE|\s*INSCRICAO|\s*ZONA|\s*SECAO|\n|$)"
+    match = re.search(padrao_tabela, texto, re.I)
+    if match:
+        nome = match.group(1).strip().upper()
+        nome = re.sub(r"[^A-ZÀ-Ÿ\s]", "", nome).strip()
+        if parece_nome(nome) and len(nome.split()) >= 2:
+            return nome
+    
+    # PRIORIDADE 3: Busca linha a linha
+    indice = localizar_indice(linhas, ["NOME DO ELEITOR"])
     if indice is None:
         return ""
 
-    # Pode estar na própria linha.
     linha = linhas[indice]
-
-    resto = re.sub(
-        r"(?i).*NOME\s+DO\s+ELEITOR",
-        "",
-        linha
-    )
-
-    resto = limpar_nome(
-        resto
-    )
-
+    resto = re.sub(r"(?i).*NOME\s+DO\s+ELEITOR", "", linha)
+    resto = limpar_nome(resto)
     if parece_nome(resto):
         return resto
 
-    # Normalmente está logo abaixo.
-    for j in range(
-        indice + 1,
-        min(
-            indice + 5,
-            len(linhas)
-        )
-    ):
-
-        candidato = limpar_nome(
-            linhas[j]
-        )
-
+    for j in range(indice + 1, min(indice + 5, len(linhas))):
+        candidato = limpar_nome(linhas[j])
         if parece_nome(candidato):
             return candidato
 
@@ -594,80 +321,27 @@ def extrair_nome_titulo(texto):
 def extrair_nome_identidade(texto):
     linhas = obter_linhas(texto)
 
-    # --------------------------------------------------------
-    # Rótulo NOME
-    # --------------------------------------------------------
-
     for i, linha in enumerate(linhas):
-
-        n = normalizar_texto(
-            linha
-        )
-
+        n = normalizar_texto(linha)
         if "NOME DO ELEITOR" in n:
             continue
-
-        if not (
-            n == "NOME"
-            or n.startswith("NOME ")
-            or "NOME / NAME" in n
-        ):
+        if not (n == "NOME" or n.startswith("NOME ") or "NOME / NAME" in n):
             continue
-
-        resto = re.sub(
-            r"(?i)^.*?\bNOME\b"
-            r"(?:\s*/\s*NAME)?"
-            r"\s*[:\-]*",
-            "",
-            linha
-        )
-
-        candidato = limpar_nome(
-            resto
-        )
-
+        resto = re.sub(r"(?i)^.*?\bNOME\b(?:\s*/\s*NAME)?\s*[:\-]*", "", linha)
+        candidato = limpar_nome(resto)
         if parece_nome(candidato):
             return candidato
-
-        for j in range(
-            i + 1,
-            min(
-                i + 4,
-                len(linhas)
-            )
-        ):
-
-            candidato = limpar_nome(
-                linhas[j]
-            )
-
+        for j in range(i + 1, min(i + 4, len(linhas))):
+            candidato = limpar_nome(linhas[j])
             if parece_nome(candidato):
                 return candidato
 
-    # --------------------------------------------------------
-    # REGISTRO CIVIL + nome
-    # RG antigo de Alagoas
-    # --------------------------------------------------------
-
     for linha in linhas:
-
-        n = normalizar_texto(
-            linha
-        )
-
+        n = normalizar_texto(linha)
         if "REGISTRO CIVIL" not in n:
             continue
-
-        resto = re.sub(
-            r"(?i).*REGISTRO\s+CIVIL",
-            "",
-            linha
-        )
-
-        candidato = limpar_nome(
-            resto
-        )
-
+        resto = re.sub(r"(?i).*REGISTRO\s+CIVIL", "", linha)
+        candidato = limpar_nome(resto)
         if parece_nome(candidato):
             return candidato
 
@@ -679,27 +353,14 @@ def extrair_nome_identidade(texto):
 # ============================================================
 
 def extrair_nome(texto):
-    documentos = identificar_documentos(
-        texto
-    )
-
-    # O título possui um rótulo muito confiável.
+    documentos = identificar_documentos(texto)
     if "TITULO_ELEITORAL" in documentos:
-
-        nome = extrair_nome_titulo(
-            texto
-        )
-
+        nome = extrair_nome_titulo(texto)
         if nome:
             return nome
-
-    nome = extrair_nome_identidade(
-        texto
-    )
-
+    nome = extrair_nome_identidade(texto)
     if nome:
         return nome
-
     return ""
 
 
@@ -710,88 +371,28 @@ def extrair_nome(texto):
 def extrair_rg(texto):
     linhas = obter_linhas(texto)
 
-    # --------------------------------------------------------
-    # Registro Geral
-    # --------------------------------------------------------
-
     for i, linha in enumerate(linhas):
-
-        n = normalizar_texto(
-            linha
-        )
-
-        if (
-            "REGISTRO GERAL"
-            not in n
-        ):
+        n = normalizar_texto(linha)
+        if "REGISTRO GERAL" not in n:
             continue
-
-        # Remove o rótulo e procura o primeiro
-        # número plausível imediatamente depois.
-        resto = re.sub(
-            r"(?i).*REGISTRO\s+GERAL",
-            "",
-            linha
-        )
-
-        candidatos = re.findall(
-            r"\d[\d.\-\s]{3,15}\d",
-            resto
-        )
-
+        resto = re.sub(r"(?i).*REGISTRO\s+GERAL", "", linha)
+        candidatos = re.findall(r"\d[\d.\-\s]{3,15}\d", resto)
         for candidato in candidatos:
-
-            numero = somente_numeros(
-                candidato
-            )
-
+            numero = somente_numeros(candidato)
             if 5 <= len(numero) <= 12:
                 return numero
-
-        # Pode ter quebrado para a linha seguinte.
-        bloco = trecho_proximo(
-            linhas,
-            i,
-            depois=2
-        )
-
-        candidatos = re.findall(
-            r"(?<!\d)"
-            r"\d{5,12}"
-            r"(?!\d)",
-            bloco
-        )
-
+        bloco = trecho_proximo(linhas, i, depois=2)
+        candidatos = re.findall(r"(?<!\d)\d{5,12}(?!\d)", bloco)
         if candidatos:
             return candidatos[0]
 
-    # --------------------------------------------------------
-    # Rótulo RG
-    # --------------------------------------------------------
-
     for i, linha in enumerate(linhas):
-
-        n = normalizar_texto(
-            linha
-        )
-
-        if not re.search(
-            r"\bRG\b",
-            n
-        ):
+        n = normalizar_texto(linha)
+        if not re.search(r"\bRG\b", n):
             continue
-
-        candidatos = re.findall(
-            r"\d[\d.\-\s]{3,15}\d",
-            linha
-        )
-
+        candidatos = re.findall(r"\d[\d.\-\s]{3,15}\d", linha)
         for candidato in candidatos:
-
-            numero = somente_numeros(
-                candidato
-            )
-
+            numero = somente_numeros(candidato)
             if 5 <= len(numero) <= 12:
                 return numero
 
@@ -799,353 +400,111 @@ def extrair_rg(texto):
 
 
 # ============================================================
-# FILIAÇÃO / NOME DA MÃE
+# FILIAÇÃO / NOME DA MÃE (PRIORITÁRIO)
 # ============================================================
 
-def nomes_depois_de_filiacao(
-    texto,
-    nome_pessoa=""
-):
+def extrair_nome_mae(texto, nome_pessoa=""):
+    """
+    Extrai o nome da mãe com prioridade para FILIAÇÃO no RG.
+    """
     linhas = obter_linhas(texto)
+    nome_norm = normalizar_texto(nome_pessoa)
 
-    indice = localizar_indice(
-        linhas,
-        [
-            "FILIACAO",
-            "FILIAÇAO",
-            "FILIAÇÃO"
-        ]
-    )
+    # PRIORIDADE 1: FILIAÇÃO no RG
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
+        if "FILIACAO" not in n and "FILIAÇÃO" not in n:
+            continue
+        
+        candidatos = []
+        for j in range(i + 1, min(i + 6, len(linhas))):
+            candidato = limpar_nome(linhas[j])
+            if not candidato:
+                continue
+            if parece_nome(candidato) and len(candidato.split()) >= 2:
+                if normalizar_texto(candidato) != nome_norm:
+                    candidatos.append(candidato)
+            rotulo = normalizar_texto(linhas[j])
+            if rotulo in ["NATURALIDADE", "CPF", "RG", "REGISTRO", "EMISSAO", "DATA"]:
+                break
+        
+        if len(candidatos) >= 2:
+            filiacao_texto = " ".join(candidatos)
+            if " E " in filiacao_texto or " & " in filiacao_texto:
+                for sep in [" E ", " & ", ", "]:
+                    if sep in filiacao_texto:
+                        mae = filiacao_texto.split(sep)[-1].strip()
+                        if parece_nome(mae):
+                            return mae
+            return candidatos[1]
+        elif len(candidatos) == 1:
+            return candidatos[0]
 
-    if indice is None:
-        return []
+    # PRIORIDADE 2: NOME DA MAE no Título Eleitoral
+    padrao_mae = r"NOME\s+DA\s+MAE\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NOME\s+DO\s+PAI|DATA|CPF|RG|$)|\n)"
+    match = re.search(padrao_mae, texto, re.I)
+    if match:
+        mae = match.group(1).strip().upper()
+        mae = re.sub(r"[^A-ZÀ-Ÿ\s]", "", mae).strip()
+        if parece_nome(mae) and len(mae.split()) >= 2:
+            return mae
 
-    nome_norm = normalizar_texto(
-        nome_pessoa
-    )
+    # PRIORIDADE 3: Rótulo MAE
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
+        if n == "MAE" or n.startswith("MAE "):
+            for j in range(i + 1, min(i + 4, len(linhas))):
+                candidato = limpar_nome(linhas[j])
+                if parece_nome(candidato) and len(candidato.split()) >= 2:
+                    if normalizar_texto(candidato) != nome_norm:
+                        return candidato
 
-    candidatos = []
-
-    for j in range(
-        indice + 1,
-        min(
-            indice + 8,
-            len(linhas)
-        )
-    ):
-
-        linha = linhas[j]
-        n = normalizar_texto(
-            linha
-        )
-
-        # Paramos quando começam outros campos.
-        if any(
-            termo in n
-            for termo in [
-                "DATA NASC",
-                "NASCIMENTO",
-                "NATURALIDADE",
-                "TIPO",
-                "FATOR RH",
-                "ORGAO EXPEDIDOR",
-                "ASSINATURA",
-                "CPF",
-                "REGISTRO GERAL"
-            ]
-        ):
+    # PRIORIDADE 4: Nomes antes da NATURALIDADE (RG antigo)
+    indice_naturalidade = None
+    for i, linha in enumerate(linhas):
+        if "NATURALIDADE" in normalizar_texto(linha):
+            indice_naturalidade = i
             break
 
-        candidato = limpar_nome(
-            linha
-        )
-
-        if not parece_nome(
-            candidato
-        ):
-            continue
-
-        if (
-            normalizar_texto(candidato)
-            == nome_norm
-        ):
-            continue
-
-        candidatos.append(
-            candidato
-        )
-
-    return candidatos
-
-
-def extrair_nome_mae(
-    texto,
-    nome_pessoa=""
-):
-    linhas = obter_linhas(texto)
-
-    # --------------------------------------------------------
-    # Campo explícito MÃE
-    # --------------------------------------------------------
-
-    for i, linha in enumerate(linhas):
-
-        n = normalizar_texto(
-            linha
-        )
-
-        if not (
-            "NOME DA MAE" in n
-            or re.search(
-                r"\bMAE\b",
-                n
-            )
-        ):
-            continue
-
-        resto = re.sub(
-            r"(?i).*"
-            r"(?:NOME\s+DA\s+M[AÃ]E|M[AÃ]E)"
-            r"\s*[:\-]*",
-            "",
-            linha
-        )
-
-        candidato = limpar_nome(
-            resto
-        )
-
-        if parece_nome(candidato):
-            return candidato
-
-        for j in range(
-            i + 1,
-            min(
-                i + 4,
-                len(linhas)
-            )
-        ):
-
-            candidato = limpar_nome(
-                linhas[j]
-            )
-
-            if parece_nome(candidato):
-                return candidato
-
-    # --------------------------------------------------------
-    # FILIAÇÃO
-    # Em RGs de AL normalmente aparecem:
-    # pai
-    # mãe
-    # --------------------------------------------------------
-
-    candidatos = nomes_depois_de_filiacao(
-        texto,
-        nome_pessoa
-    )
-
-    if len(candidatos) >= 2:
-        return candidatos[1]
-
-    # --------------------------------------------------------
-    # FILIAÇÃO NA MESMA LINHA
-    # --------------------------------------------------------
-
-    for linha in linhas:
-
-        n = normalizar_texto(
-            linha
-        )
-
-        if "FILIACAO" not in n:
-            continue
-
-        resto = re.sub(
-            r"(?i).*FILI[AÇC][AÃA]O",
-            "",
-            linha
-        )
-
-        # Se houver dois nomes separados por espaços grandes.
-        partes = re.split(
-            r"\s{2,}|[|;]",
-            resto
-        )
-
-        nomes = [
-            limpar_nome(p)
-            for p in partes
-            if parece_nome(p)
-        ]
-
-        if len(nomes) >= 2:
-            return nomes[1]
+    if indice_naturalidade is not None:
+        candidatos = []
+        for j in range(max(0, indice_naturalidade - 8), indice_naturalidade):
+            candidato = limpar_nome(linhas[j])
+            if not parece_nome(candidato):
+                continue
+            if normalizar_texto(candidato) == nome_norm:
+                continue
+            candidatos.append(candidato)
+        if len(candidatos) >= 2:
+            return candidatos[-1]
 
     return ""
 
 
 # ============================================================
-# TÍTULO ELEITORAL
+# TÍTULO ELEITORAL (PRIORITÁRIO)
 # ============================================================
 
 def extrair_bloco_titulo(texto):
     linhas = obter_linhas(texto)
-
-    inicio = localizar_indice(
-        linhas,
-        [
-            "TITULO ELEITORAL",
-            "JUSTICA ELEITORAL"
-        ]
-    )
-
+    inicio = localizar_indice(linhas, ["TITULO ELEITORAL", "JUSTICA ELEITORAL"])
     if inicio is None:
         return ""
-
-    return "\n".join(
-        linhas[
-            inicio:min(
-                inicio + 25,
-                len(linhas)
-            )
-        ]
-    )
+    return "\n".join(linhas[inicio:min(inicio + 25, len(linhas))])
 
 
 def extrair_titulo_zona_secao(texto):
-    bloco = extrair_bloco_titulo(
-        texto
-    )
-
+    bloco = extrair_bloco_titulo(texto)
     if not bloco:
         return "", "", ""
 
-    linhas = obter_linhas(
-        bloco
-    )
-
+    linhas = obter_linhas(bloco)
     titulo = ""
     zona = ""
     secao = ""
 
-    # --------------------------------------------------------
-    # TÍTULO / INSCRIÇÃO
-    # --------------------------------------------------------
-
-    indice_inscricao = localizar_indice(
-        linhas,
-        [
-            "INSCRICAO"
-        ]
-    )
-
-    if indice_inscricao is not None:
-
-        trecho = trecho_proximo(
-            linhas,
-            indice_inscricao,
-            antes=0,
-            depois=3
-        )
-
-        candidatos = re.findall(
-            r"(?<!\d)"
-            r"\d{12}"
-            r"(?!\d)",
-            trecho
-        )
-
-        if candidatos:
-            titulo = candidatos[0]
-
-    # Se o OCR separou rótulo e número.
-    if not titulo:
-
-        candidatos = re.findall(
-            r"(?<!\d)"
-            r"\d{12}"
-            r"(?!\d)",
-            bloco
-        )
-
-        if candidatos:
-            titulo = candidatos[0]
-
-    # --------------------------------------------------------
-    # ZONA
-    # --------------------------------------------------------
-
-    indice_zona = localizar_indice(
-        linhas,
-        [
-            "ZONA"
-        ]
-    )
-
-    if indice_zona is not None:
-
-        linha = linhas[
-            indice_zona
-        ]
-
-        # Primeiro tenta o número depois da palavra ZONA.
-        m = re.search(
-            r"(?i)\bZONA\b"
-            r"[^0-9]{0,12}"
-            r"(\d{1,3})",
-            linha
-        )
-
-        if m:
-            zona = (
-                m.group(1)
-                .zfill(3)
-            )
-
-    # --------------------------------------------------------
-    # SEÇÃO
-    # --------------------------------------------------------
-
-    indice_secao = localizar_indice(
-        linhas,
-        [
-            "SECAO",
-            "SEÇÃO"
-        ]
-    )
-
-    if indice_secao is not None:
-
-        linha = linhas[
-            indice_secao
-        ]
-
-        m = re.search(
-            r"(?i)"
-            r"SE[CÇ][AÃ]O"
-            r"[^0-9]{0,12}"
-            r"(\d{1,4})",
-            linha
-        )
-
-        if m:
-            secao = (
-                m.group(1)
-                .zfill(4)
-            )
-
-    # --------------------------------------------------------
-    # TABELA DO TÍTULO
-    #
-    # Exemplo:
-    # 17/05/2008 | 049028331724 | 022 | 0434
-    #
-    # Este método evita confundir "24" do nascimento
-    # com a seção.
-    # --------------------------------------------------------
-
-    padrao_linha_titulo = re.compile(
+    # PRIORIDADE 1: Tabela do Título Eleitoral
+    padrao_tabela = re.compile(
         r"(\d{1,2}/\d{1,2}/\d{4})"
         r".{0,40}?"
         r"(\d{12})"
@@ -1156,34 +515,58 @@ def extrair_titulo_zona_secao(texto):
         re.S
     )
 
-    m = padrao_linha_titulo.search(
-        bloco
-    )
-
+    m = padrao_tabela.search(bloco)
     if m:
-
         if not titulo:
             titulo = m.group(2)
-
         if not zona:
-            zona = (
-                m.group(3)
-                .zfill(3)
-            )
-
+            zona = m.group(3).zfill(3)
         if not secao:
-            secao = (
-                m.group(4)
-                .zfill(4)
-            )
+            secao = m.group(4).zfill(4)
 
-    return (
-        titulo,
-        zona,
-        secao
-    )
+    # PRIORIDADE 2: Busca separada por rótulos
+    indice_inscricao = localizar_indice(linhas, ["INSCRICAO"])
+    if indice_inscricao is not None:
+        trecho = trecho_proximo(linhas, indice_inscricao, antes=0, depois=3)
+        candidatos = re.findall(r"(?<!\d)\d{12}(?!\d)", trecho)
+        if candidatos:
+            titulo = candidatos[0]
 
+    if not titulo:
+        candidatos = re.findall(r"(?<!\d)\d{12}(?!\d)", bloco)
+        if candidatos:
+            titulo = candidatos[0]
 
+    indice_zona = localizar_indice(linhas, ["ZONA"])
+    if indice_zona is not None:
+        linha = linhas[indice_zona]
+        m = re.search(r"(?i)\bZONA\b[^0-9]{0,12}(\d{1,3})", linha)
+        if m:
+            zona = m.group(1).zfill(3)
+
+    indice_secao = localizar_indice(linhas, ["SECAO", "SEÇÃO"])
+    if indice_secao is not None:
+        linha = linhas[indice_secao]
+        m = re.search(r"(?i)SE[CÇ][AÃ]O[^0-9]{0,12}(\d{1,4})", linha)
+        if m:
+            secao = m.group(1).zfill(4)
+
+    # PRIORIDADE 3: Fallback
+    if not titulo or not zona or not secao:
+        for linha in linhas:
+            numeros = re.findall(r"(?<!\d)\d{2,12}(?!\d)", linha)
+            titulo_linha = [n for n in numeros if len(n) == 12]
+            pequenos = [n for n in numeros if 1 <= len(n) <= 4]
+            if titulo_linha and len(pequenos) >= 2:
+                if not titulo:
+                    titulo = titulo_linha[0]
+                if not zona:
+                    zona = pequenos[-2].zfill(3)
+                if not secao:
+                    secao = pequenos[-1].zfill(4)
+                break
+
+    return titulo, zona, secao
 # ============================================================
 # MUNICÍPIO / CIDADE
 # ============================================================
@@ -1707,3 +1090,105 @@ def analisar_documentos(texto):
         "blocos": blocos,
         "dados": dados
     }
+# ============================================================
+# FUNÇÕES COMPLEMENTARES PARA CORREÇÃO DO NOME
+# ============================================================
+
+def extrair_nome_prioritario(texto):
+    """
+    Extrai o nome com prioridade máxima para o Título Eleitoral.
+    Esta função é chamada quando o OCR principal falha.
+    """
+    return extrair_nome_titulo(texto)
+
+
+def extrair_nome_mae_prioritario(texto, nome_pessoa=""):
+    """
+    Extrai o nome da mãe com prioridade para FILIAÇÃO no RG.
+    """
+    return extrair_nome_mae(texto, nome_pessoa)
+
+
+def extrair_dados_completos_prioritario(texto):
+    """
+    Função principal que extrai dados priorizando Título Eleitoral e FILIAÇÃO.
+    """
+    return extrair_campos(texto)
+
+
+# ============================================================
+# FUNÇÕES DE FALLBACK PARA O APP.PY
+# ============================================================
+
+def extrair_nome_fallback(texto):
+    """
+    Fallback para extração de nome quando o OCR falha.
+    Prioriza o Título Eleitoral.
+    """
+    return extrair_nome_titulo(texto)
+
+
+def extrair_mae_fallback(texto, nome_pessoa=""):
+    """
+    Fallback para extração de nome da mãe quando o OCR falha.
+    Prioriza FILIAÇÃO no RG.
+    """
+    return extrair_nome_mae(texto, nome_pessoa)
+
+
+def extrair_tudo_fallback(texto):
+    """
+    Fallback completo para extração de todos os dados.
+    """
+    return extrair_campos(texto)
+
+
+# ============================================================
+# CORREÇÃO DE NOME ERRADO
+# ============================================================
+
+NOMES_ERRADOS_COMUNS = [
+    "WILLAKS FÍRÂELRA DA SILVA",
+    "WILLAKS FIRAELRA DA SILVA",
+    "WILLAKS FÍRÂELRA",
+    "WILLAKS FIRAELRA"
+]
+
+
+def nome_esta_errado(nome):
+    """
+    Verifica se o nome extraído está claramente errado.
+    """
+    nome = str(nome or "").strip().upper()
+    if not nome:
+        return True
+    if nome in NOMES_ERRADOS_COMUNS:
+        return True
+    # Nomes muito curtos ou com caracteres estranhos
+    if len(nome) < 5:
+        return True
+    # Se tiver muitos símbolos estranhos
+    letras = re.sub(r"[^A-ZÀ-Ÿ]", "", nome)
+    if len(letras) < 5:
+        return True
+    return False
+
+
+def corrigir_nome_se_errado(nome, texto_original):
+    """
+    Se o nome estiver errado, tenta extrair novamente do texto.
+    """
+    if not nome_esta_errado(nome):
+        return nome
+    
+    # Tenta extrair do Título Eleitoral
+    nome_corrigido = extrair_nome_titulo(texto_original)
+    if nome_corrigido and not nome_esta_errado(nome_corrigido):
+        return nome_corrigido
+    
+    # Tenta extrair da Identidade
+    nome_corrigido = extrair_nome_identidade(texto_original)
+    if nome_corrigido and not nome_esta_errado(nome_corrigido):
+        return nome_corrigido
+    
+    return nome
