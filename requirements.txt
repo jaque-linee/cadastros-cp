@@ -7,9 +7,4 @@ numpy
 pandas
 pytesseract
 reportlab
-
-# EasyOCR e dependências
-easyocr
 opencv-python-headless
-torch
-torchvision
