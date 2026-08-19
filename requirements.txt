@@ -4,8 +4,12 @@ python-dotenv
 Pillow
 PyMuPDF
 numpy
-easyocr
-opencv-python-headless==4.10.0.84
 pandas
 pytesseract
 reportlab
+
+# EasyOCR e dependências
+easyocr
+opencv-python-headless
+torch
+torchvision
