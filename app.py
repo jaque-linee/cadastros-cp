@@ -1969,7 +1969,7 @@ def encontrar_zona_secao_ocr(
 # 23. EXTRAIR DADOS OCR - VERSÃO COMPLETA COM PRIORIDADE TÍTULO
 # ============================================================
 
-def extrair_dados_ocr(texto, itens):
+def _extrair_dados_ocr_legado(texto, itens):
     """
     Extrai os dados combinando a posição dos blocos do OCR com o texto
     completo do documento, ignorando faturas de consumo anexadas.
@@ -2236,11 +2236,12 @@ def extrair_dados(
     itens,
     tipo_leitura
 ):
-    # Extração centralizada no módulo extrator_documentos.
-    # O tipo de leitura não muda mais a regra de interpretação dos campos.
-    dados = extrator_documentos.extrair_campos(texto)
-
-    # Mantém exatamente as chaves esperadas pelo restante do app.
+    """
+    Extração principal:
+    1) usa o extrator universal novo;
+    2) usa a extração antiga apenas como fallback para campos vazios;
+    3) nunca sobrescreve um campo já encontrado pelo extrator novo.
+    """
     campos = (
         "nome",
         "cpf",
@@ -2257,15 +2258,36 @@ def extrair_dados(
         "cidade"
     )
 
+    # MOTOR NOVO: não depende de identificar o tipo do documento.
+    try:
+        dados_novos = extrator_documentos.extrair_campos(texto) or {}
+    except Exception:
+        dados_novos = {}
+
     resultado = {
-        campo: str(dados.get(campo, "") or "").strip()
+        campo: str(dados_novos.get(campo, "") or "").strip()
         for campo in campos
     }
 
-    # Telefone manuscrito pode aparecer nos itens posicionais mesmo quando
-    # o texto corrido do OCR não o reconstrói corretamente.
+    # FALLBACK: aproveita o processamento antigo apenas nos campos
+    # que o extrator universal não conseguiu preencher.
+    try:
+        dados_legados = _extrair_dados_ocr_legado(texto, itens) or {}
+    except Exception:
+        dados_legados = {}
+
+    for campo in campos:
+        if not resultado[campo]:
+            valor_legado = str(dados_legados.get(campo, "") or "").strip()
+            if valor_legado:
+                resultado[campo] = valor_legado
+
+    # Mantém a leitura posicional de telefone manuscrito.
     if not resultado["telefone"]:
-        resultado["telefone"] = encontrar_telefone_documento(texto, itens)
+        try:
+            resultado["telefone"] = encontrar_telefone_documento(texto, itens)
+        except Exception:
+            resultado["telefone"] = ""
 
     return resultado
 
