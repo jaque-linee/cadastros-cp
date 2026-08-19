@@ -579,56 +579,6 @@ def executar_ocr_pdf(arquivo):
 # 11. LER DOCUMENTO
 # ============================================================
 
-def _ler_documento_legado(arquivo):
-    nome = arquivo.name.lower()
-
-    if nome.endswith(
-        ".pdf"
-    ):
-        texto_nativo = extrair_texto_pdf(
-            arquivo
-        )
-
-        if pdf_tem_texto_util(
-            texto_nativo
-        ):
-            return (
-                texto_nativo,
-                [],
-                "PDF — texto digital"
-            )
-
-        texto, itens = executar_ocr_pdf(
-            arquivo
-        )
-
-        return (
-            texto,
-            itens,
-            "PDF — OCR"
-        )
-
-    arquivo.seek(0)
-
-    imagem = Image.open(
-        arquivo
-    )
-
-    texto, itens = executar_ocr_imagem(
-        imagem
-    )
-
-    del imagem
-
-    gc.collect()
-
-    return (
-        texto,
-        itens,
-        "Imagem — OCR"
-    )
-
-
 def ler_documento(arquivo):
     """
     Etapa 7B: somente o tratamento estrutural de PDF passa pelo leitor_pdf.
@@ -669,14 +619,14 @@ def ler_documento(arquivo):
             except Exception:
                 pass
 
-            return _ler_documento_legado(
-                arquivo
+            raise RuntimeError(
+                "Falha no processamento modular do documento."
             )
 
     # Outros formatos permanecem no fluxo anterior.
     if not nome.endswith(".pdf"):
-        return _ler_documento_legado(
-            arquivo
+        raise RuntimeError(
+            "Falha no processamento modular do documento."
         )
 
     try:
@@ -746,7 +696,7 @@ def ler_documento(arquivo):
             arquivo.seek(0)
         except Exception:
             pass
-        return _ler_documento_legado(arquivo)
+        raise RuntimeError("Falha no processamento modular do documento.")
 
 
 # ============================================================
