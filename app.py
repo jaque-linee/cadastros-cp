@@ -252,13 +252,22 @@ def preparar_imagem(imagem):
 
 
 # ============================================================
-# 7. OCR DE IMAGEM - VERSÃO MELHORADA
+# 7. OCR DE IMAGEM - VERSÃO COM EASYOCR + TESSERACT
 # ============================================================
+
+@st.cache_resource(show_spinner=False)
+def carregar_ocr_easyocr():
+    """Carrega o EasyOCR uma única vez (cache)"""
+    import easyocr
+    return easyocr.Reader(["pt", "en"], gpu=False, verbose=False)
 
 def executar_ocr_imagem(imagem):
     """
-    OCR usando Tesseract com melhor pré-processamento.
+    OCR combinando Tesseract e EasyOCR para máxima precisão.
     """
+    # ============================================================
+    # 1. PRÉ-PROCESSAMENTO DA IMAGEM
+    # ============================================================
     imagem = ImageOps.exif_transpose(imagem).convert("RGB")
     largura, altura = imagem.size
 
@@ -266,21 +275,46 @@ def executar_ocr_imagem(imagem):
         escala = 2000 / largura
         imagem = imagem.resize((2000, int(altura * escala)), Image.Resampling.LANCZOS)
 
-    imagem = ImageOps.grayscale(imagem)
-    imagem = ImageOps.autocontrast(imagem)
-    imagem = ImageEnhance.Contrast(imagem).enhance(1.5)
-    imagem = imagem.filter(ImageFilter.SHARPEN)
+    imagem_grayscale = ImageOps.grayscale(imagem)
+    imagem_contraste = ImageOps.autocontrast(imagem_grayscale)
+    imagem_contraste = ImageEnhance.Contrast(imagem_contraste).enhance(1.5)
+    imagem_contraste = imagem_contraste.filter(ImageFilter.SHARPEN)
 
+    # ============================================================
+    # 2. TESSERACT OCR
+    # ============================================================
+    texto_tesseract = ""
+    itens_tesseract = []
+    
     try:
-        texto = pytesseract.image_to_string(imagem, lang="por+eng", config="--oem 3 --psm 6").strip()
-        if not texto or len(texto) < 50:
-            texto = pytesseract.image_to_string(imagem, lang="por+eng", config="--oem 3 --psm 4").strip()
-        if not texto or len(texto) < 50:
-            texto = pytesseract.image_to_string(imagem, lang="por+eng", config="--oem 3 --psm 11").strip()
+        texto_tesseract = pytesseract.image_to_string(
+            imagem_contraste, 
+            lang="por+eng", 
+            config="--oem 3 --psm 6"
+        ).strip()
         
-        dados_pos = pytesseract.image_to_data(imagem, lang="por+eng", config="--oem 3 --psm 6", output_type=pytesseract.Output.DICT)
+        if not texto_tesseract or len(texto_tesseract) < 50:
+            texto_tesseract = pytesseract.image_to_string(
+                imagem_contraste, 
+                lang="por+eng", 
+                config="--oem 3 --psm 4"
+            ).strip()
+            
+        if not texto_tesseract or len(texto_tesseract) < 50:
+            texto_tesseract = pytesseract.image_to_string(
+                imagem_contraste, 
+                lang="por+eng", 
+                config="--oem 3 --psm 11"
+            ).strip()
         
-        itens = []
+        # Extrai itens com posição e confiança do Tesseract
+        dados_pos = pytesseract.image_to_data(
+            imagem_contraste, 
+            lang="por+eng", 
+            config="--oem 3 --psm 6", 
+            output_type=pytesseract.Output.DICT
+        )
+        
         for i, palavra in enumerate(dados_pos.get("text", [])):
             palavra = str(palavra or "").strip()
             if not palavra:
@@ -291,20 +325,118 @@ def executar_ocr_imagem(imagem):
                 conf = -1
             if conf < 15:
                 continue
-            itens.append({
+            itens_tesseract.append({
                 "texto": palavra,
                 "confianca": conf / 100.0,
                 "x": float(dados_pos["left"][i]) + float(dados_pos["width"][i]) / 2,
-                "y": float(dados_pos["top"][i]) + float(dados_pos["height"][i]) / 2
+                "y": float(dados_pos["top"][i]) + float(dados_pos["height"][i]) / 2,
+                "fonte": "tesseract"
+            })
+    except Exception as e:
+        # Se Tesseract falhar, continua com EasyOCR apenas
+        pass
+
+    # ============================================================
+    # 3. EASYOCR
+    # ============================================================
+    texto_easyocr = ""
+    itens_easyocr = []
+    
+    try:
+        reader = carregar_ocr_easyocr()
+        
+        # Converte PIL para numpy array
+        import numpy as np
+        imagem_np = np.array(imagem_contraste)
+        
+        # Executa EasyOCR
+        resultados = reader.readtext(imagem_np, detail=1, paragraph=False)
+        
+        textos = []
+        for bbox, texto, confianca in resultados:
+            if confianca < 0.3:  # Filtra confiança baixa
+                continue
+            textos.append(texto)
+            
+            # Calcula centro do bounding box
+            x_centro = sum(p[0] for p in bbox) / 4
+            y_centro = sum(p[1] for p in bbox) / 4
+            
+            itens_easyocr.append({
+                "texto": texto,
+                "confianca": confianca,
+                "x": x_centro,
+                "y": y_centro,
+                "fonte": "easyocr"
             })
         
-        return texto, itens
+        texto_easyocr = " ".join(textos)
         
-    finally:
-        del imagem
-        gc.collect()
+    except Exception as e:
+        # Se EasyOCR falhar, continua com Tesseract apenas
+        pass
 
-
+    # ============================================================
+    # 4. COMBINAR RESULTADOS
+    # ============================================================
+    
+    # 4a. Combinar textos
+    texto_combinado = ""
+    
+    if texto_tesseract and texto_easyocr:
+        # Se ambos tem texto, junta com prioridade para EasyOCR
+        # (EasyOCR geralmente é mais preciso)
+        if len(texto_easyocr) > len(texto_tesseract) * 1.2:
+            # EasyOCR tem bem mais texto, usa ele
+            texto_combinado = texto_easyocr
+        elif len(texto_tesseract) > len(texto_easyocr) * 1.2:
+            # Tesseract tem bem mais texto, usa ele
+            texto_combinado = texto_tesseract
+        else:
+            # Tamanhos similares, combina ambos
+            texto_combinado = texto_tesseract + "\n" + texto_easyocr
+    elif texto_easyocr:
+        texto_combinado = texto_easyocr
+    elif texto_tesseract:
+        texto_combinado = texto_tesseract
+    else:
+        texto_combinado = ""
+    
+    # 4b. Combinar itens (prioriza EasyOCR por ser mais preciso)
+    itens_combinados = []
+    
+    # Primeiro adiciona itens do EasyOCR (prioridade)
+    for item in itens_easyocr:
+        item["prioridade"] = 1  # Prioridade alta
+        itens_combinados.append(item)
+    
+    # Depois adiciona itens do Tesseract que não estão duplicados
+    textos_easy = [item["texto"].upper() for item in itens_easyocr]
+    
+    for item in itens_tesseract:
+        texto_upper = item["texto"].upper()
+        # Verifica se não é duplicado (aproximadamente)
+        duplicado = False
+        for texto_existente in textos_easy:
+            if texto_existente in texto_upper or texto_upper in texto_existente:
+                duplicado = True
+                break
+        if not duplicado:
+            item["prioridade"] = 2  # Prioridade baixa
+            itens_combinados.append(item)
+    
+    # Ordena itens por posição (y, depois x)
+    itens_combinados.sort(key=lambda item: (item["y"], item["x"]))
+    
+    # ============================================================
+    # 5. LIMPEZA
+    # ============================================================
+    del imagem
+    del imagem_grayscale
+    del imagem_contraste
+    gc.collect()
+    
+    return texto_combinado, itens_combinados
 # ============================================================
 # 7A. EXTRAIR DADOS TESSERACT - PRIORITÁRIO (NOVA FUNÇÃO)
 # ============================================================
