@@ -1522,3 +1522,31 @@ def analisar_documentos(texto):
         "dados":
             dados
     }
+
+# No início do app.py, importe a função
+from extrator_documentos import extrair_dados_completos_prioritario
+
+# E no processamento do lote, quando o nome estiver errado:
+nome_errado = dados.get("nome") in ["WILLAKS FÍRÂELRA DA SILVA", "WILLAKS FIRAELRA DA SILVA", ""]
+if nome_errado or not parece_nome(dados.get("nome")):
+    try:
+        arquivo.seek(0)
+        imagem_fallback = Image.open(arquivo).convert("RGB")
+        texto_tesseract_fallback = executar_tesseract_imagem(imagem_fallback)
+        
+        if texto_tesseract_fallback:
+            # Usa a nova função prioritária
+            dados_extraidos = extrair_dados_completos_prioritario(texto_tesseract_fallback)
+            
+            if dados_extraidos.get("nome") and dados_extraidos["nome"] not in ["WILLAKS FÍRÂELRA DA SILVA", "WILLAKS FIRAELRA DA SILVA", ""]:
+                dados["nome"] = dados_extraidos["nome"]
+                texto = texto_tesseract_fallback
+            
+            for campo in ["cpf", "titulo", "data_nascimento", "nome_mae", "zona", "secao", "rg"]:
+                if dados_extraidos.get(campo) and not dados.get(campo):
+                    dados[campo] = dados_extraidos[campo]
+        
+        del imagem_fallback
+        gc.collect()
+    except Exception:
+        pass
