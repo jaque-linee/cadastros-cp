@@ -2139,18 +2139,38 @@ def extrair_dados(
     itens,
     tipo_leitura
 ):
-    if (
-        tipo_leitura
-        == "PDF — texto digital"
-    ):
-        return extrair_dados_pdf_digital(
-            texto
-        )
+    # Extração centralizada no módulo extrator_documentos.
+    # O tipo de leitura não muda mais a regra de interpretação dos campos.
+    dados = extrator_documentos.extrair_campos(texto)
 
-    return extrair_dados_ocr(
-        texto,
-        itens
+    # Mantém exatamente as chaves esperadas pelo restante do app.
+    campos = (
+        "nome",
+        "cpf",
+        "titulo",
+        "data_nascimento",
+        "nome_mae",
+        "zona",
+        "secao",
+        "telefone",
+        "rg",
+        "endereco",
+        "numero",
+        "bairro",
+        "cidade"
     )
+
+    resultado = {
+        campo: str(dados.get(campo, "") or "").strip()
+        for campo in campos
+    }
+
+    # Telefone manuscrito pode aparecer nos itens posicionais mesmo quando
+    # o texto corrido do OCR não o reconstrói corretamente.
+    if not resultado["telefone"]:
+        resultado["telefone"] = encontrar_telefone_documento(texto, itens)
+
+    return resultado
 
 
 # ============================================================
@@ -2624,32 +2644,6 @@ if menu == "📸 Envio de Documentos":
                         itens,
                         tipo
                     )
-
-                    # ============================================================
-                    # CORREÇÃO: Se o nome estiver errado, usa Tesseract
-                    # ============================================================
-                    nome_errado = dados.get("nome") in ["WILLAKS FÍRÂELRA DA SILVA", "WILLAKS FIRAELRA DA SILVA", ""]
-                    if nome_errado or not parece_nome(dados.get("nome")):
-                        try:
-                            arquivo.seek(0)
-                            imagem_fallback = Image.open(arquivo).convert("RGB")
-                            texto_tesseract_fallback = executar_tesseract_imagem(imagem_fallback)
-                            
-                            if texto_tesseract_fallback:
-                                dados_tesseract = extrair_dados_tesseract_prioritario(texto_tesseract_fallback)
-                                
-                                if dados_tesseract.get("nome") and dados_tesseract["nome"] not in ["WILLAKS FÍRÂELRA DA SILVA", "WILLAKS FIRAELRA DA SILVA", ""]:
-                                    dados["nome"] = dados_tesseract["nome"]
-                                    texto = texto_tesseract_fallback
-                                
-                                for campo in ["cpf", "titulo", "data_nascimento", "nome_mae", "zona", "secao"]:
-                                    if dados_tesseract.get(campo) and not dados.get(campo):
-                                        dados[campo] = dados_tesseract[campo]
-                            
-                            del imagem_fallback
-                            gc.collect()
-                        except Exception:
-                            pass
 
                     # OCR único: o documento já foi lido uma vez pelo Tesseract.
                     texto_tesseract = texto if "OCR" in tipo else ""
