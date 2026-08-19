@@ -4751,3 +4751,201 @@ elif menu == "📊 Relatórios":
                         st.error(
                             f"Não foi possível gerar o PDF: {erro_pdf}"
                         )
+# ============================================================
+# FUNÇÕES COMPLEMENTARES PARA CORREÇÃO DO NOME
+# ============================================================
+
+def extrair_nome_prioritario(texto):
+    """
+    Extrai o nome com prioridade máxima para o Título Eleitoral.
+    Esta função é chamada quando o OCR principal falha.
+    """
+    texto = str(texto or "")
+    linhas = linhas_texto(texto)
+    
+    # ============================================================
+    # PRIORIDADE 1: Título Eleitoral - "NOME DO ELEITOR | NOME"
+    # ============================================================
+    for i, linha in enumerate(linhas):
+        linha_norm = normalizar_linha(linha)
+        
+        if "NOME DO ELEITOR" not in linha_norm:
+            continue
+        
+        # Tenta extrair da própria linha
+        resto = re.sub(r"(?i).*NOME\s+DO\s+ELEITOR", "", linha)
+        resto = limpar_nome(resto)
+        
+        if parece_nome(resto) and len(resto.split()) >= 2:
+            return resto
+        
+        # Tenta nas próximas linhas (até 5 linhas)
+        for j in range(i + 1, min(i + 5, len(linhas))):
+            candidato = limpar_nome(linhas[j])
+            if parece_nome(candidato) and len(candidato.split()) >= 2:
+                # Verifica se não é um rótulo
+                rotulo = normalizar_linha(candidato)
+                if rotulo not in ["DATA", "NASCIMENTO", "CPF", "RG", "ZONA", "SECAO", "INSCRICAO"]:
+                    return candidato
+    
+    # ============================================================
+    # PRIORIDADE 2: Padrão com barra vertical "|"
+    # ============================================================
+    padrao_barra = r"NOME\s+DO\s+ELEITOR\s*[|]\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:DATA|INSCRICAO|ZONA|SECAO|$)|\n)"
+    match = re.search(padrao_barra, texto, re.I)
+    if match:
+        nome = match.group(1).strip().upper()
+        nome = re.sub(r"[^A-ZÀ-Ÿ\s]", "", nome).strip()
+        if parece_nome(nome) and len(nome.split()) >= 2:
+            return nome
+    
+    # ============================================================
+    # PRIORIDADE 3: Tabela do Título Eleitoral
+    # ============================================================
+    padrao_tabela = r"NOME\s+DO\s+ELEITOR\s*\|?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*\|?\s*DATA\s+DE|\s*INSCRICAO|\s*ZONA|\s*SECAO|\n|$)"
+    match = re.search(padrao_tabela, texto, re.I)
+    if match:
+        nome = match.group(1).strip().upper()
+        nome = re.sub(r"[^A-ZÀ-Ÿ\s]", "", nome).strip()
+        if parece_nome(nome) and len(nome.split()) >= 2:
+            return nome
+    
+    # ============================================================
+    # PRIORIDADE 4: RG - "NOME: NOME"
+    # ============================================================
+    padrao_rg = r"NOME\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NOME\s+SOCIAL|DATA\s+DE\s+NASCIMENTO|CPF|RG|NACIONALIDADE|SEXO|$)|\n)"
+    match = re.search(padrao_rg, texto, re.I)
+    if match:
+        nome = match.group(1).strip().upper()
+        nome = re.sub(r"[^A-ZÀ-Ÿ\s]", "", nome).strip()
+        if parece_nome(nome) and len(nome.split()) >= 2:
+            return nome
+    
+    return ""
+
+
+def extrair_nome_mae_prioritario(texto, nome_pessoa=""):
+    """
+    Extrai o nome da mãe com prioridade para FILIAÇÃO no RG.
+    """
+    texto = str(texto or "")
+    linhas = linhas_texto(texto)
+    
+    nome_pessoa_norm = normalizar_texto(nome_pessoa)
+    
+    # ============================================================
+    # PRIORIDADE 1: FILIAÇÃO no RG
+    # ============================================================
+    for i, linha in enumerate(linhas):
+        linha_norm = normalizar_linha(linha)
+        
+        if "FILIACAO" not in linha_norm and "FILIAÇÃO" not in linha_norm:
+            continue
+        
+        # Pega as próximas linhas até encontrar um nome
+        candidatos = []
+        for j in range(i + 1, min(i + 6, len(linhas))):
+            candidato = limpar_nome(linhas[j])
+            if not candidato:
+                continue
+            
+            # Verifica se é um nome válido
+            if parece_nome(candidato) and len(candidato.split()) >= 2:
+                # Não pode ser o nome da própria pessoa
+                if normalizar_texto(candidato) != nome_pessoa_norm:
+                    candidatos.append(candidato)
+            
+            # Para se encontrar um rótulo que não seja nome
+            rotulo = normalizar_linha(linhas[j])
+            if rotulo in ["NATURALIDADE", "CPF", "RG", "REGISTRO", "EMISSAO", "DATA"]:
+                break
+        
+        # Se tem dois nomes (pai e mãe), pega o segundo (mãe)
+        if len(candidatos) >= 2:
+            return candidatos[1]
+        elif len(candidatos) == 1:
+            return candidatos[0]
+    
+    # ============================================================
+    # PRIORIDADE 2: NOME DA MAE no Título Eleitoral
+    # ============================================================
+    padrao_mae = r"NOME\s+DA\s+MAE\s*[:\-]?\s*([A-ZÀ-Ÿ\s]+?)(?=\s*(?:NOME\s+DO\s+PAI|DATA|CPF|RG|$)|\n)"
+    match = re.search(padrao_mae, texto, re.I)
+    if match:
+        mae = match.group(1).strip().upper()
+        mae = re.sub(r"[^A-ZÀ-Ÿ\s]", "", mae).strip()
+        if parece_nome(mae) and len(mae.split()) >= 2:
+            return mae
+    
+    # ============================================================
+    # PRIORIDADE 3: Rótulo MAE simples
+    # ============================================================
+    for i, linha in enumerate(linhas):
+        linha_norm = normalizar_linha(linha)
+        
+        if linha_norm == "MAE" or linha_norm.startswith("MAE "):
+            for j in range(i + 1, min(i + 4, len(linhas))):
+                candidato = limpar_nome(linhas[j])
+                if parece_nome(candidato) and len(candidato.split()) >= 2:
+                    if normalizar_texto(candidato) != nome_pessoa_norm:
+                        return candidato
+    
+    return ""
+
+
+def extrair_dados_completos_prioritario(texto):
+    """
+    Função principal que extrai dados priorizando Título Eleitoral e FILIAÇÃO.
+    """
+    texto = str(texto or "")
+    
+    dados = resultado_vazio()
+    
+    # ============================================================
+    # NOME - PRIORIDADE MÁXIMA
+    # ============================================================
+    dados["nome"] = extrair_nome_prioritario(texto)
+    
+    # ============================================================
+    # NOME DA MÃE - PRIORIDADE FILIAÇÃO
+    # ============================================================
+    dados["nome_mae"] = extrair_nome_mae_prioritario(texto, dados["nome"])
+    
+    # ============================================================
+    # CPF
+    # ============================================================
+    dados["cpf"] = extrair_cpf(texto)
+    
+    # ============================================================
+    # DATA DE NASCIMENTO
+    # ============================================================
+    dados["data_nascimento"] = extrair_data_nascimento(texto)
+    
+    # ============================================================
+    # TÍTULO, ZONA E SEÇÃO
+    # ============================================================
+    titulo, zona, secao = extrair_titulo_zona_secao(texto)
+    dados["titulo"] = titulo
+    dados["zona"] = zona
+    dados["secao"] = secao
+    
+    # ============================================================
+    # RG
+    # ============================================================
+    dados["rg"] = extrair_rg(texto)
+    
+    # ============================================================
+    # TELEFONE
+    # ============================================================
+    dados["telefone"] = extrair_telefone(texto)
+    
+    # ============================================================
+    # ENDEREÇO
+    # ============================================================
+    endereco = extrair_endereco(texto)
+    dados["endereco"] = endereco["endereco"]
+    dados["numero"] = endereco["numero"]
+    dados["bairro"] = endereco["bairro"]
+    dados["cidade"] = extrair_cidade(texto) or endereco["cidade"]
+    
+    return dados
