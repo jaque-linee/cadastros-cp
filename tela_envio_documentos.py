@@ -234,10 +234,6 @@ def exibir_tela_envio_documentos(
                 "---"
             )
 
-            st.subheader(
-                "📊 Resultado do Lote"
-            )
-
             completos = sum(
                 1
                 for r in resultados
@@ -258,23 +254,26 @@ def exibir_tela_envio_documentos(
                 - duplicados
             )
 
-            col1, col2, col3 = st.columns(
-                3
-            )
-
-            col1.metric(
-                "Completos",
-                completos
-            )
-
-            col2.metric(
-                "Já cadastrados",
-                duplicados
-            )
-
-            col3.metric(
-                "Conferir",
-                conferir
+            st.markdown(
+                f"""
+                <div style="
+                    background:white;
+                    border:1px solid #d9e1e8;
+                    border-radius:10px;
+                    padding:8px 14px;
+                    margin:4px 0 10px 0;
+                    display:flex;
+                    align-items:center;
+                    gap:18px;
+                    flex-wrap:wrap;
+                    font-size:13px;">
+                    <strong style="font-size:16px;">📊 Resultado do lote</strong>
+                    <span>✅ {completos} completos</span>
+                    <span>🔁 {duplicados} já cadastrados</span>
+                    <span>⚠️ {conferir} a conferir</span>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
             df_resultados = pd.DataFrame(
