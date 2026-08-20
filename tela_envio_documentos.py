@@ -18,6 +18,10 @@ def exibir_tela_envio_documentos(
         "📁 Processamento de Documentos"
     )
 
+    if "lote_upload_id" not in st.session_state:
+        st.session_state["lote_upload_id"] = 0
+
+
     st.caption(
         f"Supervisor: {supervisor} | "
         f"Subsupervisor: {sub}"
@@ -31,7 +35,8 @@ def exibir_tela_envio_documentos(
             "jpg",
             "jpeg",
             "png"
-        ]
+        ],
+        key=f"uploader_lote_{st.session_state['lote_upload_id']}"
     )
 
     if arquivos:
@@ -293,6 +298,22 @@ def exibir_tela_envio_documentos(
                 "Nenhum cadastro do lote foi gravado "
                 "automaticamente."
             )
+
+            if st.button(
+                "🧹 Finalizar lote / Novo lote",
+                use_container_width=True
+            ):
+                st.session_state.pop("resultado_lote", None)
+
+                for chave in list(st.session_state.keys()):
+                    if (
+                        str(chave).startswith("mae_compacta_")
+                        or str(chave).startswith("telefone_compacto_")
+                    ):
+                        del st.session_state[chave]
+
+                st.session_state["lote_upload_id"] += 1
+                st.rerun()
 
 
     # ============================================================
