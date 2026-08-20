@@ -178,6 +178,33 @@ def data_valida(valor):
 # SÓ CARREGA SE REALMENTE PRECISAR
 # ============================================================
 
+def preparar_imagem(imagem):
+    """Prepara a imagem para OCR preservando o fluxo original."""
+    imagem = ImageOps.exif_transpose(imagem)
+    imagem = imagem.convert("RGB")
+
+    largura, altura = imagem.size
+
+    if largura < 1200:
+        proporcao = 1200 / largura
+        imagem = imagem.resize(
+            (1200, int(altura * proporcao)),
+            Image.Resampling.LANCZOS
+        )
+
+    if imagem.width > 2000:
+        proporcao = 2000 / imagem.width
+        imagem = imagem.resize(
+            (
+                2000,
+                int(imagem.height * proporcao)
+            ),
+            Image.Resampling.LANCZOS
+        )
+
+    return imagem
+
+
 def executar_ocr_imagem(imagem):
     """OCR local com Tesseract, sem depender de easyocr."""
     import pytesseract
