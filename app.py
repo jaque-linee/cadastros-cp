@@ -178,145 +178,46 @@ def data_valida(valor):
 # SÓ CARREGA SE REALMENTE PRECISAR
 # ============================================================
 
-@st.cache_resource(show_spinner=False)
-def carregar_ocr():
-    import easyocr
-
-    return easyocr.Reader(
-        ["pt", "en"],
-        gpu=False,
-        verbose=False
-    )
-
-
-# ============================================================
-# 6. PREPARAÇÃO DA IMAGEM
-# ============================================================
-
-def preparar_imagem(imagem):
-    imagem = ImageOps.exif_transpose(
-        imagem
-    )
-
-    imagem = imagem.convert(
-        "RGB"
-    )
-
-    largura, altura = imagem.size
-
-    if largura < 1200:
-        proporcao = (
-            1200 / largura
-        )
-
-        imagem = imagem.resize(
-            (
-                1200,
-                int(
-                    altura * proporcao
-                )
-            ),
-            Image.Resampling.LANCZOS
-        )
-
-    if imagem.width > 2000:
-        proporcao = (
-            2000 / imagem.width
-        )
-
-        imagem = imagem.resize(
-            (
-                2000,
-                int(
-                    imagem.height
-                    * proporcao
-                )
-            ),
-            Image.Resampling.LANCZOS
-        )
-
-    return imagem
-
-
-# ============================================================
-# 7. OCR DE IMAGEM
-# ============================================================
-
 def executar_ocr_imagem(imagem):
-    leitor = carregar_ocr()
+    """OCR local com Tesseract, sem depender de easyocr."""
+    import pytesseract
+    from pytesseract import Output
 
-    imagem = preparar_imagem(
-        imagem
-    )
+    imagem = preparar_imagem(imagem)
 
-    imagem_np = np.array(
-        imagem
-    )
-
-    resultado = leitor.readtext(
-        imagem_np,
-        detail=1,
-        paragraph=False,
-        decoder="greedy"
+    dados = pytesseract.image_to_data(
+        imagem,
+        lang="por",
+        config="--oem 3 --psm 11",
+        output_type=Output.DICT
     )
 
     itens = []
 
-    for item in resultado:
-        try:
-            caixa = item[0]
-
-            texto = str(
-                item[1]
-            ).strip()
-
-            confianca = float(
-                item[2]
-            )
-
-            if not texto:
-                continue
-
-            xs = [
-                ponto[0]
-                for ponto in caixa
-            ]
-
-            ys = [
-                ponto[1]
-                for ponto in caixa
-            ]
-
-            itens.append(
-                {
-                    "texto": texto,
-                    "confianca": confianca,
-                    "x": sum(xs) / len(xs),
-                    "y": sum(ys) / len(ys)
-                }
-            )
-
-        except Exception:
+    for i, texto_bruto in enumerate(dados.get("text", [])):
+        texto = str(texto_bruto or "").strip()
+        if not texto:
             continue
 
-    itens.sort(
-        key=lambda item: (
-            round(
-                item["y"] / 20
-            ),
-            item["x"]
-        )
-    )
+        try:
+            confianca = float(dados["conf"][i])
+        except Exception:
+            confianca = -1.0
 
-    texto = "\n".join(
-        item["texto"]
-        for item in itens
-    )
+        if confianca < 0:
+            continue
 
-    del imagem_np
+        itens.append({
+            "texto": texto,
+            "confianca": confianca / 100.0,
+            "x": float(dados["left"][i]) + float(dados["width"][i]) / 2,
+            "y": float(dados["top"][i]) + float(dados["height"][i]) / 2,
+        })
+
+    itens.sort(key=lambda item: (round(item["y"] / 20), item["x"]))
+    texto = "\n".join(item["texto"] for item in itens)
 
     gc.collect()
-
     return texto, itens
 
 
