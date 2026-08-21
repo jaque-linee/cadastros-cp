@@ -93,8 +93,12 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
         )
 
         if consulta_concorrentes.get("sucesso"):
-            titulo_normalizado = somente_numeros(
-                titulo_input
+            # Mesma normalização usada pelo relatório de cruzamentos:
+            # somente números + remoção dos zeros à esquerda.
+            titulo_normalizado = (
+                somente_numeros(
+                    titulo_input
+                ).lstrip("0")
             )
 
             for nome_base, titulos in consulta_concorrentes.get(
@@ -102,7 +106,21 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
                 {}
             ).items():
 
-                if titulo_normalizado in titulos:
+                titulos_normalizados = {
+                    somente_numeros(
+                        titulo_base
+                    ).lstrip("0")
+                    for titulo_base in (titulos or [])
+                    if somente_numeros(
+                        titulo_base
+                    )
+                }
+
+                if (
+                    titulo_normalizado
+                    and titulo_normalizado
+                    in titulos_normalizados
+                ):
                     bases_encontradas.append(
                         str(nome_base)
                     )
