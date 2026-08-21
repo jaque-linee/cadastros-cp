@@ -1803,7 +1803,8 @@ if menu == "📸 Envio de Documentos":
     exibir_tela_envio_documentos(
         base, supervisor, sub,
         ler_documento, extrair_dados,
-        verificar_duplicidade, classificar_resultado
+        verificar_duplicidade, classificar_resultado,
+        WEBHOOK_URL, comunidade
     )
 
 elif menu == "✍️ Formulário Manual":
