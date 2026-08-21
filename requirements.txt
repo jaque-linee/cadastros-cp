@@ -8,3 +8,5 @@ pandas
 pytesseract
 reportlab
 opencv-python-headless
+rapidocr
+onnxruntime
