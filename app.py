@@ -1740,49 +1740,7 @@ lista_sup, lista_sub = obter_supervisores(
 
 with st.sidebar:
     st.header(
-        "⚙️ Configuração"
-    )
-
-    sup_opcao = st.selectbox(
-        "Supervisor",
-        lista_sup
-        + [
-            "➕ Cadastrar Novo Supervisor"
-        ]
-    )
-
-    if (
-        sup_opcao
-        == "➕ Cadastrar Novo Supervisor"
-    ):
-        supervisor = st.text_input(
-            "Novo Supervisor"
-        ).upper()
-
-    else:
-        supervisor = sup_opcao
-
-    sub_opcao = st.selectbox(
-        "Subsupervisor",
-        lista_sub
-        + [
-            "➕ Cadastrar Novo Sub"
-        ]
-    )
-
-    if (
-        sub_opcao
-        == "➕ Cadastrar Novo Sub"
-    ):
-        sub = st.text_input(
-            "Novo Sub"
-        ).upper()
-
-    else:
-        sub = sub_opcao
-
-    st.markdown(
-        "---"
+        "⚙️ Menu"
     )
 
     menu = st.radio(
@@ -1794,23 +1752,79 @@ with st.sidebar:
         ]
     )
 
+    supervisor = ""
+    sub = ""
+    comunidade = ""
 
-# ============================================================
-# 33. ENVIO DE DOCUMENTOS
-# ============================================================
+    if menu != "📊 Relatórios":
+        st.markdown(
+            "---"
+        )
+
+        st.subheader(
+            "Configuração do cadastro"
+        )
+
+        sup_opcao = st.selectbox(
+            "Supervisor",
+            lista_sup
+            + [
+                "➕ Cadastrar Novo Supervisor"
+            ]
+        )
+
+        if (
+            sup_opcao
+            == "➕ Cadastrar Novo Supervisor"
+        ):
+            supervisor = st.text_input(
+                "Novo Supervisor"
+            ).strip().upper()
+        else:
+            supervisor = sup_opcao
+
+        sub_opcao = st.selectbox(
+            "Subsupervisor",
+            lista_sub
+            + [
+                "➕ Cadastrar Novo Sub"
+            ]
+        )
+
+        if (
+            sub_opcao
+            == "➕ Cadastrar Novo Sub"
+        ):
+            sub = st.text_input(
+                "Novo Sub"
+            ).strip().upper()
+        else:
+            sub = sub_opcao
+
+        comunidade_opcao = st.selectbox(
+            "Comunidade",
+            lista_comunidade
+            + [
+                "➕ Cadastrar Nova Comunidade"
+            ]
+        )
+
+        if (
+            comunidade_opcao
+            == "➕ Cadastrar Nova Comunidade"
+        ):
+            comunidade = st.text_input(
+                "Nova Comunidade"
+            ).strip().upper()
+        else:
+            comunidade = comunidade_opcao
 
 if menu == "📸 Envio de Documentos":
-    comunidade_atual = (
-        st.session_state.get("comunidade")
-        or st.session_state.get("comunidade_selecionada")
-        or ""
-    )
-
     exibir_tela_envio_documentos(
         base, supervisor, sub,
         ler_documento, extrair_dados,
         verificar_duplicidade, classificar_resultado,
-        WEBHOOK_URL, comunidade_atual
+        WEBHOOK_URL, comunidade
     )
 
 elif menu == "✍️ Formulário Manual":
