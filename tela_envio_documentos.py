@@ -295,8 +295,7 @@ def exibir_tela_envio_documentos(
             )
 
             st.caption(
-                "Confira os dados abaixo. Telefone e nome da mãe podem ser "
-                "ajustados na própria linha quando necessário."
+                "Confira e ajuste os dados abaixo quando necessário."
             )
 
             for indice_item, item in enumerate(resultados):
