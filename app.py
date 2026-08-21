@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 import re
+from PIL import Image
+
 from tela_relatorios import exibir_tela_relatorios
 from tela_formulario_manual import exibir_tela_formulario_manual
 from tela_envio_documentos import exibir_tela_envio_documentos
@@ -19,10 +21,14 @@ from validacoes import (
 # 1. CONFIGURAÇÃO
 # ============================================================
 
+icone_base = Image.open(
+    "logo_base.png"
+)
+
 st.set_page_config(
-    page_title="Sistema de Cadastro CP",
+    page_title="BASE",
     layout="wide",
-    page_icon="📋"
+    page_icon=icone_base
 )
 
 
@@ -73,6 +79,7 @@ from processamento_documentos import (
     ler_documento,
     extrair_dados,
 )
+
 
 # ============================================================
 # 25. CARREGAR BASE DO SHEETS
@@ -310,11 +317,11 @@ def obter_supervisores(
 # ============================================================
 
 st.title(
-    "📋 Sistema de Cadastro CP"
+    "BASE"
 )
 
 st.caption(
-    "Leitura e conferência de documentos"
+    "Sistema de Cadastros, Documentos e Relatórios"
 )
 
 st.markdown(
@@ -418,16 +425,33 @@ with st.sidebar:
         else:
             comunidade = comunidade_opcao
 
+
+# ============================================================
+# 33. TELAS
+# ============================================================
+
 if menu == "📸 Envio de Documentos":
     exibir_tela_envio_documentos(
-        base, supervisor, sub,
-        ler_documento, extrair_dados,
-        verificar_duplicidade, classificar_resultado,
-        WEBHOOK_URL, comunidade
+        base,
+        supervisor,
+        sub,
+        ler_documento,
+        extrair_dados,
+        verificar_duplicidade,
+        classificar_resultado,
+        WEBHOOK_URL,
+        comunidade
     )
 
 elif menu == "✍️ Formulário Manual":
-    exibir_tela_formulario_manual(base, WEBHOOK_URL, supervisor, sub)
+    exibir_tela_formulario_manual(
+        base,
+        WEBHOOK_URL,
+        supervisor,
+        sub
+    )
 
 elif menu == "📊 Relatórios":
-    exibir_tela_relatorios(base)
+    exibir_tela_relatorios(
+        base
+    )
