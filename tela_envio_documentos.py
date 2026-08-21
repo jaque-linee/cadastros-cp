@@ -161,7 +161,10 @@ def exibir_tela_envio_documentos(
                                 existente_nome,
 
                             "Supervisor atual":
-                                existente_sup
+                                existente_sup,
+
+                            "_dados":
+                                dados
                         }
                     )
 
