@@ -357,7 +357,9 @@ def exibir_tela_envio_documentos(
                         placeholder="DD/MM/AAAA"
                     ).strip()
 
-                col_cpf, col_titulo, col_rg = st.columns(3)
+                col_cpf, col_rg, col_titulo, col_zona, col_secao = st.columns(
+                    [1.15, 1, 1.35, 0.7, 0.7]
+                )
 
                 with col_cpf:
                     cpf_editado = st.text_input(
@@ -365,6 +367,14 @@ def exibir_tela_envio_documentos(
                         value=str(dados_item.get("cpf", "") or ""),
                         key=f"cpf_manual_{indice_item}_{arquivo_item}",
                         placeholder="Somente números"
+                    ).strip()
+
+                with col_rg:
+                    rg_editado = st.text_input(
+                        "RG",
+                        value=str(dados_item.get("rg", "") or ""),
+                        key=f"rg_manual_{indice_item}_{arquivo_item}",
+                        placeholder="RG"
                     ).strip()
 
                 with col_titulo:
@@ -375,12 +385,20 @@ def exibir_tela_envio_documentos(
                         placeholder="Título de eleitor"
                     ).strip()
 
-                with col_rg:
-                    rg_editado = st.text_input(
-                        "RG",
-                        value=str(dados_item.get("rg", "") or ""),
-                        key=f"rg_manual_{indice_item}_{arquivo_item}",
-                        placeholder="RG"
+                with col_zona:
+                    zona_editada = st.text_input(
+                        "Zona",
+                        value=str(dados_item.get("zona", "") or ""),
+                        key=f"zona_manual_{indice_item}_{arquivo_item}",
+                        placeholder="Zona"
+                    ).strip()
+
+                with col_secao:
+                    secao_editada = st.text_input(
+                        "Seção",
+                        value=str(dados_item.get("secao", "") or ""),
+                        key=f"secao_manual_{indice_item}_{arquivo_item}",
+                        placeholder="Seção"
                     ).strip()
 
                 col_mae, col_tel = st.columns([2.2, 1])
@@ -399,24 +417,6 @@ def exibir_tela_envio_documentos(
                         value=str(dados_item.get("telefone", "") or ""),
                         key=f"telefone_manual_{indice_item}_{arquivo_item}",
                         placeholder="82999999999"
-                    ).strip()
-
-                col_zona, col_secao = st.columns(2)
-
-                with col_zona:
-                    zona_editada = st.text_input(
-                        "Zona",
-                        value=str(dados_item.get("zona", "") or ""),
-                        key=f"zona_manual_{indice_item}_{arquivo_item}",
-                        placeholder="Zona"
-                    ).strip()
-
-                with col_secao:
-                    secao_editada = st.text_input(
-                        "Seção",
-                        value=str(dados_item.get("secao", "") or ""),
-                        key=f"secao_manual_{indice_item}_{arquivo_item}",
-                        placeholder="Seção"
                     ).strip()
 
                 # Atualiza o dicionário usado pela validação e pelo salvamento.
