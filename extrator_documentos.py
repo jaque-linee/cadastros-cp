@@ -751,8 +751,11 @@ def extrair_nome_mae(
             if candidato not in nomes:
                 nomes.append(candidato)
 
-        if len(nomes) >= 2:
-            return nomes[1]
+        if nomes:
+            # No título eleitoral testado com RapidOCR, a filiação visual
+            # traz a mãe como primeiro nome reconhecido no bloco.
+            # Evita trocar pelo nome seguinte (frequentemente o pai).
+            return nomes[0]
 
     # 3. OCR pode jogar os nomes da filiação antes do rótulo.
     for i, linha in enumerate(linhas):
