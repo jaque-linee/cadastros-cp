@@ -336,110 +336,115 @@ def exibir_tela_envio_documentos(
 
                 st.markdown(cabecalho)
 
-                # Linha principal: documentos e localização.
-                cpf_item = str(dados_item.get("cpf", "") or "—")
-                titulo_item = str(dados_item.get("titulo", "") or "—")
-                nasc_item = str(
-                    dados_item.get("data_nascimento", "") or "—"
-                )
-                zona_item = str(dados_item.get("zona", "") or "—")
-                secao_item = str(dados_item.get("secao", "") or "—")
+                # Conferência manual completa.
+                # Todos os campos ficam editáveis após o OCR, inclusive os que
+                # não foram identificados ou foram identificados incorretamente.
+                col_nome, col_nasc = st.columns([2.2, 1])
 
-                st.caption(
-                    f"CPF: {cpf_item}   •   Título: {titulo_item}   •   "
-                    f"Nascimento: {nasc_item}   •   "
-                    f"Zona/Seção: {zona_item}/{secao_item}"
-                )
+                with col_nome:
+                    nome_editado = st.text_input(
+                        "Nome",
+                        value=str(dados_item.get("nome", "") or ""),
+                        key=f"nome_manual_{indice_item}_{arquivo_item}",
+                        placeholder="Digite o nome"
+                    ).strip().upper()
 
-                # Mãe e telefone ficam juntos, sem criar seções separadas.
+                with col_nasc:
+                    nascimento_editado = st.text_input(
+                        "Nascimento",
+                        value=str(dados_item.get("data_nascimento", "") or ""),
+                        key=f"nascimento_manual_{indice_item}_{arquivo_item}",
+                        placeholder="DD/MM/AAAA"
+                    ).strip()
+
+                col_cpf, col_titulo, col_rg = st.columns(3)
+
+                with col_cpf:
+                    cpf_editado = st.text_input(
+                        "CPF",
+                        value=str(dados_item.get("cpf", "") or ""),
+                        key=f"cpf_manual_{indice_item}_{arquivo_item}",
+                        placeholder="Somente números"
+                    ).strip()
+
+                with col_titulo:
+                    titulo_editado = st.text_input(
+                        "Título",
+                        value=str(dados_item.get("titulo", "") or ""),
+                        key=f"titulo_manual_{indice_item}_{arquivo_item}",
+                        placeholder="Título de eleitor"
+                    ).strip()
+
+                with col_rg:
+                    rg_editado = st.text_input(
+                        "RG",
+                        value=str(dados_item.get("rg", "") or ""),
+                        key=f"rg_manual_{indice_item}_{arquivo_item}",
+                        placeholder="RG"
+                    ).strip()
+
                 col_mae, col_tel = st.columns([2.2, 1])
 
                 with col_mae:
-                    mae_atual = str(
-                        dados_item.get("nome_mae", "") or ""
+                    mae_editada = st.text_input(
+                        "Nome da mãe",
+                        value=str(dados_item.get("nome_mae", "") or ""),
+                        key=f"mae_manual_{indice_item}_{arquivo_item}",
+                        placeholder="Digite o nome da mãe"
                     ).strip().upper()
 
-                    candidatos = []
-
-                    for candidato in dados_item.get(
-                        "_candidatos_mae",
-                        []
-                    ):
-                        candidato = str(
-                            candidato or ""
-                        ).strip().upper()
-
-                        if (
-                            candidato
-                            and candidato != nome_item.upper()
-                            and candidato not in candidatos
-                        ):
-                            candidatos.append(candidato)
-
-                    chave_mae = (
-                        f"mae_compacta_{indice_item}_"
-                        f"{arquivo_item}"
-                    )
-
-                    if not mae_atual and candidatos:
-                        escolha_mae = st.selectbox(
-                            "Nome da mãe",
-                            options=["— SELECIONE —"] + candidatos,
-                            key=chave_mae
-                        )
-
-                        if escolha_mae != "— SELECIONE —":
-                            dados_item["nome_mae"] = escolha_mae
-                            item["Nome da mãe"] = escolha_mae
-
-                    elif mae_atual:
-                        st.text_input(
-                            "Nome da mãe",
-                            value=mae_atual,
-                            key=chave_mae,
-                            disabled=True
-                        )
-
-                    else:
-                        mae_digitada = st.text_input(
-                            "Nome da mãe",
-                            value="",
-                            key=chave_mae,
-                            placeholder="Digite se não foi identificada"
-                        )
-
-                        if str(mae_digitada).strip():
-                            dados_item["nome_mae"] = (
-                                str(mae_digitada).strip().upper()
-                            )
-                            item["Nome da mãe"] = dados_item["nome_mae"]
-
                 with col_tel:
-                    chave_tel = (
-                        f"telefone_compacto_{indice_item}_"
-                        f"{arquivo_item}"
-                    )
-
-                    telefone_atual = str(
-                        dados_item.get("telefone", "") or ""
-                    )
-
                     telefone_editado = st.text_input(
                         "Telefone",
-                        value=telefone_atual,
-                        key=chave_tel,
+                        value=str(dados_item.get("telefone", "") or ""),
+                        key=f"telefone_manual_{indice_item}_{arquivo_item}",
                         placeholder="82999999999"
+                    ).strip()
+
+                col_zona, col_secao = st.columns(2)
+
+                with col_zona:
+                    zona_editada = st.text_input(
+                        "Zona",
+                        value=str(dados_item.get("zona", "") or ""),
+                        key=f"zona_manual_{indice_item}_{arquivo_item}",
+                        placeholder="Zona"
+                    ).strip()
+
+                with col_secao:
+                    secao_editada = st.text_input(
+                        "Seção",
+                        value=str(dados_item.get("secao", "") or ""),
+                        key=f"secao_manual_{indice_item}_{arquivo_item}",
+                        placeholder="Seção"
+                    ).strip()
+
+                # Atualiza o dicionário usado pela validação e pelo salvamento.
+                dados_item["nome"] = nome_editado
+                dados_item["data_nascimento"] = nascimento_editado
+                dados_item["cpf"] = cpf_editado
+                dados_item["titulo"] = titulo_editado
+                dados_item["rg"] = rg_editado
+                dados_item["nome_mae"] = mae_editada
+                dados_item["zona"] = zona_editada
+                dados_item["secao"] = secao_editada
+
+                if telefone_editado:
+                    dados_item["telefone"] = normalizar_telefone(
+                        telefone_editado
                     )
+                else:
+                    dados_item["telefone"] = ""
 
-                    if str(telefone_editado).strip():
-                        telefone_limpo = normalizar_telefone(
-                            telefone_editado
-                        )
-                    else:
-                        telefone_limpo = ""
-
-                    dados_item["telefone"] = telefone_limpo
-                    item["Telefone"] = telefone_limpo
+                # Mantém também a linha-resumo sincronizada.
+                item["Nome"] = dados_item["nome"]
+                item["CPF"] = dados_item["cpf"]
+                item["Título"] = dados_item["titulo"]
+                item["Nascimento"] = dados_item["data_nascimento"]
+                item["Nome da mãe"] = dados_item["nome_mae"]
+                item["Zona"] = dados_item["zona"]
+                item["Seção"] = dados_item["secao"]
+                item["Telefone"] = dados_item["telefone"]
 
                 # Reclassifica após eventual escolha/digitação do nome da mãe.
                 if resultado_item != "⚠️ JÁ CADASTRADO":
@@ -590,7 +595,16 @@ def exibir_tela_envio_documentos(
                 # Remove apenas estados temporários dos campos do lote atual.
                 for chave in list(st.session_state.keys()):
                     if (
-                        str(chave).startswith("mae_compacta_")
+                        str(chave).startswith("nome_manual_")
+                        or str(chave).startswith("nascimento_manual_")
+                        or str(chave).startswith("cpf_manual_")
+                        or str(chave).startswith("titulo_manual_")
+                        or str(chave).startswith("rg_manual_")
+                        or str(chave).startswith("mae_manual_")
+                        or str(chave).startswith("telefone_manual_")
+                        or str(chave).startswith("zona_manual_")
+                        or str(chave).startswith("secao_manual_")
+                        or str(chave).startswith("mae_compacta_")
                         or str(chave).startswith("telefone_compacto_")
                     ):
                         del st.session_state[chave]
