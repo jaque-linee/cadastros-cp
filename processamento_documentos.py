@@ -53,35 +53,24 @@ def obter_rapidocr():
     return _RAPIDOCR
 
 
-def _analisar_box(box):
+def _box_para_centro(box):
     if box is None:
-        return None
-
+        return 0.0, 0.0
     try:
         pontos = [(float(p[0]), float(p[1])) for p in box]
         xs = [p[0] for p in pontos]
         ys = [p[1] for p in pontos]
-
-        return {
-            "x_min": min(xs),
-            "y_min": min(ys),
-            "x_max": max(xs),
-            "y_max": max(ys),
-            "centro_x": (min(xs) + max(xs)) / 2,
-            "centro_y": (min(ys) + max(ys)) / 2,
-        }
+        return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
     except Exception:
-        return None
+        return 0.0, 0.0
 
 
-def executar_ocr_imagem(imagem, pagina=1):
+def executar_ocr_imagem(imagem):
     """
-    RapidOCR com a mesma estrutura geométrica usada no teste do VSCode.
-    Além de x/y, preserva página, dimensões e coordenadas relativas.
+    OCR principal com RapidOCR.
+    Preserva o formato esperado pelo extrator atual.
     """
     imagem = preparar_imagem(imagem)
-    largura, altura = imagem.size
-
     resultado = obter_rapidocr()(np.array(imagem))
 
     textos = getattr(resultado, "txts", None) or []
@@ -91,56 +80,29 @@ def executar_ocr_imagem(imagem, pagina=1):
     itens = []
 
     for i, texto_bruto in enumerate(textos):
-        valor = str(texto_bruto or "").strip()
-        if not valor:
+        texto = str(texto_bruto or "").strip()
+        if not texto:
             continue
 
-        conf = 0.0
+        confianca = 0.0
         if i < len(scores):
             try:
-                conf = float(scores[i])
+                confianca = float(scores[i])
             except Exception:
                 pass
 
         box = boxes[i] if i < len(boxes) else None
-        pos = _analisar_box(box)
+        x, y = _box_para_centro(box)
 
-        item = {
-            "texto": valor,
-            "confianca": conf,
-            "pagina": pagina,
-            "largura_pagina": largura,
-            "altura_pagina": altura,
+        itens.append({
+            "texto": texto,
+            "confianca": confianca,
+            "x": x,
+            "y": y,
             "box": box,
-            "x_min": None,
-            "y_min": None,
-            "x_max": None,
-            "y_max": None,
-            "centro_x": None,
-            "centro_y": None,
-            "x_relativo": None,
-            "y_relativo": None,
-            # Compatibilidade com o restante do Streamlit
-            "x": 0.0,
-            "y": 0.0,
-        }
+        })
 
-        if pos:
-            item.update(pos)
-            item["x"] = pos["centro_x"]
-            item["y"] = pos["centro_y"]
-            item["x_relativo"] = pos["centro_x"] / largura if largura else None
-            item["y_relativo"] = pos["centro_y"] / altura if altura else None
-
-        itens.append(item)
-
-    # Não destrói a estrutura espacial; apenas mantém uma ordem estável de leitura.
-    itens.sort(key=lambda item: (
-        item["pagina"],
-        round((item["y_relativo"] or 0) / 0.006),
-        item["x_relativo"] or 0
-    ))
-
+    itens.sort(key=lambda item: (round(item["y"] / 20), item["x"]))
     texto = "\n".join(item["texto"] for item in itens)
 
     gc.collect()
@@ -312,7 +274,7 @@ def executar_ocr_pdf(arquivo):
         )
 
         bytes_imagem = pix.tobytes(
-            "png"
+            "jpeg"
         )
 
         imagem = Image.open(
@@ -324,8 +286,7 @@ def executar_ocr_pdf(arquivo):
         )
 
         texto, itens = executar_ocr_imagem(
-            imagem,
-            pagina=numero_pagina + 1
+            imagem
         )
 
         if texto:
@@ -391,6 +352,28 @@ def ler_documento(arquivo):
     imagem = Image.open(arquivo)
 
     texto, itens = executar_ocr_imagem(imagem)
+
+    # Releitura direcionada do telefone manuscrito somente se necessário.
+    telefone_ocr = encontrar_telefone_ocr(itens)
+    if not telefone_ocr:
+        telefone_ocr = recuperar_telefone_na_imagem(imagem, itens)
+
+    if telefone_ocr:
+        texto = (texto + "\nTELEFONE\n" + telefone_ocr).strip()
+        itens.append({
+            "texto": "TELEFONE",
+            "confianca": 1.0,
+            "x": 0.0,
+            "y": 0.0,
+            "box": None,
+        })
+        itens.append({
+            "texto": telefone_ocr,
+            "confianca": 1.0,
+            "x": 0.0,
+            "y": 20.0,
+            "box": None,
+        })
 
     del imagem
     gc.collect()
@@ -1133,14 +1116,14 @@ def encontrar_nome_ocr(
 
 def encontrar_mae_ocr(itens):
     """
-    1) prioriza MÃE/NOME DA MÃE explícito;
-    2) no título eleitoral, usa FILIAÇÃO + posição visual,
-       como na versão do VSCode que acertou o nome da mãe.
+    Extrai o nome da mãe somente com evidência estrutural:
+    rótulo MÃE/NOME DA MÃE ou rótulo equivalente.
+    FILIAÇÃO isolada não é suficiente para decidir qual nome é o da mãe.
     """
     rotulos_mae = []
 
     for item in itens:
-        rotulo = normalizar_rotulo(item.get("texto", ""))
+        rotulo = normalizar_rotulo(item["texto"])
         if (
             rotulo in ("MAE", "NOMEDAMAE", "NOMEMAE")
             or "NOMEDAMAE" in rotulo
@@ -1154,19 +1137,19 @@ def encontrar_mae_ocr(itens):
             if item is rotulo:
                 continue
 
-            candidato = str(item.get("texto", "") or "").strip()
+            candidato = str(item["texto"]).strip()
 
             if not parece_nome(candidato):
                 continue
 
-            dx = abs(float(item.get("x", 0)) - float(rotulo.get("x", 0)))
-            dy = float(item.get("y", 0)) - float(rotulo.get("y", 0))
+            dx = abs(item["x"] - rotulo["x"])
+            dy = item["y"] - rotulo["y"]
 
             if -50 <= dy <= 230 and dx <= 750:
                 candidatos.append(
                     (
                         abs(dy) + dx * 0.2,
-                        -float(item.get("confianca", 0) or 0),
+                        -item["confianca"],
                         candidato.upper()
                     )
                 )
@@ -1175,40 +1158,163 @@ def encontrar_mae_ocr(itens):
             candidatos.sort()
             return candidatos[0][2]
 
-    # FILIAÇÃO: reproduz a leitura espacial que funcionou no VSCode.
-    for i, bloco in enumerate(itens):
-        rotulo = normalizar_rotulo(bloco.get("texto", ""))
+    # Não deduz mãe pelo sexo, primeiro nome ou posição arbitrária.
+    return ""
 
-        if "FILIACAO" not in rotulo and "FILIACA" not in rotulo:
+
+
+# ============================================================
+# 21B. EXTRAÇÃO OCR - TELEFONE / RELEITURA DIRECIONADA
+# ============================================================
+
+def _formatar_telefone_ocr(numero):
+    numero = somente_numeros(numero)
+    if len(numero) == 11:
+        return f"({numero[:2]}) {numero[2:7]}-{numero[7:]}"
+    if len(numero) == 10:
+        return f"({numero[:2]}) {numero[2:6]}-{numero[6:]}"
+    if len(numero) == 9:
+        return f"{numero[:5]}-{numero[5:]}"
+    if len(numero) == 8:
+        return f"{numero[:4]}-{numero[4:]}"
+    return numero
+
+
+def encontrar_telefone_ocr(itens):
+    """Procura telefone reconhecido perto de TELEFONE/FONE/CELULAR/CONTATO/WHATS."""
+    rotulos = []
+    for item in itens:
+        r = normalizar_rotulo(item.get("texto", ""))
+        if any(t in r for t in ("TELEFONE", "CELULAR", "FONE", "CONTATO", "WHATS")):
+            rotulos.append(item)
+
+    candidatos = []
+    for item in itens:
+        bruto = str(item.get("texto", "") or "")
+        numero = somente_numeros(bruto)
+        if len(numero) not in (8, 9, 10, 11):
+            continue
+        if len(numero) == 11 and cpf_valido(numero):
             continue
 
-        candidatos = []
+        pontos = float(item.get("confianca", 0) or 0) * 20
+        if "-" in bruto:
+            pontos += 15
+        if "(" in bruto or ")" in bruto:
+            pontos += 10
 
-        for distancia, _, candidato in _itens_perto(itens, i, 0.20):
-            valor = str(candidato.get("texto", "") or "").strip()
+        if len(numero) == 11 and numero[2] == "9":
+            pontos += 45
+        elif len(numero) == 10 and numero[2] in "2345":
+            pontos += 25
+        elif len(numero) == 9 and numero[0] == "9":
+            pontos += 40
+        elif len(numero) == 8 and numero[0] in "2345":
+            pontos += 15
+        else:
+            pontos -= 20
 
-            if not parece_nome(valor):
+        for rotulo in rotulos:
+            dx = abs(float(item.get("x", 0)) - float(rotulo.get("x", 0)))
+            dy = float(item.get("y", 0)) - float(rotulo.get("y", 0))
+            if -80 <= dy <= 300 and dx <= 900:
+                pontos += 100 - min(70, abs(dy) * 0.15 + dx * 0.04)
+                break
+
+        candidatos.append((pontos, numero))
+
+    if not candidatos:
+        return ""
+
+    candidatos.sort(reverse=True)
+    pontos, numero = candidatos[0]
+    return _formatar_telefone_ocr(numero) if pontos >= 55 else ""
+
+
+def recuperar_telefone_na_imagem(imagem, itens):
+    """
+    Segunda passada somente quando o telefone não saiu na leitura principal.
+    Recorta a faixa próxima ao rótulo e amplia/contrasta para tentar manuscrito.
+    """
+    rotulos = []
+    for item in itens:
+        r = normalizar_rotulo(item.get("texto", ""))
+        if any(t in r for t in ("TELEFONE", "CELULAR", "FONE", "CONTATO", "WHATS")):
+            rotulos.append(item)
+
+    if not rotulos:
+        return ""
+
+    base = preparar_imagem(imagem)
+    w, h = base.size
+
+    for rotulo in rotulos:
+        x = int(float(rotulo.get("x", 0)))
+        y = int(float(rotulo.get("y", 0)))
+
+        # Área larga: telefone manuscrito pode estar à direita ou logo abaixo.
+        esquerda = max(0, x - 120)
+        topo = max(0, y - 80)
+        direita = min(w, x + 1200)
+        baixo = min(h, y + 420)
+
+        if direita <= esquerda or baixo <= topo:
+            continue
+
+        recorte = base.crop((esquerda, topo, direita, baixo))
+        escala = 2.0
+        recorte = recorte.resize(
+            (max(1, int(recorte.width * escala)), max(1, int(recorte.height * escala))),
+            Image.Resampling.LANCZOS
+        )
+        recorte = ImageOps.grayscale(recorte)
+        recorte = ImageOps.autocontrast(recorte)
+        recorte = ImageEnhance.Contrast(recorte).enhance(1.65)
+
+        resultado = obter_rapidocr()(np.array(recorte))
+        textos = getattr(resultado, "txts", None) or []
+        scores = getattr(resultado, "scores", None) or []
+        boxes = getattr(resultado, "boxes", None) or []
+
+        novos = []
+        for i, txt in enumerate(textos):
+            txt = str(txt or "").strip()
+            if not txt:
                 continue
+            score = float(scores[i]) if i < len(scores) else 0.0
+            box = boxes[i] if i < len(boxes) else None
+            cx, cy = _box_para_centro(box)
+            novos.append({
+                "texto": txt,
+                "confianca": score,
+                "x": cx,
+                "y": cy,
+                "box": box,
+            })
 
-            normal = remover_acentos(valor).upper()
+        tel = encontrar_telefone_ocr(novos)
+        if tel:
+            return tel
 
-            if any(termo in normal for termo in [
-                "ASSINATURA", "ELEITORAL", "VALIDACAO", "JUSTICA",
-                "REPUBLICA", "MUNICIPIO", "NASCIMENTO", "EMISSAO"
-            ]):
-                continue
-
-            try:
-                y = float(candidato["y_relativo"])
-                x = float(candidato["x_relativo"])
-            except Exception:
-                continue
-
-            candidatos.append((y, x, distancia, valor.upper()))
-
-        if candidatos:
-            candidatos.sort(key=lambda item: (item[0], item[1]))
-            return candidatos[0][3]
+        # Fallback restrito ao recorte: aceita padrão telefônico mesmo se
+        # o rótulo ficou fora/ilegível na segunda passada.
+        melhores = []
+        for novo in novos:
+            numero = somente_numeros(novo["texto"])
+            if len(numero) in (8, 9, 10, 11):
+                if len(numero) == 11 and cpf_valido(numero):
+                    continue
+                plausivel = (
+                    (len(numero) == 11 and numero[2] == "9")
+                    or (len(numero) == 10 and numero[2] in "2345")
+                    or (len(numero) == 9 and numero[0] == "9")
+                    or (len(numero) == 8 and numero[0] in "2345")
+                )
+                if plausivel:
+                    melhores.append((novo["confianca"], numero))
+        if melhores:
+            melhores.sort(reverse=True)
+            return _formatar_telefone_ocr(melhores[0][1])
 
     return ""
 
@@ -1217,96 +1323,118 @@ def encontrar_mae_ocr(itens):
 # 22. ZONA E SEÇÃO OCR
 # ============================================================
 
-def _distancia_relativa(a, b):
-    try:
-        ax = float(a.get("x_relativo"))
-        ay = float(a.get("y_relativo"))
-        bx = float(b.get("x_relativo"))
-        by = float(b.get("y_relativo"))
-        return ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
-    except Exception:
-        return 999.0
+def encontrar_zona_secao_ocr(
+    itens,
+    titulo
+):
+    zona = ""
+    secao = ""
 
+    rotulo_zona = None
+    rotulo_secao = None
 
-def _itens_perto(itens, indice, limite):
-    referencia = itens[indice]
-    proximos = []
+    for item in itens:
+        rotulo = normalizar_rotulo(
+            item["texto"]
+        )
 
-    for j, candidato in enumerate(itens):
-        if j == indice:
-            continue
+        if rotulo == "ZONA":
+            rotulo_zona = item
 
-        if candidato.get("pagina") != referencia.get("pagina"):
-            continue
+        if rotulo == "SECAO":
+            rotulo_secao = item
 
-        distancia = _distancia_relativa(referencia, candidato)
+    def procurar_valor(
+        rotulo,
+        max_digitos
+    ):
+        if rotulo is None:
+            return ""
 
-        if distancia <= limite:
-            proximos.append((distancia, j, candidato))
+        candidatos = []
 
-    return sorted(proximos, key=lambda item: item[0])
-
-
-def encontrar_zona_secao_ocr(itens, titulo):
-    """
-    Mesma estratégia espacial que acertou 055 / 0252 no teste do VSCode:
-    procura ZONA/SEÇÃO e escolhe o número curto geometricamente mais próximo.
-    """
-    saida = {"ZONA": "", "SECAO": ""}
-
-    for chave, termo, max_digitos in [
-        ("ZONA", "ZONA", 3),
-        ("SECAO", "SECAO", 4),
-    ]:
-        melhores = []
-
-        for i, bloco in enumerate(itens):
-            rotulo = normalizar_rotulo(bloco.get("texto", ""))
-
-            if termo not in rotulo:
+        for item in itens:
+            if item is rotulo:
                 continue
 
-            for distancia, _, candidato in _itens_perto(itens, i, 0.09):
-                bruto = str(candidato.get("texto", "") or "").strip()
+            texto = item[
+                "texto"
+            ]
 
-                # Data não pode virar zona/seção.
-                if re.search(r"\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4}", bruto):
-                    continue
+            # Não usar datas
+            if re.search(
+                r"\d{2}[\/.\-]\d{2}[\/.\-]\d{4}",
+                texto
+            ):
+                continue
 
-                numero = somente_numeros(bruto)
+            numero = somente_numeros(
+                texto
+            )
 
-                if not numero or len(numero) > max_digitos:
-                    continue
+            if not (
+                1 <= len(numero)
+                <= max_digitos
+            ):
+                continue
 
-                if numero == somente_numeros(titulo):
-                    continue
+            if numero == titulo:
+                continue
 
-                # O bloco precisa ser essencialmente numérico.
-                compactado = re.sub(r"\s+", "", bruto)
-                if len(numero) < max(1, len(compactado) - 1):
-                    continue
+            dy = (
+                item["y"]
+                - rotulo["y"]
+            )
 
-                pontos = 100 - distancia * 300
+            dx = abs(
+                item["x"]
+                - rotulo["x"]
+            )
 
-                try:
-                    dx = abs(
-                        float(candidato["x_relativo"])
-                        - float(bloco["x_relativo"])
-                    )
-                    if dx < 0.055:
-                        pontos += 35
-                except Exception:
-                    pass
+            if not (
+                0 < dy <= 160
+            ):
+                continue
 
-                pontos += float(candidato.get("confianca", 0) or 0) * 5
-                melhores.append((pontos, numero))
+            if dx > 130:
+                continue
 
-        if melhores:
-            melhores.sort(key=lambda item: item[0], reverse=True)
-            saida[chave] = melhores[0][1]
+            candidatos.append(
+                (
+                    dx * 4 + dy,
+                    -item["confianca"],
+                    numero
+                )
+            )
 
-    zona = saida["ZONA"].zfill(3) if saida["ZONA"] else ""
-    secao = saida["SECAO"].zfill(4) if saida["SECAO"] else ""
+        if candidatos:
+            candidatos.sort()
+
+            return candidatos[
+                0
+            ][2]
+
+        return ""
+
+    zona = procurar_valor(
+        rotulo_zona,
+        3
+    )
+
+    secao = procurar_valor(
+        rotulo_secao,
+        4
+    )
+
+    if zona:
+        zona = zona.zfill(
+            3
+        )
+
+    if secao:
+        secao = secao.zfill(
+            4
+        )
 
     return zona, secao
 
