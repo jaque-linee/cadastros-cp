@@ -73,9 +73,16 @@ def executar_ocr_imagem(imagem):
     imagem = preparar_imagem(imagem)
     resultado = obter_rapidocr()(np.array(imagem))
 
-    textos = getattr(resultado, "txts", None) or []
-    scores = getattr(resultado, "scores", None) or []
-    boxes = getattr(resultado, "boxes", None) or []
+    textos = getattr(resultado, "txts", None)
+    scores = getattr(resultado, "scores", None)
+    boxes = getattr(resultado, "boxes", None)
+
+    if textos is None:
+        textos = []
+    if scores is None:
+        scores = []
+    if boxes is None:
+        boxes = []
 
     itens = []
 
@@ -564,7 +571,6 @@ def encontrar_mae_texto_digital(linhas):
 def extrair_dados_pdf_digital(
     texto
 ):
-    print("\n>>> DEBUG OCR: ENTROU EM extrair_dados_pdf_digital <<<")
     linhas = linhas_texto(
         texto
     )
@@ -1466,7 +1472,6 @@ def extrair_dados_ocr(
     texto,
     itens
 ):
-    print("\n>>> DEBUG OCR: ENTROU NO MOTOR COMPLETO DO VSCODE <<<")
     # Aqui roda EXATAMENTE a função extrair_dados do VSCode.
     dados = _MOTOR_VSCODE["extrair_dados"](itens)
 
