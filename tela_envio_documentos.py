@@ -2,6 +2,7 @@ import gc
 import pandas as pd
 import streamlit as st
 import sheets
+import cruzamento
 
 from leitor_documentos import preparar_documento
 from extrator_documentos import analisar_documentos
@@ -129,6 +130,20 @@ def exibir_tela_envio_documentos(
                         duplicado
                     )
 
+                    # Cruzamento do título com as bases concorrentes.
+                    bases_encontradas = ""
+                    titulo_cruzado = str(dados.get("titulo", "") or "").strip()
+
+                    if titulo_cruzado:
+                        consulta_cruzamento = cruzamento.consultar_titulo(
+                            webhook_url,
+                            titulo_cruzado
+                        )
+                        if consulta_cruzamento.get("sucesso"):
+                            bases_encontradas = str(
+                                consulta_cruzamento.get("texto", "") or ""
+                            ).strip()
+
                     existente_nome = ""
                     existente_sup = ""
 
@@ -188,6 +203,12 @@ def exibir_tela_envio_documentos(
 
                             "Supervisor atual":
                                 existente_sup,
+
+                            "Bases encontradas":
+                                bases_encontradas,
+
+                            "_titulo_cruzado":
+                                titulo_cruzado,
 
                             "_dados":
                                 dados
@@ -454,6 +475,30 @@ def exibir_tela_envio_documentos(
                 dados_item["zona"] = zona_editada
                 dados_item["secao"] = secao_editada
 
+                # Se o título foi digitado/corrigido manualmente, refaz o cruzamento.
+                titulo_atual_cruzamento = str(
+                    dados_item.get("titulo", "") or ""
+                ).strip()
+                titulo_ja_cruzado = str(
+                    item.get("_titulo_cruzado", "") or ""
+                ).strip()
+
+                if titulo_atual_cruzamento != titulo_ja_cruzado:
+                    bases_atualizadas = ""
+
+                    if titulo_atual_cruzamento:
+                        consulta_cruzamento = cruzamento.consultar_titulo(
+                            webhook_url,
+                            titulo_atual_cruzamento
+                        )
+                        if consulta_cruzamento.get("sucesso"):
+                            bases_atualizadas = str(
+                                consulta_cruzamento.get("texto", "") or ""
+                            ).strip()
+
+                    item["Bases encontradas"] = bases_atualizadas
+                    item["_titulo_cruzado"] = titulo_atual_cruzamento
+
                 if telefone_editado:
                     dados_item["telefone"] = normalizar_telefone(
                         telefone_editado
@@ -508,6 +553,15 @@ def exibir_tela_envio_documentos(
                         st.caption(
                             "↳ " + " • ".join(detalhes_duplicado)
                         )
+
+                bases_exibicao = str(
+                    item.get("Bases encontradas", "") or ""
+                ).strip()
+
+                if bases_exibicao:
+                    st.caption(
+                        f"🎯 Cruzamento: {bases_exibicao}"
+                    )
 
                 st.markdown(
                     "<div style='border-bottom:1px solid #d9e1e8; "
