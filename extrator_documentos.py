@@ -4,388 +4,936 @@ from datetime import datetime
 
 
 # ============================================================
-# UTILIDADES
+# ESTRUTURA PADRÃO
 # ============================================================
 
-def limpar_texto(valor):
-    if valor is None:
-        return ""
-    return re.sub(r"\s+", " ", str(valor)).strip()
+CAMPOS = [
+    "nome",
+    "cpf",
+    "rg",
+    "data_nascimento",
+    "nome_mae",
+    "titulo",
+    "zona",
+    "secao",
+    "endereco",
+    "numero",
+    "bairro",
+    "cidade",
+    "telefone",
+    "nis",
+    "dap",
+    "sus",
+]
 
 
-def sem_acentos(valor):
-    valor = limpar_texto(valor)
+def resultado_vazio():
+    return {
+        campo: ""
+        for campo in CAMPOS
+    }
+
+
+# ============================================================
+# NORMALIZAÇÃO
+# ============================================================
+
+def remover_acentos(texto):
+    texto = str(texto or "")
 
     return "".join(
-        c for c in unicodedata.normalize("NFD", valor)
+        c
+        for c in unicodedata.normalize(
+            "NFD",
+            texto
+        )
         if unicodedata.category(c) != "Mn"
-    ).upper()
-
-
-def somente_numeros(valor):
-    return re.sub(r"\D", "", limpar_texto(valor))
-
-
-def texto(bloco):
-    """
-    IMPORTANTE:
-    Agora o extrator recebe os dicionários criados
-    pelo teste_ocr.py.
-    """
-    if isinstance(bloco, dict):
-        return limpar_texto(bloco.get("texto", ""))
-
-    return limpar_texto(bloco)
-
-
-def confianca(bloco):
-    if not isinstance(bloco, dict):
-        return 0.0
-
-    try:
-        return float(bloco.get("confianca") or 0)
-    except Exception:
-        return 0.0
-
-
-# ============================================================
-# NORMALIZAÇÃO PARA COMPARAR RÓTULOS
-# ============================================================
-
-def compacto(valor):
-    return re.sub(
-        r"[^A-Z0-9]",
-        "",
-        sem_acentos(valor)
     )
 
 
-def contem_algum(valor, termos):
-    normal = sem_acentos(valor)
-    comp = compacto(valor)
+def normalizar_texto(texto):
+    texto = remover_acentos(
+        texto
+    ).upper()
 
-    for termo in termos:
-        termo_normal = sem_acentos(termo)
-        termo_comp = compacto(termo)
+    texto = re.sub(
+        r"[ \t]+",
+        " ",
+        texto
+    )
 
-        if termo_normal in normal:
-            return True
+    return texto.strip()
 
-        if len(termo_comp) >= 5 and termo_comp in comp:
-            return True
 
-    return False
+def somente_numeros(valor):
+    return re.sub(
+        r"\D",
+        "",
+        str(valor or "")
+    )
+
+
+def obter_linhas(texto):
+    return [
+        linha.strip()
+        for linha in str(
+            texto or ""
+        ).splitlines()
+        if linha.strip()
+    ]
+
+
+def limpar_nome(valor):
+    valor = str(
+        valor or ""
+    )
+
+    valor = re.sub(
+        r"[^A-Za-zÀ-ÿ'\s]",
+        " ",
+        valor
+    )
+
+    valor = re.sub(
+        r"\s+",
+        " ",
+        valor
+    )
+
+    return valor.strip().upper()
+
+
+# ============================================================
+# UTILIDADES DE CONTEXTO
+# ============================================================
+
+def contexto_linhas(
+    linhas,
+    indice,
+    antes=1,
+    depois=3
+):
+    inicio = max(
+        0,
+        indice - antes
+    )
+
+    fim = min(
+        len(linhas),
+        indice + depois + 1
+    )
+
+    return "\n".join(
+        linhas[inicio:fim]
+    )
+
+
+def contem_algum(
+    texto,
+    termos
+):
+    texto = normalizar_texto(
+        texto
+    )
+
+    return any(
+        normalizar_texto(termo)
+        in texto
+        for termo in termos
+    )
 
 
 # ============================================================
 # CPF
 # ============================================================
 
-def cpf_valido(numero):
-    numero = somente_numeros(numero)
+def cpf_valido(cpf):
+    cpf = somente_numeros(
+        cpf
+    )
 
-    if len(numero) != 11:
+    if len(cpf) != 11:
         return False
 
-    if numero == numero[0] * 11:
+    if cpf == cpf[0] * 11:
         return False
 
     try:
         soma = sum(
-            int(numero[i]) * (10 - i)
+            int(cpf[i])
+            * (10 - i)
             for i in range(9)
         )
 
-        resto = soma % 11
-        d1 = 0 if resto < 2 else 11 - resto
+        d1 = (
+            11 - soma % 11
+        )
+
+        if d1 >= 10:
+            d1 = 0
+
+        if d1 != int(
+            cpf[9]
+        ):
+            return False
 
         soma = sum(
-            int(numero[i]) * (11 - i)
+            int(cpf[i])
+            * (11 - i)
             for i in range(10)
         )
 
-        resto = soma % 11
-        d2 = 0 if resto < 2 else 11 - resto
+        d2 = (
+            11 - soma % 11
+        )
 
-        return numero[-2:] == f"{d1}{d2}"
+        if d2 >= 10:
+            d2 = 0
+
+        return (
+            d2
+            == int(cpf[10])
+        )
 
     except Exception:
         return False
 
 
-def formatar_cpf(numero):
-    numero = somente_numeros(numero)
+def formatar_cpf(cpf):
+    cpf = somente_numeros(
+        cpf
+    )
+
+    if len(cpf) != 11:
+        return cpf
 
     return (
-        f"{numero[:3]}."
-        f"{numero[3:6]}."
-        f"{numero[6:9]}-"
-        f"{numero[9:]}"
+        f"{cpf[:3]}."
+        f"{cpf[3:6]}."
+        f"{cpf[6:9]}-"
+        f"{cpf[9:]}"
     )
 
 
-def extrair_cpf(blocos):
-    # Primeiro: CPF matematicamente válido.
-    for bloco in blocos:
-        numero = somente_numeros(texto(bloco))
+def extrair_cpf(texto):
+    """
+    Procura CPF em TODO o conteúdo.
 
-        if len(numero) == 11 and cpf_valido(numero):
-            return formatar_cpf(numero)
+    Não depende do tipo de documento.
+    """
 
-    # Segundo: número de 11 dígitos explicitamente
-    # associado a CPF.
-    for i, bloco in enumerate(blocos):
-        if not contem_algum(texto(bloco), ["CPF"]):
+    texto = str(
+        texto or ""
+    )
+
+    candidatos = []
+
+    # CPF formatado ou parcialmente formatado.
+    padrao = re.compile(
+        r"(?<!\d)"
+        r"(\d{3})"
+        r"[\.\s\-]?"
+        r"(\d{3})"
+        r"[\.\s\-]?"
+        r"(\d{3})"
+        r"[\.\s\-]?"
+        r"(\d{2})"
+        r"(?!\d)"
+    )
+
+    for match in padrao.finditer(
+        texto
+    ):
+        numero = "".join(
+            match.groups()
+        )
+
+        candidatos.append(
+            numero
+        )
+
+    # Também procura CPF dentro de linhas maiores,
+    # como acontece na CIN/MRZ.
+    for numero in re.findall(
+        r"\d{11}",
+        texto
+    ):
+        candidatos.append(
+            numero
+        )
+
+    vistos = set()
+
+    for numero in candidatos:
+
+        numero = somente_numeros(
+            numero
+        )
+
+        if numero in vistos:
             continue
 
-        for j in range(i, min(i + 4, len(blocos))):
-            numero = somente_numeros(texto(blocos[j]))
+        vistos.add(
+            numero
+        )
 
-            if len(numero) == 11:
-                return formatar_cpf(numero)
+        if cpf_valido(
+            numero
+        ):
+            return formatar_cpf(
+                numero
+            )
 
     return ""
 
 
 # ============================================================
-# DATA DE NASCIMENTO
+# DATAS
 # ============================================================
 
-PADRAO_DATA = re.compile(
-    r"\b"
-    r"(0?[1-9]|[12]\d|3[01])"
-    r"[\/\-.]"
-    r"(0?[1-9]|1[0-2])"
-    r"[\/\-.]"
-    r"((?:19|20)\d{2})"
-    r"\b"
-)
+def data_valida(data):
+    try:
+        datetime.strptime(
+            data,
+            "%d/%m/%Y"
+        )
+
+        return True
+
+    except Exception:
+        return False
 
 
-def extrair_datas(valor):
-    encontrados = []
+def extrair_datas(texto):
+    resultados = []
 
-    for match in PADRAO_DATA.finditer(texto(valor)):
-        dia = int(match.group(1))
-        mes = int(match.group(2))
-        ano = int(match.group(3))
-
-        try:
-            data = datetime(ano, mes, dia)
-            encontrados.append(data)
-        except ValueError:
-            pass
-
-    return encontrados
-
-
-def extrair_nascimento(blocos):
-    candidatos = []
-
-    ano_atual = datetime.now().year
-
-    for indice, bloco in enumerate(blocos):
-        for data in extrair_datas(bloco):
-
-            pontos = 0
-
-            idade = ano_atual - data.year
-
-            # Cadastro de adulto: forte indício.
-            if 16 <= idade <= 110:
-                pontos += 40
-            elif 0 <= idade <= 110:
-                pontos += 10
-
-            # Confiança do OCR.
-            pontos += confianca(bloco) * 10
-
-            # Procura contexto próximo na ORDEM do OCR.
-            inicio = max(0, indice - 4)
-            fim = min(len(blocos), indice + 5)
-
-            contexto = " ".join(
-                sem_acentos(texto(b))
-                for b in blocos[inicio:fim]
-            )
-
-            if any(
-                marcador in contexto
-                for marcador in [
-                    "NASCIMENTO",
-                    "NASC",
-                    "NASCIME",
-                    "DATA DE NASC"
-                ]
-            ):
-                pontos += 60
-
-            if any(
-                marcador in contexto
-                for marcador in [
-                    "EMISSAO",
-                    "VALIDADE",
-                    "EXPEDICAO"
-                ]
-            ):
-                pontos -= 30
-
-            candidatos.append(
-                (pontos, data)
-            )
-
-    if not candidatos:
-        return ""
-
-    candidatos.sort(
-        key=lambda item: item[0],
-        reverse=True
+    padrao = re.compile(
+        r"\b"
+        r"(\d{1,2})"
+        r"[/.\-]"
+        r"(\d{1,2})"
+        r"[/.\-]"
+        r"(\d{4})"
+        r"\b"
     )
 
-    return candidatos[0][1].strftime("%d/%m/%Y")
+    for match in padrao.finditer(
+        str(texto or "")
+    ):
+        data = (
+            f"{int(match.group(1)):02d}/"
+            f"{int(match.group(2)):02d}/"
+            f"{match.group(3)}"
+        )
+
+        if data_valida(
+            data
+        ):
+            resultados.append(
+                data
+            )
+
+    return resultados
 
 
-# ============================================================
-# TÍTULO ELEITORAL
-# ============================================================
+def extrair_data_nascimento(texto):
+    linhas = obter_linhas(
+        texto
+    )
 
-def extrair_titulo(blocos):
-    candidatos = []
-
-    for indice, bloco in enumerate(blocos):
-        valor = texto(bloco)
-        numero = somente_numeros(valor)
-
-        if len(numero) != 12:
+    # Primeiro procura data associada
+    # explicitamente a nascimento.
+    for i, linha in enumerate(
+        linhas
+    ):
+        if not contem_algum(
+            linha,
+            [
+                "NASCIMENTO",
+                "DATA NASC",
+                "DATE OF BIRTH",
+                "NASC."
+            ]
+        ):
             continue
 
-        pontos = 20
-
-        # Título frequentemente aparece agrupado:
-        # 0417 1503 1791
-        if len(valor.split()) >= 2:
-            pontos += 15
-
-        inicio = max(0, indice - 12)
-        fim = min(len(blocos), indice + 5)
-
-        contexto = " ".join(
-            sem_acentos(texto(b))
-            for b in blocos[inicio:fim]
+        bloco = contexto_linhas(
+            linhas,
+            i,
+            antes=0,
+            depois=3
         )
 
-        # Aceita inclusive OCR ruim como
-        # TITULOFLFITORAL.
-        if "TITULO" in contexto:
-            pontos += 70
-
-        if "ELEITOR" in contexto:
-            pontos += 30
-
-        pontos += confianca(bloco) * 10
-
-        candidatos.append(
-            (pontos, numero, indice)
+        datas = extrair_datas(
+            bloco
         )
 
-    if not candidatos:
-        return "", None
+        if datas:
+            return datas[0]
 
-    candidatos.sort(
-        key=lambda item: item[0],
-        reverse=True
+    # Fallback:
+    # entre todas as datas, prioriza anos
+    # compatíveis com nascimento.
+    datas = extrair_datas(
+        texto
     )
 
-    melhor = candidatos[0]
+    candidatos = []
 
-    return melhor[1], melhor[2]
+    for data in datas:
+        try:
+            ano = int(
+                data[-4:]
+            )
+
+            if 1900 <= ano <= 2020:
+                candidatos.append(
+                    data
+                )
+
+        except Exception:
+            pass
+
+    return (
+        candidatos[0]
+        if candidatos
+        else ""
+    )
 
 
 # ============================================================
 # NOME
 # ============================================================
 
+ROTULOS_INVALIDOS_NOME = [
+    "REPUBLICA",
+    "FEDERATIVA",
+    "BRASIL",
+    "ESTADO",
+    "SECRETARIA",
+    "SEGURANCA",
+    "PUBLICA",
+    "PERICIA",
+    "OFICIAL",
+    "INSTITUTO",
+    "IDENTIFICACAO",
+    "JUSTICA",
+    "ELEITORAL",
+    "TITULO",
+    "CARTEIRA",
+    "IDENTIDADE",
+    "REGISTRO GERAL",
+    "REGISTRO CIVIL",
+    "NASCIMENTO",
+    "NATURALIDADE",
+    "MUNICIPIO",
+    "INSCRICAO",
+    "ZONA",
+    "SECAO",
+    "CPF",
+    "FILIACAO",
+    "ORGAO EXPEDIDOR",
+    "DATA DE EMISSAO",
+    "DATA DE EXPEDICAO",
+    "VALIDADE",
+    "POLEGAR",
+    "ASSINATURA",
+]
+
+
 def parece_nome(valor):
-    valor = limpar_texto(valor)
+    nome = limpar_nome(
+        valor
+    )
 
-    if len(valor) < 7:
+    if len(nome) < 7:
         return False
 
-    if any(c.isdigit() for c in valor):
+    palavras = nome.split()
+
+    if len(palavras) < 2:
         return False
 
-    letras = sum(c.isalpha() for c in valor)
+    normalizado = normalizar_texto(
+        nome
+    )
 
-    if letras < 7:
+    if any(
+        termo in normalizado
+        for termo
+        in ROTULOS_INVALIDOS_NOME
+    ):
         return False
 
-    normal = sem_acentos(valor)
-
-    proibidos = [
-        "REPUBLICA",
-        "FEDERATIVA",
-        "SECRETARIA",
-        "SEGURANCA",
-        "PUBLICA",
-        "IDENTIFICACAO",
-        "BIOMETRICA",
-        "ELEITORAL",
-        "TITULO",
-        "CARTEIRA",
-        "IDENTIDADE",
-        "HABILITACAO",
-        "NASCIMENTO",
-        "VALIDADE",
-        "EMISSAO",
-        "ASSINATURA",
-        "MUNICIPIO",
-        "REGISTRO",
-        "BRASIL",
-        "ESTADO"
+    # Evita lixo OCR muito curto.
+    palavras_validas = [
+        palavra
+        for palavra in palavras
+        if len(palavra) >= 2
     ]
 
-    if any(p in normal for p in proibidos):
-        return False
+    return (
+        len(palavras_validas)
+        >= 2
+    )
 
-    return True
+
+def candidato_depois_rotulo(
+    linhas,
+    indice,
+    rotulos,
+    limite=4
+):
+    linha = linhas[
+        indice
+    ]
+
+    linha_norm = normalizar_texto(
+        linha
+    )
+
+    # Tenta retirar o rótulo da própria linha.
+    for rotulo in rotulos:
+        rotulo_norm = (
+            normalizar_texto(
+                rotulo
+            )
+        )
+
+        pos = linha_norm.find(
+            rotulo_norm
+        )
+
+        if pos >= 0:
+            # Usamos regex no original para preservar acentos.
+            partes = re.split(
+                re.escape(rotulo),
+                linha,
+                maxsplit=1,
+                flags=re.I
+            )
+
+            if len(partes) == 2:
+                candidato = limpar_nome(
+                    partes[1]
+                )
+
+                if parece_nome(
+                    candidato
+                ):
+                    return candidato
+
+    # Depois procura linhas seguintes.
+    for j in range(
+        indice + 1,
+        min(
+            indice + limite + 1,
+            len(linhas)
+        )
+    ):
+        candidato = limpar_nome(
+            linhas[j]
+        )
+
+        if parece_nome(
+            candidato
+        ):
+            return candidato
+
+    return ""
 
 
-def extrair_nome(blocos):
-    candidatos = []
+def extrair_nome(texto):
+    """
+    Extrai o nome sem depender do tipo de documento.
+    Prioriza rótulos fortes e usa CPF como âncora somente como fallback.
+    """
+    linhas = obter_linhas(texto)
 
-    for indice, bloco in enumerate(blocos):
-        valor = texto(bloco)
+    # 1. NOME DO ELEITOR
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
 
-        if not parece_nome(valor):
+        if "NOME DO ELEITOR" not in n:
             continue
 
-        pontos = confianca(bloco) * 20
+        resto = re.sub(
+            r"(?i).*NOME\s+DO\s+ELEITOR\s*[:\-]*",
+            "",
+            linha
+        ).strip()
 
-        inicio = max(0, indice - 5)
-        fim = min(len(blocos), indice + 3)
+        candidato = limpar_nome(resto)
 
-        contexto = " ".join(
-            sem_acentos(texto(b))
-            for b in blocos[inicio:fim]
-        )
+        if parece_nome(candidato):
+            return candidato
 
-        if "NOME" in contexto:
-            pontos += 60
+        for j in range(i + 1, min(i + 5, len(linhas))):
+            candidato = limpar_nome(linhas[j])
 
-        if "ELEITOR" in contexto:
-            pontos += 30
+            if parece_nome(candidato):
+                return candidato
 
-        # Nome localizado dentro de região reconhecida
-        # como título/identidade recebe reforço.
-        if (
-            "IDENTIFICACAO" in contexto
-            or "BIOMETRICA" in contexto
+    # 2. NOME / NAME ou NOME
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
+
+        if "NOME DO ELEITOR" in n:
+            continue
+
+        if not (
+            n == "NOME"
+            or n.startswith("NOME ")
+            or "NOME / NAME" in n
+            or "NOME/NAME" in n
         ):
-            pontos += 20
+            continue
 
-        candidatos.append(
-            (pontos, valor.upper())
+        resto = re.sub(
+            r"(?i)^.*?\bNOME\b(?:\s*/\s*NAME)?\s*[:\-]*",
+            "",
+            linha
+        ).strip()
+
+        candidato = limpar_nome(resto)
+
+        if parece_nome(candidato):
+            return candidato
+
+        for j in range(i + 1, min(i + 5, len(linhas))):
+            candidato = limpar_nome(linhas[j])
+
+            if parece_nome(candidato):
+                return candidato
+
+    # 3. REGISTRO CIVIL
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
+
+        if "REGISTRO CIVIL" not in n:
+            continue
+
+        resto = re.sub(
+            r"(?i).*REGISTRO\s+CIVIL\s*[:\-]*",
+            "",
+            linha
+        ).strip()
+
+        candidato = limpar_nome(resto)
+
+        if parece_nome(candidato):
+            return candidato
+
+        for j in range(i + 1, min(i + 4, len(linhas))):
+            candidato = limpar_nome(linhas[j])
+
+            if parece_nome(candidato):
+                return candidato
+
+    # 4. Fallback: nome válido imediatamente antes do CPF.
+    indice_cpf = None
+
+    for i, linha in enumerate(linhas):
+        if "CPF" in normalizar_texto(linha):
+            indice_cpf = i
+            break
+
+    if indice_cpf is not None:
+        candidatos = []
+
+        for j in range(max(0, indice_cpf - 8), indice_cpf):
+            candidato = limpar_nome(linhas[j])
+
+            if parece_nome(candidato):
+                candidatos.append(candidato)
+
+        if candidatos:
+            return candidatos[-1]
+
+    return ""
+
+
+def extrair_nome_mae(
+    texto,
+    nome_pessoa=""
+):
+    """
+    Extrai o nome da mãe por rótulo explícito ou pelo bloco de filiação.
+    Não inventa mãe quando não houver evidência suficiente.
+    """
+    linhas = obter_linhas(texto)
+    nome_pessoa_norm = normalizar_texto(nome_pessoa)
+
+    # 1. Rótulo explícito MÃE / NOME DA MÃE
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
+
+        if not (
+            "NOME DA MAE" in n
+            or re.search(r"\bMAE\b", n)
+        ):
+            continue
+
+        resto = re.sub(
+            r"(?i).*?(?:NOME\s+DA\s+M[AÃ]E|M[AÃ]E)\s*[:\-]*",
+            "",
+            linha
+        ).strip()
+
+        candidato = limpar_nome(resto)
+
+        if (
+            parece_nome(candidato)
+            and normalizar_texto(candidato) != nome_pessoa_norm
+        ):
+            return candidato
+
+        for j in range(i + 1, min(i + 4, len(linhas))):
+            candidato = limpar_nome(linhas[j])
+
+            if (
+                parece_nome(candidato)
+                and normalizar_texto(candidato) != nome_pessoa_norm
+            ):
+                return candidato
+
+    # 2. FILIAÇÃO: normalmente pai e mãe em sequência.
+    for i, linha in enumerate(linhas):
+        if "FILIACAO" not in normalizar_texto(linha):
+            continue
+
+        nomes = []
+
+        resto = re.sub(
+            r"(?i).*FILI[AÇC][AÃA]O\s*[:\-]*",
+            "",
+            linha
+        ).strip()
+
+        for parte in re.split(r"\s{2,}|[|;]", resto):
+            candidato = limpar_nome(parte)
+
+            if (
+                parece_nome(candidato)
+                and normalizar_texto(candidato) != nome_pessoa_norm
+                and candidato not in nomes
+            ):
+                nomes.append(candidato)
+
+        for j in range(i + 1, min(i + 10, len(linhas))):
+            linha_j = linhas[j]
+            nj = normalizar_texto(linha_j)
+
+            if contem_algum(
+                nj,
+                [
+                    "DATA NASCIMENTO",
+                    "DATA DE NASCIMENTO",
+                    "NASCIMENTO",
+                    "NATURALIDADE",
+                    "ORGAO EXPEDIDOR",
+                    "DATA EXPEDICAO",
+                    "DATA DE EXPEDICAO",
+                    "VALIDADE",
+                    "ASSINATURA"
+                ]
+            ):
+                break
+
+            candidato = limpar_nome(linha_j)
+
+            if not parece_nome(candidato):
+                continue
+
+            if normalizar_texto(candidato) == nome_pessoa_norm:
+                continue
+
+            if candidato not in nomes:
+                nomes.append(candidato)
+
+        if nomes:
+            # No título eleitoral testado com RapidOCR, a filiação visual
+            # traz a mãe como primeiro nome reconhecido no bloco.
+            # Evita trocar pelo nome seguinte (frequentemente o pai).
+            return nomes[0]
+
+    # 3. OCR pode jogar os nomes da filiação antes do rótulo.
+    for i, linha in enumerate(linhas):
+        if "FILIACAO" not in normalizar_texto(linha):
+            continue
+
+        candidatos = []
+
+        for j in range(max(0, i - 5), i):
+            candidato = limpar_nome(linhas[j])
+
+            if (
+                parece_nome(candidato)
+                and normalizar_texto(candidato) != nome_pessoa_norm
+            ):
+                candidatos.append(candidato)
+
+        if len(candidatos) >= 2:
+            return candidatos[-1]
+
+    return ""
+
+
+def extrair_rg(texto):
+    """
+    Extrai RG sem confundir CPF e datas.
+    """
+    linhas = obter_linhas(texto)
+    cpf_num = somente_numeros(extrair_cpf(texto))
+
+    # 1. REGISTRO GERAL
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
+
+        if "REGISTRO GERAL" not in n:
+            continue
+
+        bloco = contexto_linhas(linhas, i, antes=0, depois=3)
+
+        bloco = re.sub(
+            r"\b\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}\b",
+            " ",
+            bloco
         )
+
+        candidatos = re.findall(
+            r"(?<!\d)\d[\d.\-\s]{4,15}\d(?!\d)",
+            bloco
+        )
+
+        for candidato in candidatos:
+            numero = somente_numeros(candidato)
+
+            if not (5 <= len(numero) <= 12):
+                continue
+
+            if numero == cpf_num:
+                continue
+
+            if len(numero) == 11 and cpf_valido(numero):
+                continue
+
+            return numero
+
+    # 2. Rótulo RG isolado
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
+
+        if not re.search(r"\bRG\b", n):
+            continue
+
+        # Evita interpretar "ÓRGÃO" como RG.
+        if "ORGAO" in n and not re.search(r"(^|\s)RG(\s|$|[:\-])", n):
+            continue
+
+        bloco = contexto_linhas(linhas, i, antes=0, depois=2)
+
+        bloco = re.sub(
+            r"\b\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}\b",
+            " ",
+            bloco
+        )
+
+        candidatos = re.findall(
+            r"(?<!\d)\d{5,12}(?!\d)",
+            bloco
+        )
+
+        for numero in candidatos:
+            if numero == cpf_num:
+                continue
+
+            if len(numero) == 11 and cpf_valido(numero):
+                continue
+
+            return numero
+
+    return ""
+
+
+def pontuar_titulo(
+    texto,
+    inicio,
+    fim
+):
+    """
+    Pontua candidato de 12 dígitos
+    pelo contexto ao redor.
+    """
+
+    contexto = normalizar_texto(
+        texto[
+            max(
+                0,
+                inicio - 100
+            ):
+            min(
+                len(texto),
+                fim + 100
+            )
+        ]
+    )
+
+    pontos = 0
+
+    for termo, peso in [
+        ("INSCRICAO", 5),
+        ("TITULO ELEITORAL", 5),
+        ("JUSTICA ELEITORAL", 4),
+        ("ZONA", 3),
+        ("SECAO", 3),
+        ("ELEITOR", 2),
+    ]:
+        if termo in contexto:
+            pontos += peso
+
+    return pontos
+
+
+def extrair_titulo(texto):
+    """
+    Extrai título eleitoral de 12 dígitos.
+    Aceita também OCR com espaços ou separadores entre os algarismos.
+    """
+    texto = str(texto or "")
+    linhas = obter_linhas(texto)
+    candidatos = []
+
+    # 1. Procura perto de INSCRIÇÃO.
+    for i, linha in enumerate(linhas):
+        if "INSCRICAO" not in normalizar_texto(linha):
+            continue
+
+        bloco = contexto_linhas(linhas, i, antes=1, depois=4)
+
+        for match in re.finditer(
+            r"(?<!\d)(?:\d[\s|.\-]*){12}(?!\d)",
+            bloco
+        ):
+            numero = somente_numeros(match.group())
+
+            if len(numero) == 12:
+                candidatos.append((100, numero))
+
+    # 2. Procura qualquer sequência exata de 12 dígitos e pontua contexto.
+    for match in re.finditer(
+        r"(?<!\d)\d{12}(?!\d)",
+        texto
+    ):
+        numero = match.group()
+
+        pontos = pontuar_titulo(
+            texto,
+            match.start(),
+            match.end()
+        )
+
+        candidatos.append((pontos, numero))
 
     if not candidatos:
         return ""
@@ -395,514 +943,370 @@ def extrair_nome(blocos):
         reverse=True
     )
 
-    return candidatos[0][1]
+    melhor_pontos, melhor = candidatos[0]
+
+    if melhor_pontos < 3:
+        return ""
+
+    return melhor
+
+
+def extrair_zona_secao(
+    texto,
+    titulo=""
+):
+    """
+    Extrai zona e seção pelo rótulo e, se necessário,
+    usa o título eleitoral como âncora.
+    """
+    linhas = obter_linhas(texto)
+    zona = ""
+    secao = ""
+
+    # 1. Rótulos diretos
+    for i, linha in enumerate(linhas):
+        n = normalizar_texto(linha)
+
+        if "ZONA" not in n and "SECAO" not in n:
+            continue
+
+        bloco = contexto_linhas(
+            linhas,
+            i,
+            antes=0,
+            depois=3
+        )
+
+        if not zona:
+            mz = re.search(
+                r"(?i)\bZONA\b[^0-9]{0,30}(\d{1,3})",
+                bloco
+            )
+
+            if mz:
+                zona = mz.group(1).zfill(3)
+
+        if not secao:
+            ms = re.search(
+                r"(?i)SE[CÇ][AÃ]O[^0-9]{0,30}(\d{1,4})",
+                bloco
+            )
+
+            if ms:
+                secao = ms.group(1).zfill(4)
+
+        if zona and secao:
+            return zona, secao
+
+    # 2. Título como âncora
+    if titulo and (not zona or not secao):
+        texto_str = str(texto or "")
+        pos = texto_str.find(titulo)
+
+        if pos >= 0:
+            trecho = texto_str[
+                max(0, pos - 120):
+                min(len(texto_str), pos + len(titulo) + 220)
+            ]
+
+            pos_local = trecho.find(titulo)
+            depois = trecho[pos_local + len(titulo):]
+
+            # Remove datas para não capturar dia/mês/ano como zona/seção.
+            depois = re.sub(
+                r"\b\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}\b",
+                " ",
+                depois
+            )
+
+            numeros = re.findall(
+                r"(?<!\d)\d{1,4}(?!\d)",
+                depois
+            )
+
+            candidatos = []
+
+            for numero in numeros:
+                valor = int(numero)
+
+                if 0 < valor <= 9999:
+                    candidatos.append(numero)
+
+            if not zona:
+                for numero in candidatos:
+                    if len(numero) <= 3:
+                        zona = numero.zfill(3)
+                        break
+
+            if not secao and zona:
+                achou_zona = False
+
+                for numero in candidatos:
+                    if not achou_zona and numero.zfill(3) == zona:
+                        achou_zona = True
+                        continue
+
+                    if achou_zona:
+                        secao = numero.zfill(4)
+                        break
+
+    # 3. Tabela eleitoral achatada pelo OCR:
+    # nascimento + título + zona + seção
+    if not zona or not secao:
+        padrao = re.compile(
+            r"(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4})"
+            r".{0,100}?"
+            r"(\d{12})"
+            r".{0,50}?"
+            r"(\d{1,3})"
+            r".{0,50}?"
+            r"(\d{1,4})",
+            re.S
+        )
+
+        match = padrao.search(str(texto or ""))
+
+        if match:
+            titulo_encontrado = match.group(2)
+
+            if not titulo or titulo_encontrado == titulo:
+                if not zona:
+                    zona = match.group(3).zfill(3)
+
+                if not secao:
+                    secao = match.group(4).zfill(4)
+
+    return zona, secao
+
+
+def limpar_cidade(valor):
+    cidade = limpar_nome(
+        valor
+    )
+
+    cidade = re.sub(
+        r"(?i)^.*?\bMUNICIPIO\b"
+        r"(?:\s*/?\s*UF)?"
+        r"\s*",
+        "",
+        cidade
+    )
+
+    cidade = re.sub(
+        r"(?i)^.*?\bNATURALIDADE\b"
+        r"\s*",
+        "",
+        cidade
+    )
+
+    cidade = re.sub(
+        r"^[RLI|]+\s+",
+        "",
+        cidade
+    )
+
+    return cidade.strip()
+
+
+def extrair_cidade(texto):
+    linhas = obter_linhas(
+        texto
+    )
+
+    # --------------------------------------------------------
+    # MUNICÍPIO / UF
+    # --------------------------------------------------------
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if "MUNICIPIO" not in (
+            normalizar_texto(
+                linha
+            )
+        ):
+            continue
+
+        bloco = contexto_linhas(
+            linhas,
+            i,
+            antes=0,
+            depois=3
+        )
+
+        # Prioridade para CIDADE / UF.
+        matches = re.findall(
+            r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s]{2,40}?)"
+            r"\s*/\s*"
+            r"([A-Z]{2})\b",
+            bloco,
+            re.I
+        )
+
+        for cidade, uf in matches:
+
+            cidade = limpar_cidade(
+                cidade
+            )
+
+            if (
+                cidade
+                and "MUNICIPIO"
+                not in normalizar_texto(
+                    cidade
+                )
+            ):
+                return cidade
+
+    # --------------------------------------------------------
+    # NATURALIDADE
+    # --------------------------------------------------------
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if "NATURALIDADE" not in (
+            normalizar_texto(
+                linha
+            )
+        ):
+            continue
+
+        bloco = contexto_linhas(
+            linhas,
+            i,
+            antes=0,
+            depois=2
+        )
+
+        match = re.search(
+            r"(?i)"
+            r"NATURALIDADE"
+            r"[^A-Za-zÀ-ÿ]{0,10}"
+            r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s]{2,35}?)"
+            r"\s*[-/]\s*"
+            r"([A-Z]{2})\b",
+            bloco
+        )
+
+        if match:
+
+            cidade = limpar_cidade(
+                match.group(1)
+            )
+
+            if cidade:
+                return cidade
+
+    return ""
 
 
 # ============================================================
 # TELEFONE
 # ============================================================
 
-def formatar_telefone(numero):
-    numero = somente_numeros(numero)
-    if len(numero) == 11:
-        return f"({numero[:2]}) {numero[2:7]}-{numero[7:]}"
-    if len(numero) == 10:
-        return f"({numero[:2]}) {numero[2:6]}-{numero[6:]}"
-    if len(numero) == 9:
-        return f"{numero[:5]}-{numero[5:]}"
-    if len(numero) == 8:
-        return f"{numero[:4]}-{numero[4:]}"
-    return numero
-
-
-def extrair_telefone(blocos, cpf, titulo):
-    cpf_num = somente_numeros(cpf)
-    titulo_num = somente_numeros(titulo)
-    candidatos = []
-
-    def adicionar(numero, valor, indice, bonus=0):
-        if len(numero) not in (8, 9, 10, 11):
-            return
-        if numero in {cpf_num, titulo_num, ""}:
-            return
-        if len(numero) == 11 and cpf_valido(numero):
-            return
-
-        if len(numero) == 8:
-            try:
-                datetime.strptime(numero, "%d%m%Y")
-                return
-            except ValueError:
-                pass
-
-        inicio = max(0, indice - 4)
-        fim = min(len(blocos), indice + 5)
-        contexto = " ".join(sem_acentos(texto(b)) for b in blocos[inicio:fim])
-        rotulo = any(t in contexto for t in
-                     ["TELEFONE", "CELULAR", "FONE", "CONTATO", "WHATS"])
-
-        pontos = confianca(blocos[indice]) * 10 + bonus
-        if rotulo:
-            pontos += 100
-        if "-" in valor:
-            pontos += 30
-        if "(" in valor or ")" in valor:
-            pontos += 25
-
-        if len(numero) == 11 and numero[2] == "9":
-            pontos += 65
-        elif len(numero) == 10 and numero[2] in "2345":
-            pontos += 30
-        elif len(numero) == 9 and numero[0] == "9":
-            pontos += 70
-        elif len(numero) == 8 and numero[0] in "2345":
-            pontos += 20
-        else:
-            pontos -= 40
-
-        if any(t in contexto for t in [
-            "CEP", "MATRICULA", "HIDROMETRO", "CONSUMO", "FATURA",
-            "INSCRICAO", "CPF", "TITULO", "ZONA", "SECAO",
-            "REGISTRO", "IDENTIDADE", "NASCIMENTO", "EMISSAO",
-            "VALIDADE", "CNS", "CTPS"
-        ]) and not rotulo:
-            pontos -= 45
-
-        if len(set(numero)) <= 3:
-            pontos -= 30
-
-        candidatos.append((pontos, numero))
-
-    for i, bloco in enumerate(blocos):
-        valor = texto(bloco)
-        adicionar(somente_numeros(valor), valor, i)
-
-    # Telefones manuscritos às vezes são quebrados em 2 ou 3 blocos.
-    for i in range(len(blocos)):
-        partes = []
-        for j in range(i, min(i + 3, len(blocos))):
-            bruto = texto(blocos[j])
-            nums = somente_numeros(bruto)
-            if not nums or len(nums) > 7:
-                break
-
-            if j > i:
-                try:
-                    a = blocos[j - 1]
-                    b = blocos[j]
-                    if a.get("pagina") != b.get("pagina"):
-                        break
-                    dx = abs(float(b["x_relativo"]) - float(a["x_relativo"]))
-                    dy = abs(float(b["y_relativo"]) - float(a["y_relativo"]))
-                    if dx > 0.18 or dy > 0.08:
-                        break
-                except Exception:
-                    pass
-
-            partes.append(nums)
-            combinado = "".join(partes)
-            if len(combinado) in (8, 9, 10, 11):
-                valor_combinado = " ".join(texto(blocos[k]) for k in range(i, j + 1))
-                adicionar(combinado, valor_combinado, i, bonus=20)
-
-    if not candidatos:
-        return ""
-
-    candidatos.sort(key=lambda item: item[0], reverse=True)
-    pontos, numero = candidatos[0]
-
-    if pontos < 60:
-        return ""
-
-    return formatar_telefone(numero)
-
-
-# ============================================================
-# ZONA / SEÇÃO
-# ============================================================
-
-def extrair_zona_secao(blocos, indice_titulo):
+def extrair_telefone(texto):
     """
-    Extrai ZONA e SEÇÃO sem depender de layout fixo.
+    Não aceita qualquer sequência de 10/11
+    dígitos como telefone.
 
-    Estratégia:
-    1) procura os rótulos ZONA e SEÇÃO em toda a página;
-    2) aceita o número imediatamente antes OU depois do rótulo;
-    3) dá preferência aos candidatos próximos ao TÍTULO ELEITORAL;
-    4) evita confundir data, CPF, título e números longos.
+    Isso evita transformar CPF, título, RG,
+    MRZ etc. em telefone.
     """
 
-    def numero_curto(indice, max_digitos):
-        if indice < 0 or indice >= len(blocos):
-            return None
-
-        valor = somente_numeros(texto(blocos[indice]))
-
-        if not valor:
-            return None
-
-        if not (1 <= len(valor) <= max_digitos):
-            return None
-
-        return valor
-
-    def distancia_titulo(indice):
-        if indice_titulo is None:
-            return 999
-        return abs(indice - indice_titulo)
-
-    zona_candidatos = []
-    secao_candidatos = []
+    texto = str(
+        texto or ""
+    )
 
     # --------------------------------------------------------
-    # 1) RÓTULOS EXPLÍCITOS
+    # Mais confiável: (82) 99999-9999
     # --------------------------------------------------------
 
-    for indice, bloco in enumerate(blocos):
-        normal = sem_acentos(texto(bloco))
-        comp = compacto(texto(bloco))
+    padrao = re.compile(
+        r"\("
+        r"(\d{2})"
+        r"\)"
+        r"\s*"
+        r"(\d{4,5})"
+        r"[\s.\-]*"
+        r"(\d{4})"
+    )
 
-        eh_zona = (
-            normal == "ZONA"
-            or "ZONA" in normal
-            or comp == "ZONA"
+    for match in padrao.finditer(
+        texto
+    ):
+        ddd = match.group(1)
+        p1 = match.group(2)
+        p2 = match.group(3)
+
+        numero = (
+            ddd
+            + p1
+            + p2
         )
 
-        eh_secao = (
-            normal == "SECAO"
-            or "SECAO" in normal
-            or comp == "SECAO"
-        )
-
-        if eh_zona:
-            # OCR pode devolver o valor antes ou depois do rótulo.
-            for deslocamento in [-1, 1, -2, 2, -3, 3, -4, 4]:
-                j = indice + deslocamento
-                numero = numero_curto(j, 3)
-
-                if numero is None:
-                    continue
-
-                pontos = 100
-                pontos -= abs(deslocamento) * 8
-                pontos -= distancia_titulo(j) * 2
-                pontos += confianca(blocos[j]) * 10
-
-                zona_candidatos.append(
-                    (pontos, j, numero)
-                )
-
-        if eh_secao:
-            for deslocamento in [-1, 1, -2, 2, -3, 3, -4, 4]:
-                j = indice + deslocamento
-                numero = numero_curto(j, 4)
-
-                if numero is None:
-                    continue
-
-                pontos = 100
-                pontos -= abs(deslocamento) * 8
-                pontos -= distancia_titulo(j) * 2
-                pontos += confianca(blocos[j]) * 10
-
-                secao_candidatos.append(
-                    (pontos, j, numero)
-                )
-
-    # --------------------------------------------------------
-    # 2) FALLBACK: REGIÃO DO TÍTULO
-    # --------------------------------------------------------
-    # Em vários títulos o OCR reconhece:
-    #
-    # TITULO ...
-    # nascimento
-    # número do título
-    # zona
-    # seção
-    #
-    # mas pode falhar justamente nos rótulos.
-    # Por isso analisamos números curtos perto do título.
-    # --------------------------------------------------------
-
-    if indice_titulo is not None:
-
-        inicio = max(0, indice_titulo - 6)
-        fim = min(len(blocos), indice_titulo + 10)
-
-        curtos = []
-
-        for j in range(inicio, fim):
-            if j == indice_titulo:
-                continue
-
-            valor_original = texto(blocos[j])
-            numero = somente_numeros(valor_original)
-
-            if not numero:
-                continue
-
-            # Ignora datas e números longos.
-            if "/" in valor_original:
-                continue
-
-            if 1 <= len(numero) <= 4:
-                curtos.append(
-                    (
-                        j,
-                        numero,
-                        abs(j - indice_titulo),
-                        confianca(blocos[j])
-                    )
-                )
-
-        # Zona normalmente tem até 3 dígitos.
-        if not zona_candidatos:
-            for j, numero, distancia, conf in curtos:
-                if len(numero) <= 3:
-                    pontos = 40
-                    pontos -= distancia * 3
-                    pontos += conf * 10
-
-                    zona_candidatos.append(
-                        (pontos, j, numero)
-                    )
-
-        # Seção normalmente tem até 4 dígitos.
-        if not secao_candidatos:
-            for j, numero, distancia, conf in curtos:
-                if len(numero) <= 4:
-                    pontos = 35
-                    pontos -= distancia * 3
-                    pontos += conf * 10
-
-                    secao_candidatos.append(
-                        (pontos, j, numero)
-                    )
-
-    # --------------------------------------------------------
-    # ESCOLHER MELHORES
-    # --------------------------------------------------------
-
-    zona = ""
-    secao = ""
-    indice_zona = None
-
-    if zona_candidatos:
-        zona_candidatos.sort(
-            key=lambda item: item[0],
-            reverse=True
-        )
-
-        _, indice_zona, zona = zona_candidatos[0]
-
-    if secao_candidatos:
-        # Evita usar exatamente o mesmo bloco escolhido como zona,
-        # quando houver outro candidato plausível para seção.
-        diferentes = [
-            item
-            for item in secao_candidatos
-            if item[1] != indice_zona
-        ]
-
-        lista = (
-            diferentes
-            if diferentes
-            else secao_candidatos
-        )
-
-        lista.sort(
-            key=lambda item: item[0],
-            reverse=True
-        )
-
-        _, _, secao = lista[0]
-
-    # Mantém zeros à esquerda para a planilha.
-    if zona:
-        zona = zona.zfill(3)
-
-    if secao:
-        secao = secao.zfill(4)
-
-    return zona, secao
-
-
-# ============================================================
-# RG
-# ============================================================
-
-def extrair_rg(blocos, cpf, titulo):
-    proibidos = {
-        somente_numeros(cpf),
-        somente_numeros(titulo),
-        ""
-    }
-
-    candidatos = []
-
-    for indice, bloco in enumerate(blocos):
-        valor = texto(bloco)
-        numero = somente_numeros(valor)
-
-        if not (6 <= len(numero) <= 10):
-            continue
-
-        if numero in proibidos:
-            continue
-
-        if len(numero) == 8:
-            try:
-                datetime.strptime(numero, "%d%m%Y")
-                continue
-            except ValueError:
-                pass
-
-        pontos = confianca(bloco) * 15
-
-        inicio = max(0, indice - 8)
-        fim = min(len(blocos), indice + 9)
-
-        contexto = " ".join(
-            sem_acentos(texto(b))
-            for b in blocos[inicio:fim]
-        )
-
-        if "DOC IDENTIDADE" in contexto:
-            pontos += 120
-
-        if "REGISTRO GERAL" in contexto:
-            pontos += 110
-
-        if re.search(r"RG", contexto):
-            pontos += 100
-
-        if "IDENTIDADE" in contexto:
-            pontos += 45
-
-        if any(
-            termo in contexto
-            for termo in [
-                "SSP",
-                "SCJDS",
-                "ORGAO EXPEDIDOR",
-                "ORG EXPEDIDOR",
-                "EXPEDIDOR"
-            ]
+        if len(numero) not in (
+            10,
+            11
         ):
-            pontos += 45
+            continue
 
-        if 7 <= len(numero) <= 9:
-            pontos += 25
+        return (
+            f"({ddd}) "
+            f"{p1}-{p2}"
+        )
 
-        normal_valor = sem_acentos(valor)
+    # --------------------------------------------------------
+    # Sem parênteses:
+    # só aceita perto de TELEFONE/CELULAR/FONE/WHATSAPP.
+    # --------------------------------------------------------
 
-        # Ex.: "31213766 SCJDS AL"
-        if "SSP" in normal_valor or "SCJDS" in normal_valor:
-            pontos += 80
+    linhas = obter_linhas(
+        texto
+    )
 
-        if any(
-            termo in contexto
-            for termo in [
-                "CEP",
+    for i, linha in enumerate(
+        linhas
+    ):
+        if not contem_algum(
+            linha,
+            [
                 "TELEFONE",
                 "CELULAR",
                 "FONE",
-                "MATRICULA",
-                "HIDROMETRO",
-                "CONSUMO",
-                "FATURA"
+                "WHATSAPP"
             ]
         ):
-            pontos -= 50
+            continue
 
-        candidatos.append(
-            (pontos, numero)
+        bloco = contexto_linhas(
+            linhas,
+            i,
+            antes=0,
+            depois=2
         )
 
-    if not candidatos:
-        return ""
+        match = re.search(
+            r"(?<!\d)"
+            r"(?:55\s*)?"
+            r"(\d{2})"
+            r"[\s.\-]*"
+            r"(9?\d{4})"
+            r"[\s.\-]*"
+            r"(\d{4})"
+            r"(?!\d)",
+            bloco
+        )
 
-    candidatos.sort(
-        key=lambda item: item[0],
-        reverse=True
-    )
+        if match:
+            ddd = match.group(1)
+            p1 = match.group(2)
+            p2 = match.group(3)
 
-    if candidatos[0][0] < 55:
-        return ""
-
-    return candidatos[0][1]
-
-
-# ============================================================
-# NOME DA MÃE
-# ============================================================
-
-def _nome_filiacao_valido(valor, nome_principal):
-    valor = limpar_texto(valor)
-    if not parece_nome(valor):
-        return False
-
-    normal = sem_acentos(valor)
-    if nome_principal and normal == sem_acentos(nome_principal):
-        return False
-
-    proibidos = [
-        "RESPONSAVEL", "CLIENTE", "CPF", "CNPJ", "ENDERECO",
-        "COMPANHIA", "SANEAMENTO", "CASAL", "FATURA", "CONSUMO",
-        "VENCIMENTO", "MATRICULA", "HIDROMETRO", "ASSINATURA",
-        "PORTADOR", "NACIONALIDADE", "VALIDADE", "NASCIMENTO",
-        "IDENTIDADE", "REGISTRO", "ELEITORAL", "SECRETARIA",
-        "REPUBLICA", "BRASILEIRO", "ORGAO", "EXPEDIDOR"
-    ]
-    if any(termo in normal for termo in proibidos):
-        return False
-
-    palavras = re.findall(r"[A-ZÀ-Ú]+", normal)
-    return len(palavras) >= 2
-
-
-def extrair_nome_mae(blocos, nome):
-    # Primeiro procura NOME DA MÃE / MÃE.
-    for indice, bloco in enumerate(blocos):
-        normal = sem_acentos(texto(bloco))
-        comp = compacto(texto(bloco))
-
-        if not ("NOME DA MAE" in normal or "NOMEDAMAE" in comp or normal == "MAE"):
-            continue
-
-        for j in range(indice + 1, min(indice + 12, len(blocos))):
-            candidato = texto(blocos[j])
-            if _nome_filiacao_valido(candidato, nome):
-                return candidato.upper()
-
-    # Depois usa FILIAÇÃO sem depender de coordenada fixa.
-    for indice, bloco in enumerate(blocos):
-        comp = compacto(texto(bloco))
-        if "FILIACAO" not in comp and "FILIACA" not in comp:
-            continue
-
-        nomes = []
-
-        for j in range(indice + 1, min(indice + 22, len(blocos))):
-            candidato = texto(blocos[j])
-            normal = sem_acentos(candidato)
-
-            if nomes and any(t in normal for t in [
-                "ASSINATURA", "TITULO ELEITORAL", "NOME DO ELEITOR",
-                "CPF/CNPJ", "ENDERECO DE ENTREGA", "OBSERVACOES"
-            ]):
-                break
-
-            if not _nome_filiacao_valido(candidato, nome):
-                continue
-
-            candidato = candidato.upper()
-            if sem_acentos(candidato) not in [sem_acentos(x) for x in nomes]:
-                nomes.append(candidato)
-
-            # Em CNH/RG, normalmente pai e mãe vêm nessa ordem.
-            if len(nomes) >= 2:
-                return nomes[1]
+            return (
+                f"({ddd}) "
+                f"{p1}-{p2}"
+            )
 
     return ""
 
@@ -911,369 +1315,508 @@ def extrair_nome_mae(blocos, nome):
 # ENDEREÇO
 # ============================================================
 
-def extrair_endereco(blocos):
-    tipos = [
-        "RUA ",
-        "AVENIDA ",
-        "AV ",
-        "TRAVESSA ",
-        "TV ",
-        "RODOVIA ",
-        "ESTRADA ",
-        "SITIO ",
-        "POVOADO ",
-        "LOTEAMENTO ",
-        "RESIDENCIAL ",
-        "CONJUNTO ",
-        "PRACA "
-    ]
+def extrair_endereco(texto):
+    dados = {
+        "endereco": "",
+        "numero": "",
+        "bairro": ""
+    }
 
-    for bloco in blocos:
-        valor = texto(bloco)
-        normal = sem_acentos(valor)
+    linhas = obter_linhas(
+        texto
+    )
 
-        if any(
-            normal.startswith(tipo)
-            for tipo in tipos
+    padrao_logradouro = re.compile(
+        r"\b("
+        r"RUA|"
+        r"AVENIDA|"
+        r"AV\.?|"
+        r"TRAVESSA|"
+        r"TRAV\.?|"
+        r"RODOVIA|"
+        r"ROD\.?|"
+        r"ESTRADA|"
+        r"PRACA|"
+        r"PRAÇA|"
+        r"ALAMEDA|"
+        r"LOTEAMENTO|"
+        r"CONJUNTO"
+        r")\b",
+        re.I
+    )
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if not padrao_logradouro.search(
+            linha
         ):
-            return valor.upper()
+            continue
+
+        linha_limpa = re.sub(
+            r"\s+",
+            " ",
+            linha
+        ).strip()
+
+        # Evita textos institucionais.
+        if contem_algum(
+            linha_limpa,
+            [
+                "SECRETARIA",
+                "JUSTICA ELEITORAL",
+                "REPUBLICA FEDERATIVA"
+            ]
+        ):
+            continue
+
+        match_numero = re.search(
+            r"(?:,\s*|\bN[º°O]?\s*)"
+            r"(\d+[A-Z]?)\b",
+            linha_limpa,
+            re.I
+        )
+
+        if match_numero:
+
+            dados["endereco"] = (
+                linha_limpa[
+                    :match_numero.start()
+                ]
+                .strip(" ,-;")
+                .upper()
+            )
+
+            dados["numero"] = (
+                match_numero.group(1)
+                .upper()
+            )
+
+            resto = (
+                linha_limpa[
+                    match_numero.end():
+                ]
+                .strip(" ,-;")
+            )
+
+            resto = re.split(
+                r"\bCEP\b",
+                resto,
+                maxsplit=1,
+                flags=re.I
+            )[0]
+
+            if resto:
+                dados["bairro"] = (
+                    resto.upper()
+                )
+
+        else:
+            dados["endereco"] = (
+                linha_limpa.upper()
+            )
+
+        return dados
+
+    # Procura campo ENDEREÇO explícito.
+    for i, linha in enumerate(
+        linhas
+    ):
+        if "ENDERECO" not in (
+            normalizar_texto(
+                linha
+            )
+        ):
+            continue
+
+        resto = re.sub(
+            r"(?i).*ENDERE[CÇ]O"
+            r"\s*[:\-]*",
+            "",
+            linha
+        ).strip()
+
+        if resto:
+            dados["endereco"] = (
+                resto.upper()
+            )
+
+        elif i + 1 < len(linhas):
+            dados["endereco"] = (
+                linhas[i + 1]
+                .upper()
+            )
+
+        break
+
+    return dados
+
+
+# ============================================================
+# NIS
+# ============================================================
+
+def extrair_nis(texto):
+    linhas = obter_linhas(
+        texto
+    )
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if not contem_algum(
+            linha,
+            [
+                "NIS",
+                "PIS",
+                "PASEP"
+            ]
+        ):
+            continue
+
+        bloco = contexto_linhas(
+            linhas,
+            i,
+            antes=0,
+            depois=2
+        )
+
+        candidatos = re.findall(
+            r"(?<!\d)"
+            r"\d{11}"
+            r"(?!\d)",
+            bloco
+        )
+
+        for numero in candidatos:
+            if cpf_valido(
+                numero
+            ):
+                continue
+
+            return numero
 
     return ""
 
 
 # ============================================================
-# CIDADE
+# SUS / CNS
 # ============================================================
 
-def extrair_cidade(blocos):
-    for bloco in blocos:
-        valor = texto(bloco)
-        normal = sem_acentos(valor)
+def extrair_sus(texto):
+    linhas = obter_linhas(
+        texto
+    )
 
-        # Exemplos:
-        # ARAPIRACA/AL
-        # ARAPIRACA-AL
+    for i, linha in enumerate(
+        linhas
+    ):
+        if not contem_algum(
+            linha,
+            [
+                "CNS",
+                "CARTAO SUS",
+                "CARTAO NACIONAL DE SAUDE"
+            ]
+        ):
+            continue
+
+        bloco = contexto_linhas(
+            linhas,
+            i,
+            antes=0,
+            depois=3
+        )
+
+        candidatos = re.findall(
+            r"(?<!\d)"
+            r"\d{15}"
+            r"(?!\d)",
+            bloco
+        )
+
+        if candidatos:
+            return candidatos[0]
+
+    return ""
+
+
+# ============================================================
+# DAP
+# ============================================================
+
+def extrair_dap(texto):
+    linhas = obter_linhas(
+        texto
+    )
+
+    for i, linha in enumerate(
+        linhas
+    ):
+        if "DAP" not in (
+            normalizar_texto(
+                linha
+            )
+        ):
+            continue
+
+        bloco = contexto_linhas(
+            linhas,
+            i,
+            antes=0,
+            depois=2
+        )
+
         match = re.search(
-            r"\b([A-ZÀ-Ú][A-ZÀ-Ú\s]{2,})"
-            r"[\-/]"
-            r"([A-Z]{2})\b",
-            valor.upper()
+            r"(?i)\bDAP\b"
+            r"\s*[:\-]?\s*"
+            r"([A-Z0-9./\-]{5,30})",
+            bloco
         )
 
         if match:
-            cidade = limpar_texto(
+            return (
                 match.group(1)
+                .strip()
+                .upper()
             )
 
-            if cidade:
-                return cidade.upper()
-
-        # OCR pode colar:
-        # ARAPIRACAVAL
-        if normal.endswith("AL") and len(normal) > 4:
-            candidato = re.sub(
-                r"[^A-Z]",
-                "",
-                normal
-            )
-
-            if candidato.endswith("AL"):
-                candidato = candidato[:-2]
-
-                # Evita palavras aleatórias.
-                if len(candidato) >= 4:
-                    return candidato
-
     return ""
 
 
 # ============================================================
-# EXTRATOR PRINCIPAL
+# EXTRAÇÃO UNIVERSAL
 # ============================================================
 
+def extrair_campos(texto):
+    """
+    MOTOR UNIVERSAL.
+
+    Não pergunta qual é o tipo do documento.
+
+    Procura cada campo de forma independente
+    em TODO o conteúdo recebido.
+    """
+
+    dados = resultado_vazio()
+
+    # Identificação pessoal
+    dados["cpf"] = (
+        extrair_cpf(
+            texto
+        )
+    )
+
+    dados["nome"] = (
+        extrair_nome(
+            texto
+        )
+    )
+
+    dados["data_nascimento"] = (
+        extrair_data_nascimento(
+            texto
+        )
+    )
+
+    dados["rg"] = (
+        extrair_rg(
+            texto
+        )
+    )
+
+    dados["nome_mae"] = (
+        extrair_nome_mae(
+            texto,
+            dados["nome"]
+        )
+    )
+
+    # Dados eleitorais
+    dados["titulo"] = (
+        extrair_titulo(
+            texto
+        )
+    )
+
+    (
+        dados["zona"],
+        dados["secao"]
+    ) = extrair_zona_secao(
+        texto,
+        dados["titulo"]
+    )
+
+    # Localização
+    dados["cidade"] = (
+        extrair_cidade(
+            texto
+        )
+    )
+
+    endereco = (
+        extrair_endereco(
+            texto
+        )
+    )
+
+    dados["endereco"] = (
+        endereco.get(
+            "endereco",
+            ""
+        )
+    )
+
+    dados["numero"] = (
+        endereco.get(
+            "numero",
+            ""
+        )
+    )
+
+    dados["bairro"] = (
+        endereco.get(
+            "bairro",
+            ""
+        )
+    )
+
+    # Contato
+    dados["telefone"] = (
+        extrair_telefone(
+            texto
+        )
+    )
+
+    # Outros documentos
+    dados["nis"] = (
+        extrair_nis(
+            texto
+        )
+    )
+
+    dados["sus"] = (
+        extrair_sus(
+            texto
+        )
+    )
+
+    dados["dap"] = (
+        extrair_dap(
+            texto
+        )
+    )
+
+    return dados
+
 
 # ============================================================
-# LEITURA POR RÓTULOS EXPLÍCITOS
+# COMPATIBILIDADE COM O APP ATUAL
 # ============================================================
 
-def _distancia(a, b):
-    try:
-        ax, ay = float(a["x_relativo"]), float(a["y_relativo"])
-        bx, by = float(b["x_relativo"]), float(b["y_relativo"])
-        return ((ax-bx)**2 + (ay-by)**2) ** 0.5
-    except Exception:
-        return 999.0
+def identificar_documentos(texto):
+    """
+    Mantida somente para compatibilidade
+    com chamadas antigas do app.
 
+    NÃO é utilizada para decidir como
+    os campos serão extraídos.
+    """
 
-def _eh_rotulo(valor):
-    n = sem_acentos(valor)
-    c = compacto(valor)
-    termos = [
-        "NOME DO ELEITOR", "NOMEDOELEITOR", "DATA DE NASCIMENTO",
-        "DATADENASCIMENTO", "INSCRICAO", "ZONA", "SECAO", "MUNICIPIO",
-        "FILIACAO", "CODIGO DE VALIDACAO", "CODIGODEVALIDACAO",
-        "DATA DE EMISSAO", "JUSTICA ELEITORAL", "REPUBLICA FEDERATIVA",
-        "TITULO ELEITORAL"
-    ]
-    return any(t in n or t in c for t in termos)
+    encontrados = []
 
+    texto_norm = normalizar_texto(
+        texto
+    )
 
-def _nome_forte(valor):
-    valor = limpar_texto(valor)
-    if not parece_nome(valor) or _eh_rotulo(valor):
-        return False
-    n = sem_acentos(valor)
-    proibidos = [
-        "CODIGO", "VALIDACAO", "JUSTICA", "ELEITORAL", "REPUBLICA",
-        "FEDERATIVA", "BRASIL", "ORIENTACOES", "TRIBUNAL", "INTERNET",
-        "MUNICIPIO", "BIOMETRIA", "ELEITOR", "ELEITORA", "TITULO"
-    ]
-    return not any(p in n for p in proibidos)
-
-
-def _perto(blocos, i, limite):
-    r = blocos[i]
-    itens = []
-    for j, b in enumerate(blocos):
-        if j == i or b.get("pagina") != r.get("pagina"):
-            continue
-        d = _distancia(r, b)
-        if d <= limite:
-            itens.append((d, j, b))
-    return sorted(itens, key=lambda x: x[0])
-
-
-def extrair_nome_rotulado(blocos):
-    for i, b in enumerate(blocos):
-        n, c = sem_acentos(texto(b)), compacto(texto(b))
-        if "NOME DO ELEITOR" not in n and "NOMEDOELEITOR" not in c:
-            continue
-        candidatos = []
-        for d, _, cand in _perto(blocos, i, 0.16):
-            v = limpar_texto(texto(cand))
-            if _nome_forte(v):
-                candidatos.append((100 - d*200, v.upper()))
-        if candidatos:
-            return max(candidatos)[1]
-    return ""
-
-
-def extrair_cidade_rotulada(blocos):
-    for i, b in enumerate(blocos):
-        n = sem_acentos(texto(b))
-        if "MUNICIPIO" not in n:
-            continue
-        candidatos = []
-        for d, _, cand in _perto(blocos, i, 0.15):
-            v = limpar_texto(texto(cand)).upper()
-            vn = sem_acentos(v)
-            if _eh_rotulo(v) or any(x in vn for x in ["CODIGO","VALIDACAO","JUSTICA","ELEITORAL"]):
-                continue
-            m = re.match(r"^\s*([A-ZÀ-Ú][A-ZÀ-Ú\s.'-]{2,}?)(?:\s*[/\-]\s*[A-Z]{2})?\s*$", v)
-            if m:
-                cidade = limpar_texto(m.group(1)).strip(" -/")
-                if len(cidade) >= 3:
-                    candidatos.append((100-d*200, cidade))
-        if candidatos:
-            return max(candidatos)[1]
-    return ""
-
-
-def extrair_zona_secao_rotuladas(blocos):
-    saida = {"ZONA": "", "SEÇÃO": ""}
-    for chave, termo in [("ZONA","ZONA"), ("SEÇÃO","SECAO")]:
-        melhores = []
-        for i, b in enumerate(blocos):
-            if termo not in sem_acentos(texto(b)):
-                continue
-            for d, _, cand in _perto(blocos, i, 0.09):
-                bruto = limpar_texto(texto(cand))
-                num = somente_numeros(bruto)
-                if not num or len(num) > 4:
-                    continue
-                # bloco deve ser essencialmente numérico
-                if len(num) < max(1, len(bruto.replace(" ","")) - 1):
-                    continue
-                pontos = 100-d*300
-                try:
-                    dx = abs(float(cand["x_relativo"])-float(b["x_relativo"]))
-                    if dx < 0.055:
-                        pontos += 35
-                except Exception:
-                    pass
-                melhores.append((pontos, num))
-        if melhores:
-            valor = max(melhores)[1]
-            saida[chave] = valor.zfill(3 if chave=="ZONA" else 4)
-    return saida["ZONA"], saida["SEÇÃO"]
-
-
-def extrair_mae_filiacao_rotulada(blocos, nome_principal):
-    for i, b in enumerate(blocos):
-        c = compacto(texto(b))
-        if "FILIACAO" not in c and "FILIACA" not in c:
-            continue
-
-        candidatos = []
-        for d, j, cand in _perto(blocos, i, 0.20):
-            v = limpar_texto(texto(cand))
-            if not _nome_filiacao_valido(v, nome_principal):
-                continue
-            try:
-                y = float(cand["y_relativo"])
-                x = float(cand["x_relativo"])
-            except Exception:
-                y, x = 9.0, 9.0
-            candidatos.append((y, x, d, v.upper()))
-
-        if candidatos:
-            # Título eleitoral não informa "pai/mãe"; no modelo testado,
-            # o primeiro nome visual da filiação é a mãe.
-            candidatos.sort(key=lambda z: (z[0], z[1]))
-            return candidatos[0][3]
-    return ""
-
-
-def extrair_dados(blocos, recuperados=None):
-
-    # Segurança: garante que estamos usando a versão correta.
-    if blocos and not isinstance(blocos[0], dict):
-        raise TypeError(
-            "O extrator V2 esperava blocos do RapidOCR, "
-            "mas recebeu textos simples."
+    if contem_algum(
+        texto_norm,
+        [
+            "TITULO ELEITORAL",
+            "JUSTICA ELEITORAL"
+        ]
+    ):
+        encontrados.append(
+            "TITULO_ELEITORAL"
         )
 
-    nome = extrair_nome(blocos)
+    if contem_algum(
+        texto_norm,
+        [
+            "REGISTRO GERAL",
+            "CARTEIRA DE IDENTIDADE",
+            "INSTITUTO DE IDENTIFICACAO",
+            "FILIACAO"
+        ]
+    ):
+        encontrados.append(
+            "IDENTIDADE"
+        )
 
-    cpf = extrair_cpf(blocos)
+    if contem_algum(
+        texto_norm,
+        [
+            "CARTEIRA NACIONAL DE HABILITACAO",
+            "HABILITACAO"
+        ]
+    ):
+        encontrados.append(
+            "CNH"
+        )
 
-    nascimento = extrair_nascimento(
-        blocos
-    )
+    if contem_algum(
+        texto_norm,
+        [
+            "CEP",
+            "ENDERECO",
+            "COMPROVANTE DE RESIDENCIA"
+        ]
+    ):
+        encontrados.append(
+            "COMPROVANTE_ENDERECO"
+        )
 
-    titulo, indice_titulo = extrair_titulo(
-        blocos
-    )
+    if not encontrados:
+        encontrados.append(
+            "DOCUMENTO_NAO_IDENTIFICADO"
+        )
 
-    zona, secao = extrair_zona_secao(
-        blocos,
-        indice_titulo
-    )
+    return encontrados
 
-    rg = extrair_rg(
-        blocos,
-        cpf,
-        titulo
-    )
 
-    nome_mae = extrair_nome_mae(
-        blocos,
-        nome
-    )
+def separar_blocos_documentos(texto):
+    """
+    Mantida para compatibilidade.
 
-    telefone = extrair_telefone(
-        blocos,
-        cpf,
-        titulo
-    )
-
-    endereco = extrair_endereco(
-        blocos
-    )
-
-    cidade = extrair_cidade(
-        blocos
-    )
-
-    # Rótulos explícitos têm prioridade sobre heurísticas genéricas.
-    nome_rotulo = extrair_nome_rotulado(blocos)
-    if nome_rotulo:
-        nome = nome_rotulo
-
-    cidade_rotulo = extrair_cidade_rotulada(blocos)
-    if cidade_rotulo:
-        cidade = cidade_rotulo
-
-    zona_rotulo, secao_rotulo = extrair_zona_secao_rotuladas(blocos)
-    if zona_rotulo:
-        zona = zona_rotulo
-    if secao_rotulo:
-        secao = secao_rotulo
-
-    mae_rotulo = extrair_mae_filiacao_rotulada(blocos, nome)
-    if mae_rotulo:
-        nome_mae = mae_rotulo
-
-    recuperados = recuperados or {}
-
-    mae_recuperada = limpar_texto(
-        recuperados.get("NOME DA MÃE", "")
-    )
-    telefone_recuperado = limpar_texto(
-        recuperados.get("TELEFONE", "")
-    )
-
-    if mae_recuperada:
-        nome_mae = mae_recuperada.upper()
-
-    if telefone_recuperado:
-        telefone = telefone_recuperado
+    O extrator universal não depende
+    desses blocos.
+    """
 
     return {
-        "NOME": nome,
-        "CPF": cpf,
-        "RG": rg,
-        "DATA DE NASCIMENTO": nascimento,
-        "NOME DA MÃE": nome_mae,
-
-        "ENDEREÇO": endereco,
-        "Nº": "",
-        "BAIRRO": "",
-        "CIDADE": cidade,
-
-        "TITULO": titulo,
-        "ZONA": zona,
-        "SEÇÃO": secao,
-
-        "TELEFONE": telefone
+        "DOCUMENTO_COMPLETO":
+            str(texto or "").strip()
     }
 
 
-# ============================================================
-# MOSTRAR RESULTADO
-# ============================================================
+def analisar_documentos(texto):
+    """
+    Interface compatível com o restante
+    do projeto.
+    """
 
-def mostrar_dados(dados):
+    return {
+        "documentos":
+            identificar_documentos(
+                texto
+            ),
 
-    print()
-    print("=" * 70)
-    print("DADOS EXTRAÍDOS")
-    print("=" * 70)
+        "blocos":
+            separar_blocos_documentos(
+                texto
+            ),
 
-    ordem = [
-        "NOME",
-        "CPF",
-        "RG",
-        "DATA DE NASCIMENTO",
-        "NOME DA MÃE",
-        "ENDEREÇO",
-        "Nº",
-        "BAIRRO",
-        "CIDADE",
-        "TITULO",
-        "ZONA",
-        "SEÇÃO",
-        "TELEFONE"
-    ]
-
-    for campo in ordem:
-        valor = dados.get(campo, "")
-
-        if not valor:
-            valor = "NÃO ENCONTRADO"
-
-        print(
-            f"{campo:<20}: {valor}"
-        )
-
-    print("=" * 70)
+        "dados":
+            extrair_campos(
+                texto
+            )
+    }
