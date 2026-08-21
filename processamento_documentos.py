@@ -564,6 +564,7 @@ def encontrar_mae_texto_digital(linhas):
 def extrair_dados_pdf_digital(
     texto
 ):
+    print("\n>>> DEBUG OCR: ENTROU EM extrair_dados_pdf_digital <<<")
     linhas = linhas_texto(
         texto
     )
@@ -1465,6 +1466,7 @@ def extrair_dados_ocr(
     texto,
     itens
 ):
+    print("\n>>> DEBUG OCR: ENTROU NO MOTOR COMPLETO DO VSCODE <<<")
     # Aqui roda EXATAMENTE a função extrair_dados do VSCode.
     dados = _MOTOR_VSCODE["extrair_dados"](itens)
 
