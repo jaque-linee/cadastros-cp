@@ -308,36 +308,7 @@ def obter_supervisores(
 
 
 # ============================================================
-# 30. CABEÇALHO
-# ============================================================
-
-col_logo, col_titulo = st.columns(
-    [1, 8],
-    vertical_alignment="center"
-)
-
-with col_logo:
-    st.image(
-        "logo_base.png",
-        width=75
-    )
-
-with col_titulo:
-    st.title(
-        "BASE"
-    )
-
-    st.caption(
-        "Sistema de Cadastros, Documentos e Relatórios"
-    )
-
-st.markdown(
-    "---"
-)
-
-
-# ============================================================
-# 31. CARREGAR BASE
+# 30. CARREGAR BASE
 # ============================================================
 
 base = carregar_base()
@@ -348,7 +319,7 @@ lista_sup, lista_sub, lista_comunidade = obter_supervisores(
 
 
 # ============================================================
-# 32. SIDEBAR
+# 31. SIDEBAR
 # ============================================================
 
 with st.sidebar:
@@ -438,10 +409,63 @@ with st.sidebar:
 
 
 # ============================================================
+# 32. CABEÇALHO
+# ============================================================
+
+# No Banco de Dados não mostramos o cabeçalho grande,
+# para deixar mais espaço para a planilha.
+
+if menu != "🗃️ Banco de Dados":
+
+    col_logo, col_titulo = st.columns(
+        [1, 8],
+        vertical_alignment="center"
+    )
+
+    with col_logo:
+        st.image(
+            "logo_base.png",
+            width=75
+        )
+
+    with col_titulo:
+        st.title(
+            "BASE"
+        )
+
+        st.caption(
+            "Sistema de Cadastros, Documentos e Relatórios"
+        )
+
+    st.markdown(
+        "---"
+    )
+
+else:
+
+    # Reduz margens somente na tela do Banco de Dados
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 0.5rem !important;
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+            padding-bottom: 0rem !important;
+            max-width: 100% !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+# ============================================================
 # 33. TELAS
 # ============================================================
 
 if menu == "📸 Envio de Documentos":
+
     exibir_tela_envio_documentos(
         base,
         supervisor,
@@ -454,7 +478,9 @@ if menu == "📸 Envio de Documentos":
         comunidade
     )
 
+
 elif menu == "✍️ Formulário Manual":
+
     exibir_tela_formulario_manual(
         base,
         WEBHOOK_URL,
@@ -462,28 +488,39 @@ elif menu == "✍️ Formulário Manual":
         sub
     )
 
+
 elif menu == "📊 Relatórios":
+
     exibir_tela_relatorios(
         base
     )
 
+
 elif menu == "🗃️ Banco de Dados":
 
-    st.subheader(
-        "🗃️ Banco de Dados"
-    )
-
-    st.caption(
-        "Planilha principal do sistema BASE"
+    st.markdown(
+        """
+        <div style="
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        ">
+            🗃️ Banco de Dados
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
     st.markdown(
         """
         <iframe
             src="https://docs.google.com/spreadsheets/d/1lA9K0T9mGUQYi9MX0PjXrpeekjXsh4PbfvYZr_BVKY4/edit?usp=sharing"
-            width="100%"
-            height="750"
-            frameborder="0">
+            style="
+                width: 100%;
+                height: 86vh;
+                border: 0;
+                display: block;
+            ">
         </iframe>
         """,
         unsafe_allow_html=True
