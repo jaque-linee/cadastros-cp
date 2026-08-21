@@ -1,9 +1,6 @@
-from extrator_documentos import extrair_dados as extrair_dados_vscode
 import re
 import io
 import gc
-import tempfile
-from pathlib import Path
 import unicodedata
 import numpy as np
 import pandas as pd
@@ -56,38 +53,25 @@ def obter_rapidocr():
     return _RAPIDOCR
 
 
-def _analisar_box(box):
+def _box_para_centro(box):
     if box is None:
-        return None
+        return 0.0, 0.0
     try:
         pontos = [(float(p[0]), float(p[1])) for p in box]
         xs = [p[0] for p in pontos]
         ys = [p[1] for p in pontos]
-        return {
-            "x_min": min(xs), "y_min": min(ys),
-            "x_max": max(xs), "y_max": max(ys),
-            "centro_x": (min(xs) + max(xs)) / 2,
-            "centro_y": (min(ys) + max(ys)) / 2,
-        }
+        return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
     except Exception:
-        return None
+        return 0.0, 0.0
 
 
-def executar_ocr_imagem(imagem, pagina=1):
+def executar_ocr_imagem(imagem):
+    """
+    OCR principal com RapidOCR.
+    Preserva o formato esperado pelo extrator atual.
+    """
     imagem = preparar_imagem(imagem)
-    largura, altura = imagem.size
-
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as arq:
-        caminho = arq.name
-
-    try:
-        imagem.save(caminho, format="PNG")
-        resultado = obter_rapidocr()(caminho)
-    finally:
-        try:
-            Path(caminho).unlink(missing_ok=True)
-        except Exception:
-            pass
+    resultado = obter_rapidocr()(np.array(imagem))
 
     textos = getattr(resultado, "txts", None) or []
     scores = getattr(resultado, "scores", None) or []
@@ -95,9 +79,9 @@ def executar_ocr_imagem(imagem, pagina=1):
 
     itens = []
 
-    for i, valor in enumerate(textos):
-        valor = str(valor or "").strip()
-        if not valor:
+    for i, texto_bruto in enumerate(textos):
+        texto = str(texto_bruto or "").strip()
+        if not texto:
             continue
 
         confianca = 0.0
@@ -108,33 +92,19 @@ def executar_ocr_imagem(imagem, pagina=1):
                 pass
 
         box = boxes[i] if i < len(boxes) else None
-        pos = _analisar_box(box)
+        x, y = _box_para_centro(box)
 
-        item = {
-            "texto": valor, "confianca": confianca, "pagina": pagina,
-            "largura_pagina": largura, "altura_pagina": altura, "box": box,
-            "x_min": None, "y_min": None, "x_max": None, "y_max": None,
-            "centro_x": None, "centro_y": None,
-            "x_relativo": None, "y_relativo": None,
-            "x": 0.0, "y": 0.0,
-        }
+        itens.append({
+            "texto": texto,
+            "confianca": confianca,
+            "x": x,
+            "y": y,
+            "box": box,
+        })
 
-        if pos:
-            item.update(pos)
-            item["x"] = pos["centro_x"]
-            item["y"] = pos["centro_y"]
-            item["x_relativo"] = pos["centro_x"] / largura if largura else None
-            item["y_relativo"] = pos["centro_y"] / altura if altura else None
-
-        itens.append(item)
-
-    itens.sort(key=lambda item: (
-        item.get("pagina", 1),
-        round((item.get("y_relativo") or 0) / 0.006),
-        item.get("x_relativo") or 0,
-    ))
-
+    itens.sort(key=lambda item: (round(item["y"] / 20), item["x"]))
     texto = "\n".join(item["texto"] for item in itens)
+
     gc.collect()
     return texto, itens
 
@@ -316,8 +286,7 @@ def executar_ocr_pdf(arquivo):
         )
 
         texto, itens = executar_ocr_imagem(
-            imagem,
-            pagina=numero_pagina + 1
+            imagem
         )
 
         if texto:
@@ -383,6 +352,28 @@ def ler_documento(arquivo):
     imagem = Image.open(arquivo)
 
     texto, itens = executar_ocr_imagem(imagem)
+
+    # Releitura direcionada do telefone manuscrito somente se necessário.
+    telefone_ocr = encontrar_telefone_ocr(itens)
+    if not telefone_ocr:
+        telefone_ocr = recuperar_telefone_na_imagem(imagem, itens)
+
+    if telefone_ocr:
+        texto = (texto + "\nTELEFONE\n" + telefone_ocr).strip()
+        itens.append({
+            "texto": "TELEFONE",
+            "confianca": 1.0,
+            "x": 0.0,
+            "y": 0.0,
+            "box": None,
+        })
+        itens.append({
+            "texto": telefone_ocr,
+            "confianca": 1.0,
+            "x": 0.0,
+            "y": 20.0,
+            "box": None,
+        })
 
     del imagem
     gc.collect()
@@ -1171,6 +1162,163 @@ def encontrar_mae_ocr(itens):
     return ""
 
 
+
+# ============================================================
+# 21B. EXTRAÇÃO OCR - TELEFONE / RELEITURA DIRECIONADA
+# ============================================================
+
+def _formatar_telefone_ocr(numero):
+    numero = somente_numeros(numero)
+    if len(numero) == 11:
+        return f"({numero[:2]}) {numero[2:7]}-{numero[7:]}"
+    if len(numero) == 10:
+        return f"({numero[:2]}) {numero[2:6]}-{numero[6:]}"
+    if len(numero) == 9:
+        return f"{numero[:5]}-{numero[5:]}"
+    if len(numero) == 8:
+        return f"{numero[:4]}-{numero[4:]}"
+    return numero
+
+
+def encontrar_telefone_ocr(itens):
+    """Procura telefone reconhecido perto de TELEFONE/FONE/CELULAR/CONTATO/WHATS."""
+    rotulos = []
+    for item in itens:
+        r = normalizar_rotulo(item.get("texto", ""))
+        if any(t in r for t in ("TELEFONE", "CELULAR", "FONE", "CONTATO", "WHATS")):
+            rotulos.append(item)
+
+    candidatos = []
+    for item in itens:
+        bruto = str(item.get("texto", "") or "")
+        numero = somente_numeros(bruto)
+        if len(numero) not in (8, 9, 10, 11):
+            continue
+        if len(numero) == 11 and cpf_valido(numero):
+            continue
+
+        pontos = float(item.get("confianca", 0) or 0) * 20
+        if "-" in bruto:
+            pontos += 15
+        if "(" in bruto or ")" in bruto:
+            pontos += 10
+
+        if len(numero) == 11 and numero[2] == "9":
+            pontos += 45
+        elif len(numero) == 10 and numero[2] in "2345":
+            pontos += 25
+        elif len(numero) == 9 and numero[0] == "9":
+            pontos += 40
+        elif len(numero) == 8 and numero[0] in "2345":
+            pontos += 15
+        else:
+            pontos -= 20
+
+        for rotulo in rotulos:
+            dx = abs(float(item.get("x", 0)) - float(rotulo.get("x", 0)))
+            dy = float(item.get("y", 0)) - float(rotulo.get("y", 0))
+            if -80 <= dy <= 300 and dx <= 900:
+                pontos += 100 - min(70, abs(dy) * 0.15 + dx * 0.04)
+                break
+
+        candidatos.append((pontos, numero))
+
+    if not candidatos:
+        return ""
+
+    candidatos.sort(reverse=True)
+    pontos, numero = candidatos[0]
+    return _formatar_telefone_ocr(numero) if pontos >= 55 else ""
+
+
+def recuperar_telefone_na_imagem(imagem, itens):
+    """
+    Segunda passada somente quando o telefone não saiu na leitura principal.
+    Recorta a faixa próxima ao rótulo e amplia/contrasta para tentar manuscrito.
+    """
+    rotulos = []
+    for item in itens:
+        r = normalizar_rotulo(item.get("texto", ""))
+        if any(t in r for t in ("TELEFONE", "CELULAR", "FONE", "CONTATO", "WHATS")):
+            rotulos.append(item)
+
+    if not rotulos:
+        return ""
+
+    base = preparar_imagem(imagem)
+    w, h = base.size
+
+    for rotulo in rotulos:
+        x = int(float(rotulo.get("x", 0)))
+        y = int(float(rotulo.get("y", 0)))
+
+        # Área larga: telefone manuscrito pode estar à direita ou logo abaixo.
+        esquerda = max(0, x - 120)
+        topo = max(0, y - 80)
+        direita = min(w, x + 1200)
+        baixo = min(h, y + 420)
+
+        if direita <= esquerda or baixo <= topo:
+            continue
+
+        recorte = base.crop((esquerda, topo, direita, baixo))
+        escala = 2.0
+        recorte = recorte.resize(
+            (max(1, int(recorte.width * escala)), max(1, int(recorte.height * escala))),
+            Image.Resampling.LANCZOS
+        )
+        recorte = ImageOps.grayscale(recorte)
+        recorte = ImageOps.autocontrast(recorte)
+        recorte = ImageEnhance.Contrast(recorte).enhance(1.65)
+
+        resultado = obter_rapidocr()(np.array(recorte))
+        textos = getattr(resultado, "txts", None) or []
+        scores = getattr(resultado, "scores", None) or []
+        boxes = getattr(resultado, "boxes", None) or []
+
+        novos = []
+        for i, txt in enumerate(textos):
+            txt = str(txt or "").strip()
+            if not txt:
+                continue
+            score = float(scores[i]) if i < len(scores) else 0.0
+            box = boxes[i] if i < len(boxes) else None
+            cx, cy = _box_para_centro(box)
+            novos.append({
+                "texto": txt,
+                "confianca": score,
+                "x": cx,
+                "y": cy,
+                "box": box,
+            })
+
+        tel = encontrar_telefone_ocr(novos)
+        if tel:
+            return tel
+
+        # Fallback restrito ao recorte: aceita padrão telefônico mesmo se
+        # o rótulo ficou fora/ilegível na segunda passada.
+        melhores = []
+        for novo in novos:
+            numero = somente_numeros(novo["texto"])
+            if len(numero) in (8, 9, 10, 11):
+                if len(numero) == 11 and cpf_valido(numero):
+                    continue
+                plausivel = (
+                    (len(numero) == 11 and numero[2] == "9")
+                    or (len(numero) == 10 and numero[2] in "2345")
+                    or (len(numero) == 9 and numero[0] == "9")
+                    or (len(numero) == 8 and numero[0] in "2345")
+                )
+                if plausivel:
+                    melhores.append((novo["confianca"], numero))
+        if melhores:
+            melhores.sort(reverse=True)
+            return _formatar_telefone_ocr(melhores[0][1])
+
+    return ""
+
+
 # ============================================================
 # 22. ZONA E SEÇÃO OCR
 # ============================================================
@@ -1368,22 +1516,20 @@ def dados_digitais_suficientes(dados):
 # 24. EXTRAÇÃO GERAL
 # ============================================================
 
-def extrair_dados(texto, itens, tipo_leitura):
-    dados = extrair_dados_vscode(list(itens or []))
-    return {
-        "nome": dados.get("NOME", ""),
-        "cpf": dados.get("CPF", ""),
-        "rg": dados.get("RG", ""),
-        "data_nascimento": dados.get("DATA DE NASCIMENTO", ""),
-        "nome_mae": dados.get("NOME DA MÃE", ""),
-        "endereco": dados.get("ENDEREÇO", ""),
-        "numero": dados.get("Nº", ""),
-        "bairro": dados.get("BAIRRO", ""),
-        "cidade": dados.get("CIDADE", ""),
-        "titulo": dados.get("TITULO", ""),
-        "zona": dados.get("ZONA", ""),
-        "secao": dados.get("SEÇÃO", ""),
-        "telefone": dados.get("TELEFONE", ""),
-    }
+def extrair_dados(
+    texto,
+    itens,
+    tipo_leitura
+):
+    if (
+        tipo_leitura
+        == "PDF — texto digital"
+    ):
+        return extrair_dados_pdf_digital(
+            texto
+        )
 
-
+    return extrair_dados_ocr(
+        texto,
+        itens
+    )
