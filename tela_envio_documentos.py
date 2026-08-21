@@ -67,6 +67,19 @@ def exibir_tela_envio_documentos(
         ):
             resultados = []
 
+            # Carrega as bases concorrentes uma única vez para todo o lote.
+            consulta_bases_cruzamento = cruzamento.carregar_bases(
+                webhook_url
+            )
+
+            bases_cruzamento = (
+                consulta_bases_cruzamento.get("bases", {})
+                if consulta_bases_cruzamento.get("sucesso")
+                else {}
+            )
+
+            st.session_state["bases_cruzamento_lote"] = bases_cruzamento
+
             total = len(
                 arquivos
             )
@@ -135,14 +148,14 @@ def exibir_tela_envio_documentos(
                     titulo_cruzado = str(dados.get("titulo", "") or "").strip()
 
                     if titulo_cruzado:
-                        consulta_cruzamento = cruzamento.consultar_titulo(
-                            webhook_url,
-                            titulo_cruzado
+                        consulta_cruzamento = cruzamento.cruzar_titulo(
+                            titulo_cruzado,
+                            bases_cruzamento
                         )
-                        if consulta_cruzamento.get("sucesso"):
-                            bases_encontradas = str(
-                                consulta_cruzamento.get("texto", "") or ""
-                            ).strip()
+
+                        bases_encontradas = str(
+                            consulta_cruzamento.get("texto", "") or ""
+                        ).strip()
 
                     existente_nome = ""
                     existente_sup = ""
@@ -487,14 +500,34 @@ def exibir_tela_envio_documentos(
                     bases_atualizadas = ""
 
                     if titulo_atual_cruzamento:
-                        consulta_cruzamento = cruzamento.consultar_titulo(
-                            webhook_url,
-                            titulo_atual_cruzamento
+                        bases_cruzamento_edicao = st.session_state.get(
+                            "bases_cruzamento_lote",
+                            {}
                         )
-                        if consulta_cruzamento.get("sucesso"):
-                            bases_atualizadas = str(
-                                consulta_cruzamento.get("texto", "") or ""
-                            ).strip()
+
+                        if not bases_cruzamento_edicao:
+                            consulta_bases_edicao = cruzamento.carregar_bases(
+                                webhook_url
+                            )
+
+                            if consulta_bases_edicao.get("sucesso"):
+                                bases_cruzamento_edicao = consulta_bases_edicao.get(
+                                    "bases",
+                                    {}
+                                )
+
+                                st.session_state[
+                                    "bases_cruzamento_lote"
+                                ] = bases_cruzamento_edicao
+
+                        consulta_cruzamento = cruzamento.cruzar_titulo(
+                            titulo_atual_cruzamento,
+                            bases_cruzamento_edicao
+                        )
+
+                        bases_atualizadas = str(
+                            consulta_cruzamento.get("texto", "") or ""
+                        ).strip()
 
                     item["Bases encontradas"] = bases_atualizadas
                     item["_titulo_cruzado"] = titulo_atual_cruzamento
@@ -670,6 +703,7 @@ def exibir_tela_envio_documentos(
                 use_container_width=True
             ):
                 st.session_state.pop("resultado_lote", None)
+                st.session_state.pop("bases_cruzamento_lote", None)
 
                 # Remove apenas estados temporários dos campos do lote atual.
                 for chave in list(st.session_state.keys()):
