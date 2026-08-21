@@ -1800,11 +1800,17 @@ with st.sidebar:
 # ============================================================
 
 if menu == "📸 Envio de Documentos":
+    comunidade_atual = (
+        st.session_state.get("comunidade")
+        or st.session_state.get("comunidade_selecionada")
+        or ""
+    )
+
     exibir_tela_envio_documentos(
         base, supervisor, sub,
         ler_documento, extrair_dados,
         verificar_duplicidade, classificar_resultado,
-        WEBHOOK_URL, comunidade
+        WEBHOOK_URL, comunidade_atual
     )
 
 elif menu == "✍️ Formulário Manual":
