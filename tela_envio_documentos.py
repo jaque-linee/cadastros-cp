@@ -3,6 +3,9 @@ import pandas as pd
 import streamlit as st
 import sheets
 
+from leitor_documentos import preparar_documento
+from extrator_documentos import analisar_documentos
+
 
 
 def normalizar_telefone(valor):
@@ -83,15 +86,38 @@ def exibir_tela_envio_documentos(
                 )
 
                 try:
-                    texto, itens, tipo = ler_documento(
-                        arquivo
+                    arquivo_bytes = arquivo.getvalue()
+
+                    documento = preparar_documento(
+                        arquivo.name,
+                        arquivo_bytes
                     )
 
-                    dados = extrair_dados(
-                        texto,
-                        itens,
-                        tipo
-                    )
+                    tipo = documento.get("tipo", "")
+                    texto = documento.get("texto", "")
+
+                    # PDFs com texto digital já usam os módulos novos.
+                    if texto.strip():
+                        analise = documento.get("documentos")
+
+                        if not analise:
+                            analise = analisar_documentos(texto)
+
+                        dados = analise.get("dados", {})
+                        itens = []
+
+                    else:
+                        # Compatibilidade temporária para PDF/imagem escaneados:
+                        # mantém somente o OCR atual até isolarmos esse motor.
+                        texto, itens, tipo_antigo = ler_documento(
+                            arquivo
+                        )
+
+                        if tipo_antigo:
+                            tipo = tipo_antigo
+
+                        analise = analisar_documentos(texto)
+                        dados = analise.get("dados", {})
 
                     duplicado, existente = verificar_duplicidade(
                         dados,
