@@ -11,7 +11,7 @@ from PIL import Image
 
 MIN_CARACTERES_TEXTO_DIGITAL = 80
 
-ZOOM_PADRAO_OCR = 2.5
+ZOOM_PADRAO_OCR = 250 / 72
 
 
 # ============================================================
