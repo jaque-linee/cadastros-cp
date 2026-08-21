@@ -102,36 +102,33 @@ def exibir_tela_envio_documentos(
                 try:
                     arquivo_bytes = arquivo.getvalue()
 
+                    # Mantém preparar_documento para não alterar a estrutura
+                    # da tela, mas a EXTRAÇÃO CADASTRAL passa pelo motor OCR
+                    # fornecido pelo processamento_documentos.
                     documento = preparar_documento(
                         arquivo.name,
                         arquivo_bytes
                     )
 
                     tipo = documento.get("tipo", "")
-                    texto = documento.get("texto", "")
 
-                    # PDFs com texto digital já usam os módulos novos.
-                    if texto.strip():
-                        analise = documento.get("documentos")
+                    # IMPORTANTE:
+                    # antes, PDFs que possuíam qualquer camada de texto
+                    # desviavam do RapidOCR. Agora todos os documentos de
+                    # cadastro passam pelo mesmo ler_documento/extrair_dados.
+                    arquivo.seek(0)
+                    texto, itens, tipo_ocr = ler_documento(
+                        arquivo
+                    )
 
-                        if not analise:
-                            analise = analisar_documentos(texto)
+                    if tipo_ocr:
+                        tipo = tipo_ocr
 
-                        dados = analise.get("dados", {})
-                        itens = []
-
-                    else:
-                        # Compatibilidade temporária para PDF/imagem escaneados:
-                        # mantém somente o OCR atual até isolarmos esse motor.
-                        texto, itens, tipo_antigo = ler_documento(
-                            arquivo
-                        )
-
-                        if tipo_antigo:
-                            tipo = tipo_antigo
-
-                        analise = analisar_documentos(texto)
-                        dados = analise.get("dados", {})
+                    dados = extrair_dados(
+                        texto,
+                        itens,
+                        tipo
+                    )
 
                     duplicado, existente = verificar_duplicidade(
                         dados,
