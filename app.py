@@ -316,13 +316,25 @@ def obter_supervisores(
 # 30. CABEÇALHO
 # ============================================================
 
-st.title(
-    "BASE"
+col_logo, col_titulo = st.columns(
+    [1, 8],
+    vertical_alignment="center"
 )
 
-st.caption(
-    "Sistema de Cadastros, Documentos e Relatórios"
-)
+with col_logo:
+    st.image(
+        "logo_base.png",
+        width=75
+    )
+
+with col_titulo:
+    st.title(
+        "BASE"
+    )
+
+    st.caption(
+        "Sistema de Cadastros, Documentos e Relatórios"
+    )
 
 st.markdown(
     "---"
