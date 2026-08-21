@@ -1278,81 +1278,37 @@ def mostrar_dados(dados):
 
     print("=" * 70)
 
-
 # ============================================================
 # COMPATIBILIDADE COM O STREAMLIT
 # ============================================================
 
-CAMPOS = [
-    "nome", "cpf", "rg", "data_nascimento", "nome_mae",
-    "titulo", "zona", "secao", "endereco", "numero",
-    "bairro", "cidade", "telefone", "nis", "dap", "sus"
-]
-
-
-def resultado_vazio():
-    return {campo: "" for campo in CAMPOS}
-
-
-def converter_para_streamlit(dados):
-    """Converte a saída do motor do VSCode para as chaves usadas pelo app."""
+def converter_dados_streamlit(dados):
     return {
         "nome": dados.get("NOME", ""),
         "cpf": dados.get("CPF", ""),
         "rg": dados.get("RG", ""),
         "data_nascimento": dados.get("DATA DE NASCIMENTO", ""),
         "nome_mae": dados.get("NOME DA MÃE", ""),
-        "titulo": dados.get("TITULO", ""),
-        "zona": dados.get("ZONA", ""),
-        "secao": dados.get("SEÇÃO", ""),
         "endereco": dados.get("ENDEREÇO", ""),
         "numero": dados.get("Nº", ""),
         "bairro": dados.get("BAIRRO", ""),
         "cidade": dados.get("CIDADE", ""),
+        "titulo": dados.get("TITULO", ""),
+        "zona": dados.get("ZONA", ""),
+        "secao": dados.get("SEÇÃO", ""),
         "telefone": dados.get("TELEFONE", ""),
-        "nis": "",
-        "dap": "",
-        "sus": "",
+        "nis": "", "dap": "", "sus": "",
     }
 
 
-def extrair_campos_blocos(blocos, recuperados=None):
-    """Entrada oficial do Streamlit para o motor RapidOCR do VSCode."""
-    return converter_para_streamlit(
-        extrair_dados(blocos, recuperados=recuperados)
-    )
+def extrair_dados_streamlit(blocos):
+    return converter_dados_streamlit(extrair_dados(blocos))
 
 
-def identificar_documentos(texto_bruto):
-    normal = sem_acentos(texto_bruto)
-    encontrados = []
-    if "TITULO" in normal or "ELEITORAL" in normal:
-        encontrados.append("TITULO_ELEITORAL")
-    if "IDENTIDADE" in normal or "REGISTRO GERAL" in normal:
-        encontrados.append("IDENTIDADE")
-    if "HABILITACAO" in normal:
-        encontrados.append("CNH")
-    if "ENDERECO" in normal or "CEP" in normal:
-        encontrados.append("COMPROVANTE_ENDERECO")
-    return encontrados or ["DOCUMENTO_NAO_IDENTIFICADO"]
-
-
-def separar_blocos_documentos(texto_bruto):
-    return {"DOCUMENTO_COMPLETO": str(texto_bruto or "").strip()}
-
-
-def analisar_documentos(texto_bruto, blocos=None):
-    """
-    Compatibilidade com chamadas antigas.
-    Quando os blocos RapidOCR forem fornecidos, usa o mesmo motor do VSCode.
-    """
-    if blocos:
-        dados = extrair_campos_blocos(blocos)
-    else:
-        dados = resultado_vazio()
-
+def analisar_documentos(texto):
+    # Mantido apenas para não quebrar imports antigos do app.
     return {
-        "documentos": identificar_documentos(texto_bruto),
-        "blocos": separar_blocos_documentos(texto_bruto),
-        "dados": dados,
+        "documentos": [],
+        "blocos": {},
+        "dados": {}
     }
