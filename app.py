@@ -1665,6 +1665,8 @@ def obter_supervisores(
         "SEM SUBSUPERVISOR"
     ]
 
+    comunidades = []
+
     for item in base:
         sup = str(
             item.get(
@@ -1676,6 +1678,13 @@ def obter_supervisores(
         sub = str(
             item.get(
                 "subsupervisor",
+                ""
+            )
+        ).strip().upper()
+
+        comunidade = str(
+            item.get(
+                "comunidade",
                 ""
             )
         ).strip().upper()
@@ -1696,12 +1705,23 @@ def obter_supervisores(
                 sub
             )
 
+        if (
+            comunidade
+            and comunidade not in comunidades
+        ):
+            comunidades.append(
+                comunidade
+            )
+
     return (
         sorted(
             supervisores
         ),
         sorted(
             subs
+        ),
+        sorted(
+            comunidades
         )
     )
 
@@ -1729,7 +1749,7 @@ st.markdown(
 
 base = carregar_base()
 
-lista_sup, lista_sub = obter_supervisores(
+lista_sup, lista_sub, lista_comunidade = obter_supervisores(
     base
 )
 
