@@ -5,6 +5,9 @@ import pandas as pd
 import streamlit.components.v1 as components
 
 import relatorios
+import sheets
+
+WEBHOOK_URL = st.secrets["WEBHOOK_URL"]
 
 
 def exibir_tela_relatorios(base):
