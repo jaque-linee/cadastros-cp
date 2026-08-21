@@ -168,11 +168,6 @@ def verificar_duplicidade(
 
 # ============================================================
 # 27. REGRA DE DADOS MÍNIMOS
-#
-# Nome
-# + nascimento
-# + nome da mãe
-# + CPF OU título
 # ============================================================
 
 def verificar_dados_minimos(
@@ -366,7 +361,8 @@ with st.sidebar:
         [
             "📸 Envio de Documentos",
             "✍️ Formulário Manual",
-            "📊 Relatórios"
+            "📊 Relatórios",
+            "🗃️ Banco de Dados"
         ]
     )
 
@@ -374,7 +370,10 @@ with st.sidebar:
     sub = ""
     comunidade = ""
 
-    if menu != "📊 Relatórios":
+    if menu not in [
+        "📊 Relatórios",
+        "🗃️ Banco de Dados"
+    ]:
         st.markdown(
             "---"
         )
@@ -466,4 +465,26 @@ elif menu == "✍️ Formulário Manual":
 elif menu == "📊 Relatórios":
     exibir_tela_relatorios(
         base
+    )
+
+elif menu == "🗃️ Banco de Dados":
+
+    st.subheader(
+        "🗃️ Banco de Dados"
+    )
+
+    st.caption(
+        "Planilha principal do sistema BASE"
+    )
+
+    st.markdown(
+        """
+        <iframe
+            src="https://docs.google.com/spreadsheets/d/1lA9K0T9mGUQYi9MX0PjXrpeekjXsh4PbfvYZr_BVKY4/edit?usp=sharing"
+            width="100%"
+            height="750"
+            frameborder="0">
+        </iframe>
+        """,
+        unsafe_allow_html=True
     )
