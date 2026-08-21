@@ -107,7 +107,7 @@ def exibir_tela_relatorios(base):
                     coluna_imprimir, coluna_pdf = st.columns(2)
 
                     with coluna_imprimir:
-                        pdf_base64 = base64.b64encode(pdf_relatorio).decode("utf-8")
+                        pdf_base64 = __import__("base64").b64encode(pdf_relatorio).decode("utf-8")
                         components.html(
                             f"""
                             <button onclick="imprimirPDFNome()" style="width:100%;height:38px;background:#0056b3;color:white;border:2px solid #0056b3;border-radius:12px;font-weight:bold;cursor:pointer;font-family:sans-serif;">🖨️ Imprimir</button>
@@ -276,7 +276,7 @@ def exibir_tela_relatorios(base):
                     coluna_imprimir, coluna_pdf = st.columns(2)
 
                     with coluna_imprimir:
-                        pdf_base64_zona = base64.b64encode(pdf_relatorio_zona).decode("utf-8")
+                        pdf_base64_zona = __import__("base64").b64encode(pdf_relatorio_zona).decode("utf-8")
                         components.html(
                             f"""
                             <button onclick="imprimirPDFZona()" style="width:100%;height:38px;background:#0056b3;color:white;border:2px solid #0056b3;border-radius:12px;font-weight:bold;cursor:pointer;font-family:sans-serif;">🖨️ Imprimir</button>
@@ -424,7 +424,7 @@ def exibir_tela_relatorios(base):
                     coluna_imprimir, coluna_pdf = st.columns(2)
 
                     with coluna_imprimir:
-                        pdf_base64_domicilio = base64.b64encode(pdf_relatorio_domicilio).decode("utf-8")
+                        pdf_base64_domicilio = __import__("base64").b64encode(pdf_relatorio_domicilio).decode("utf-8")
                         components.html(
                             f"""
                             <button onclick="imprimirPDFDomicilio()" style="width:100%;height:38px;background:#0056b3;color:white;border:2px solid #0056b3;border-radius:12px;font-weight:bold;cursor:pointer;font-family:sans-serif;">🖨️ Imprimir</button>
@@ -618,7 +618,7 @@ def exibir_tela_relatorios(base):
                         coluna_imprimir, coluna_pdf = st.columns(2)
 
                         with coluna_imprimir:
-                            pdf_base64_cruzamentos = base64.b64encode(pdf_cruzamentos).decode("utf-8")
+                            pdf_base64_cruzamentos = __import__("base64").b64encode(pdf_cruzamentos).decode("utf-8")
                             components.html(
                                 f"""
                                 <button onclick="imprimirPDFCruzamentos()" style="width:100%;height:38px;background:#0056b3;color:white;border:2px solid #0056b3;border-radius:12px;font-weight:bold;cursor:pointer;font-family:sans-serif;">🖨️ Imprimir</button>
