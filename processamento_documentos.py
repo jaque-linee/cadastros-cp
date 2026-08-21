@@ -94,15 +94,20 @@ def executar_ocr_imagem(imagem):
         box = boxes[i] if i < len(boxes) else None
         x, y = _box_para_centro(box)
 
+        largura, altura = imagem.size
         itens.append({
             "texto": texto,
             "confianca": confianca,
-            "x": x,
-            "y": y,
+            "pagina": 1,
+            "largura_pagina": largura,
+            "altura_pagina": altura,
+            "x": x, "y": y,
+            "x_relativo": (x / largura) if largura else None,
+            "y_relativo": (y / altura) if altura else None,
             "box": box,
         })
 
-    itens.sort(key=lambda item: (round(item["y"] / 20), item["x"]))
+    # Ordem original do RapidOCR, como no VSCode.
     texto = "\n".join(item["texto"] for item in itens)
 
     gc.collect()
@@ -288,6 +293,8 @@ def executar_ocr_pdf(arquivo):
         texto, itens = executar_ocr_imagem(
             imagem
         )
+        for item in itens:
+            item["pagina"] = numero_pagina + 1
 
         if texto:
             textos.append(
@@ -1439,6 +1446,79 @@ def encontrar_zona_secao_ocr(
     return zona, secao
 
 
+
+# ============================================================
+# REFORÇO ESPACIAL DO VSCODE
+# ============================================================
+def _distancia_vscode(a,b):
+    try:
+        return ((float(a["x_relativo"])-float(b["x_relativo"]))**2 +
+                (float(a["y_relativo"])-float(b["y_relativo"]))**2)**0.5
+    except Exception:
+        return 999.0
+
+def _perto_vscode(itens,i,limite):
+    r=itens[i]; achados=[]
+    for j,b in enumerate(itens):
+        if j==i or b.get("pagina")!=r.get("pagina"):
+            continue
+        d=_distancia_vscode(r,b)
+        if d<=limite:
+            achados.append((d,j,b))
+    return sorted(achados,key=lambda x:x[0])
+
+def encontrar_mae_vscode(itens,nome):
+    for i,b in enumerate(itens):
+        c=re.sub(r"[^A-Z0-9]","",normalizar_texto(b.get("texto","")))
+        if "FILIACAO" not in c and "FILIACA" not in c:
+            continue
+        candidatos=[]
+        for d,_,cand in _perto_vscode(itens,i,0.20):
+            v=limpar_valor(cand.get("texto",""))
+            if not parece_nome_pessoa(v):
+                continue
+            n=normalizar_texto(v)
+            if nome and n==normalizar_texto(nome):
+                continue
+            if any(x in n for x in ["RESPONSAVEL","CPF","CNPJ","ENDERECO","FATURA",
+                                    "NASCIMENTO","IDENTIDADE","REGISTRO","ELEITORAL",
+                                    "SECRETARIA","REPUBLICA","ORGAO","EXPEDIDOR"]):
+                continue
+            try:
+                y=float(cand["y_relativo"]); x=float(cand["x_relativo"])
+            except Exception:
+                y=x=9.0
+            candidatos.append((y,x,d,v.upper()))
+        if candidatos:
+            candidatos.sort(key=lambda z:(z[0],z[1]))
+            return candidatos[0][3]
+    return ""
+
+def encontrar_zona_secao_vscode(itens):
+    saida={"zona":"","secao":""}
+    for chave,termo in [("zona","ZONA"),("secao","SECAO")]:
+        melhores=[]
+        for i,b in enumerate(itens):
+            if termo not in normalizar_texto(b.get("texto","")):
+                continue
+            for d,_,cand in _perto_vscode(itens,i,0.09):
+                bruto=limpar_valor(cand.get("texto",""))
+                num=somente_numeros(bruto)
+                if not num or len(num)>4:
+                    continue
+                pontos=100-d*300
+                try:
+                    if abs(float(cand["x_relativo"])-float(b["x_relativo"]))<0.055:
+                        pontos+=35
+                except Exception:
+                    pass
+                melhores.append((pontos,num))
+        if melhores:
+            valor=max(melhores)[1]
+            saida[chave]=valor.zfill(3 if chave=="zona" else 4)
+    return saida["zona"],saida["secao"]
+
+
 # ============================================================
 # 23. EXTRAIR DADOS OCR
 # ============================================================
@@ -1466,11 +1546,19 @@ def extrair_dados_ocr(
     nome_mae = encontrar_mae_ocr(
         itens
     )
+    mae_vscode = encontrar_mae_vscode(itens, nome)
+    if mae_vscode:
+        nome_mae = mae_vscode
 
     zona, secao = encontrar_zona_secao_ocr(
         itens,
         titulo
     )
+    zona_vscode, secao_vscode = encontrar_zona_secao_vscode(itens)
+    if zona_vscode:
+        zona = zona_vscode
+    if secao_vscode:
+        secao = secao_vscode
 
     return {
         "nome": nome,
