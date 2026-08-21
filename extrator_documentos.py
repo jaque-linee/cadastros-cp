@@ -1283,10 +1283,15 @@ def mostrar_dados(dados):
 # ============================================================
 
 def analisar_documentos(texto_bruto):
-    linhas=[linha.strip() for linha in str(texto_bruto or "").splitlines() if linha.strip()]
-    blocos=[{"texto":linha,"confianca":1.0,"pagina":1,"largura_pagina":1,"altura_pagina":1,"box":None,"x_min":None,"y_min":None,"x_max":None,"y_max":None,"centro_x":None,"centro_y":None,"x_relativo":None,"y_relativo":None} for linha in linhas]
-    try:
-        dados=extrair_dados(blocos) if blocos else {}
-    except Exception:
-        dados={}
-    return {"documentos":[],"blocos":blocos,"dados":dados}
+    linhas = [x.strip() for x in str(texto_bruto or "").splitlines() if x.strip()]
+    blocos = [
+        {
+            "texto": linha, "confianca": 1.0, "pagina": 1,
+            "largura_pagina": 1, "altura_pagina": 1,
+            "box": None, "x_min": None, "y_min": None,
+            "x_max": None, "y_max": None, "centro_x": None,
+            "centro_y": None, "x_relativo": None, "y_relativo": None,
+        }
+        for linha in linhas
+    ]
+    return extrair_dados(blocos) if blocos else {}
