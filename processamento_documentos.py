@@ -5,8 +5,9 @@ import unicodedata
 import numpy as np
 import pandas as pd
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageEnhance
 import fitz
+from rapidocr import RapidOCR
 
 from validacoes import (
     somente_numeros,
@@ -38,53 +39,67 @@ def preparar_imagem(imagem):
             Image.Resampling.LANCZOS
         )
 
-    if imagem.width > 2000:
-        proporcao = 2000 / imagem.width
-        imagem = imagem.resize(
-            (
-                2000,
-                int(imagem.height * proporcao)
-            ),
-            Image.Resampling.LANCZOS
-        )
-
     return imagem
 
 
+_RAPIDOCR = None
+
+
+def obter_rapidocr():
+    """Carrega o RapidOCR uma única vez por processo."""
+    global _RAPIDOCR
+    if _RAPIDOCR is None:
+        _RAPIDOCR = RapidOCR()
+    return _RAPIDOCR
+
+
+def _box_para_centro(box):
+    if box is None:
+        return 0.0, 0.0
+    try:
+        pontos = [(float(p[0]), float(p[1])) for p in box]
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    except Exception:
+        return 0.0, 0.0
+
+
 def executar_ocr_imagem(imagem):
-    """OCR local com Tesseract, sem depender de easyocr."""
-    import pytesseract
-    from pytesseract import Output
-
+    """
+    OCR principal com RapidOCR.
+    Preserva o formato esperado pelo extrator atual.
+    """
     imagem = preparar_imagem(imagem)
+    resultado = obter_rapidocr()(np.array(imagem))
 
-    dados = pytesseract.image_to_data(
-        imagem,
-        lang="por",
-        config="--oem 3 --psm 11",
-        output_type=Output.DICT
-    )
+    textos = getattr(resultado, "txts", None) or []
+    scores = getattr(resultado, "scores", None) or []
+    boxes = getattr(resultado, "boxes", None) or []
 
     itens = []
 
-    for i, texto_bruto in enumerate(dados.get("text", [])):
+    for i, texto_bruto in enumerate(textos):
         texto = str(texto_bruto or "").strip()
         if not texto:
             continue
 
-        try:
-            confianca = float(dados["conf"][i])
-        except Exception:
-            confianca = -1.0
+        confianca = 0.0
+        if i < len(scores):
+            try:
+                confianca = float(scores[i])
+            except Exception:
+                pass
 
-        if confianca < 0:
-            continue
+        box = boxes[i] if i < len(boxes) else None
+        x, y = _box_para_centro(box)
 
         itens.append({
             "texto": texto,
-            "confianca": confianca / 100.0,
-            "x": float(dados["left"][i]) + float(dados["width"][i]) / 2,
-            "y": float(dados["top"][i]) + float(dados["height"][i]) / 2,
+            "confianca": confianca,
+            "x": x,
+            "y": y,
+            "box": box,
         })
 
     itens.sort(key=lambda item: (round(item["y"] / 20), item["x"]))
@@ -252,8 +267,8 @@ def executar_ocr_pdf(arquivo):
 
         pix = pagina.get_pixmap(
             matrix=fitz.Matrix(
-                1.25,
-                1.25
+                250 / 72,
+                250 / 72
             ),
             alpha=False
         )
