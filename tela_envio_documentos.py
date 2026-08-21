@@ -1,8 +1,10 @@
 import gc
+import io
 import pandas as pd
 import streamlit as st
 import sheets
 import cruzamento
+from streamlit_paste_button import paste_image_button
 
 from leitor_documentos import preparar_documento
 from extrator_documentos import analisar_documentos
@@ -44,7 +46,7 @@ def exibir_tela_envio_documentos(
         f"Subsupervisor: {sub}"
     )
 
-    arquivos = st.file_uploader(
+    arquivos_upload = st.file_uploader(
         "Selecione fotos ou PDFs",
         accept_multiple_files=True,
         type=[
@@ -55,6 +57,46 @@ def exibir_tela_envio_documentos(
         ],
         key=f"uploader_lote_{st.session_state['lote_upload_id']}"
     )
+
+    st.caption(
+        "Ou copie uma foto/print e clique abaixo para colar."
+    )
+
+    imagem_colada = paste_image_button(
+        "📋 Colar foto da área de transferência",
+        key=f"colar_foto_{st.session_state['lote_upload_id']}",
+        errors="raise"
+    )
+
+    if (
+        imagem_colada is not None
+        and imagem_colada.image_data is not None
+    ):
+        buffer_colado = io.BytesIO()
+        imagem_colada.image_data.convert("RGB").save(
+            buffer_colado,
+            format="PNG"
+        )
+        st.session_state["_imagem_colada_bytes"] = (
+            buffer_colado.getvalue()
+        )
+
+    arquivos = list(arquivos_upload or [])
+
+    bytes_imagem_colada = st.session_state.get(
+        "_imagem_colada_bytes"
+    )
+
+    if bytes_imagem_colada:
+        arquivo_colado = io.BytesIO(
+            bytes_imagem_colada
+        )
+        arquivo_colado.name = "imagem_colada.png"
+        arquivos.append(arquivo_colado)
+
+        st.success(
+            "📋 Foto colada e pronta para processar."
+        )
 
     if arquivos:
         st.info(
@@ -701,6 +743,7 @@ def exibir_tela_envio_documentos(
             ):
                 st.session_state.pop("resultado_lote", None)
                 st.session_state.pop("bases_cruzamento_lote", None)
+                st.session_state.pop("_imagem_colada_bytes", None)
 
                 # Remove apenas estados temporários dos campos do lote atual.
                 for chave in list(st.session_state.keys()):
