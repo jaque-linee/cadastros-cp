@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import re
 
+import cruzamento
+
 
 def somente_numeros(valor):
     return re.sub(r"\D", "", str(valor or ""))
@@ -27,9 +29,16 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
                     "",
 
                 "encontrado":
-                    None
+                    None,
+
+                "bases_encontradas_manual":
+                    ""
             }
         )
+
+    # Garante a chave mesmo em sessão antiga já aberta.
+    if "bases_encontradas_manual" not in st.session_state:
+        st.session_state["bases_encontradas_manual"] = ""
 
     titulo_input = st.text_input(
         "Título de Eleitor:",
@@ -73,11 +82,59 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
             encontrado
         )
 
+        # ========================================================
+        # CRUZAMENTO COM AS BASES CONCORRENTES
+        # ========================================================
+
+        bases_encontradas = ""
+
+        if titulo_input.strip():
+            consulta_bases = cruzamento.carregar_bases(
+                webhook_url
+            )
+
+            if consulta_bases.get("sucesso"):
+                resultado_cruzamento = cruzamento.cruzar_titulo(
+                    titulo_input,
+                    consulta_bases.get(
+                        "bases",
+                        {}
+                    )
+                )
+
+                bases_encontradas = str(
+                    resultado_cruzamento.get(
+                        "texto",
+                        ""
+                    )
+                    or ""
+                ).strip()
+
+        st.session_state[
+            "bases_encontradas_manual"
+        ] = bases_encontradas
+
         st.session_state.busca_realizada = (
             True
         )
 
     if st.session_state.busca_realizada:
+
+        # Mostra o cruzamento independentemente de já estar
+        # cadastrado ou não na base principal.
+        bases_manual = str(
+            st.session_state.get(
+                "bases_encontradas_manual",
+                ""
+            )
+            or ""
+        ).strip()
+
+        if bases_manual:
+            st.warning(
+                f"🎯 Cruzamento encontrado: "
+                f"{bases_manual}"
+            )
 
         if st.session_state.encontrado:
             e = st.session_state.encontrado
@@ -101,6 +158,10 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
                 )
 
                 st.session_state.titulo = ""
+
+                st.session_state[
+                    "bases_encontradas_manual"
+                ] = ""
 
                 st.rerun()
 
@@ -195,6 +256,10 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
 
                                 st.session_state.titulo = ""
 
+                                st.session_state[
+                                    "bases_encontradas_manual"
+                                ] = ""
+
                                 st.rerun()
 
                             else:
@@ -214,5 +279,3 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
     # ============================================================
     # 28. RELATÓRIOS
     # ============================================================
-
-
