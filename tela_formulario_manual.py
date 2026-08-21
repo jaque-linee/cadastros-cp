@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import re
 
-import cruzamento
+import sheets
 
 
 def somente_numeros(valor):
@@ -32,13 +32,13 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
                     None,
 
                 "bases_encontradas_manual":
-                    ""
+                    []
             }
         )
 
     # Garante a chave mesmo em sessão antiga já aberta.
     if "bases_encontradas_manual" not in st.session_state:
-        st.session_state["bases_encontradas_manual"] = ""
+        st.session_state["bases_encontradas_manual"] = []
 
     titulo_input = st.text_input(
         "Título de Eleitor:",
@@ -83,32 +83,29 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
         )
 
         # ========================================================
-        # CRUZAMENTO COM AS BASES CONCORRENTES
+        # CRUZAMENTO — MESMA FONTE USADA PELO RELATÓRIO
         # ========================================================
 
-        bases_encontradas = ""
+        bases_encontradas = []
 
-        if titulo_input.strip():
-            consulta_bases = cruzamento.carregar_bases(
-                webhook_url
+        consulta_concorrentes = sheets.carregar_concorrentes(
+            webhook_url
+        )
+
+        if consulta_concorrentes.get("sucesso"):
+            titulo_normalizado = somente_numeros(
+                titulo_input
             )
 
-            if consulta_bases.get("sucesso"):
-                resultado_cruzamento = cruzamento.cruzar_titulo(
-                    titulo_input,
-                    consulta_bases.get(
-                        "bases",
-                        {}
-                    )
-                )
+            for nome_base, titulos in consulta_concorrentes.get(
+                "dados",
+                {}
+            ).items():
 
-                bases_encontradas = str(
-                    resultado_cruzamento.get(
-                        "texto",
-                        ""
+                if titulo_normalizado in titulos:
+                    bases_encontradas.append(
+                        str(nome_base)
                     )
-                    or ""
-                ).strip()
 
         st.session_state[
             "bases_encontradas_manual"
@@ -122,18 +119,15 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
 
         # Mostra o cruzamento independentemente de já estar
         # cadastrado ou não na base principal.
-        bases_manual = str(
-            st.session_state.get(
-                "bases_encontradas_manual",
-                ""
-            )
-            or ""
-        ).strip()
+        bases_manual = st.session_state.get(
+            "bases_encontradas_manual",
+            []
+        )
 
         if bases_manual:
             st.warning(
-                f"🎯 Cruzamento encontrado: "
-                f"{bases_manual}"
+                "🎯 Cruzamento encontrado: "
+                + " | ".join(bases_manual)
             )
 
         if st.session_state.encontrado:
@@ -161,7 +155,7 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
 
                 st.session_state[
                     "bases_encontradas_manual"
-                ] = ""
+                ] = []
 
                 st.rerun()
 
@@ -258,7 +252,7 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
 
                                 st.session_state[
                                     "bases_encontradas_manual"
-                                ] = ""
+                                ] = []
 
                                 st.rerun()
 
