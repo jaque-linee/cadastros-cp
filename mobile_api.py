@@ -72,6 +72,11 @@ class ArquivoMobile:
     ):
         return self._arquivo.tell()
 
+    def getvalue(
+        self
+    ):
+        return self._arquivo.getvalue()
+
 
 # ============================================================
 # PROCESSAR FOTO
@@ -85,15 +90,17 @@ def processar_foto_mobile(
     """
     Recebe uma foto enviada pelo BASE Mobile.
 
-    Fluxo:
+    Usa exatamente o mesmo motor do sistema principal:
 
     FOTO
       ↓
     ler_documento()
       ↓
-    extrair_dados()
+    texto + itens + tipo_leitura
       ↓
-    devolve título e demais dados encontrados
+    extrair_dados(texto, itens, tipo_leitura)
+      ↓
+    dados encontrados
     """
 
     if not conteudo:
@@ -106,94 +113,96 @@ def processar_foto_mobile(
 
     try:
 
+        # ====================================================
+        # 1. PREPARAR ARQUIVO
+        # ====================================================
+
         arquivo = ArquivoMobile(
             conteudo=conteudo,
             nome=nome,
             tipo=tipo
         )
 
-        # --------------------------------------------
-        # OCR EXISTENTE
-        # --------------------------------------------
+        # ====================================================
+        # 2. USAR O MESMO LEITOR DO STREAMLIT
+        #
+        # ler_documento() retorna:
+        #
+        # texto
+        # itens
+        # tipo_leitura
+        # ====================================================
 
         resultado_leitura = ler_documento(
             arquivo
         )
 
-        # --------------------------------------------
-        # ACEITA OS FORMATOS QUE O MOTOR POSSA RETORNAR
-        # --------------------------------------------
+        # ====================================================
+        # 3. VALIDAR RETORNO
+        # ====================================================
 
-        texto = ""
-        blocos = []
-
-        if isinstance(
+        if not isinstance(
             resultado_leitura,
             tuple
         ):
+            return {
+                "sucesso": False,
+                "mensagem": (
+                    "O leitor retornou um formato inesperado."
+                ),
+                "titulo": "",
+                "dados": {}
+            }
 
-            if len(
-                resultado_leitura
-            ) >= 1:
-                texto = (
-                    resultado_leitura[0]
-                    or ""
-                )
+        if len(
+            resultado_leitura
+        ) < 3:
+            return {
+                "sucesso": False,
+                "mensagem": (
+                    "O leitor não retornou todas as "
+                    "informações necessárias."
+                ),
+                "titulo": "",
+                "dados": {}
+            }
 
-            if len(
-                resultado_leitura
-            ) >= 2:
-                blocos = (
-                    resultado_leitura[1]
-                    or []
-                )
+        # ====================================================
+        # 4. PEGAR OS 3 RETORNOS DO MOTOR
+        # ====================================================
 
-        elif isinstance(
-            resultado_leitura,
-            dict
-        ):
+        texto = (
+            resultado_leitura[0]
+            or ""
+        )
 
-            texto = (
-                resultado_leitura.get(
-                    "texto",
-                    ""
-                )
-                or ""
-            )
+        itens = (
+            resultado_leitura[1]
+            or []
+        )
 
-            blocos = (
-                resultado_leitura.get(
-                    "blocos",
-                    []
-                )
-                or []
-            )
+        tipo_leitura = (
+            resultado_leitura[2]
+            or ""
+        )
 
-        else:
-            texto = str(
-                resultado_leitura
-                or ""
-            )
+        # ====================================================
+        # 5. EXTRAIR DADOS
+        #
+        # ASSINATURA CORRETA DO SEU MOTOR:
+        #
+        # extrair_dados(
+        #     texto,
+        #     itens,
+        #     tipo_leitura
+        # )
+        # ====================================================
 
-        # --------------------------------------------
-        # EXTRAÇÃO EXISTENTE
-        # --------------------------------------------
-
-        try:
-
-            dados = extrair_dados(
-                texto,
-                blocos
-            )
-
-        except TypeError:
-
-            # Compatibilidade caso a função atual
-            # aceite somente o texto.
-
-            dados = extrair_dados(
-                texto
-            )
+        dados = extrair_dados(
+            texto,
+            itens,
+            tipo_leitura
+        )
 
         if not isinstance(
             dados,
@@ -201,9 +210,9 @@ def processar_foto_mobile(
         ):
             dados = {}
 
-        # --------------------------------------------
-        # TÍTULO
-        # --------------------------------------------
+        # ====================================================
+        # 6. NORMALIZAR TÍTULO
+        # ====================================================
 
         titulo = somente_numeros(
             dados.get(
@@ -212,9 +221,16 @@ def processar_foto_mobile(
             )
         )
 
-        # --------------------------------------------
-        # RESPOSTA
-        # --------------------------------------------
+        # ====================================================
+        # 7. GARANTIR TÍTULO NORMALIZADO NOS DADOS
+        # ====================================================
+
+        if titulo:
+            dados["titulo"] = titulo
+
+        # ====================================================
+        # 8. RESPOSTA COM TÍTULO LOCALIZADO
+        # ====================================================
 
         if titulo:
 
@@ -222,8 +238,13 @@ def processar_foto_mobile(
                 "sucesso": True,
                 "mensagem": "Título localizado.",
                 "titulo": titulo,
-                "dados": dados
+                "dados": dados,
+                "tipo_leitura": tipo_leitura
             }
+
+        # ====================================================
+        # 9. FOTO LIDA, MAS SEM TÍTULO
+        # ====================================================
 
         return {
             "sucesso": True,
@@ -232,7 +253,8 @@ def processar_foto_mobile(
                 "não foi localizado."
             ),
             "titulo": "",
-            "dados": dados
+            "dados": dados,
+            "tipo_leitura": tipo_leitura
         }
 
     except Exception as erro:
