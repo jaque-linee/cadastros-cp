@@ -30,7 +30,7 @@
             margin: 0 auto;
             padding: 26px 20px;
             border-radius: 18px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.06);
         }
 
         .logo {
@@ -124,15 +124,47 @@
             cursor: pointer;
         }
 
+        #consultar:disabled {
+            opacity: 0.6;
+        }
+
         #resultado {
             display: none;
             margin-top: 18px;
-            padding: 15px;
-            border-radius: 10px;
+            padding: 16px;
+            border-radius: 12px;
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        .sucesso {
+            background: #e8f5e9;
+            color: #1b5e20;
+            border: 1px solid #c8e6c9;
+        }
+
+        .aviso {
+            background: #fff8e1;
+            color: #7a5200;
+            border: 1px solid #ffe082;
+        }
+
+        .erro {
+            background: #fdecec;
+            color: #a12622;
+            border: 1px solid #f5c2c0;
+        }
+
+        .carregando {
             background: #e8f1fb;
             color: #164e87;
-            font-size: 14px;
-            line-height: 1.5;
+            border: 1px solid #c6daf2;
+        }
+
+        .titulo-encontrado {
+            font-size: 22px;
+            font-weight: bold;
+            margin-top: 5px;
         }
 
         .rodape {
@@ -147,162 +179,328 @@
 
 <body>
 
-    <div class="caixa">
+<div class="caixa">
 
-        <div class="logo">
-            <img
-                src="logo_base.png"
-                alt="BASE"
-                onerror="this.style.display='none'"
-            >
-        </div>
-
-        <h1>BASE</h1>
-
-        <div class="subtitulo">
-            Consulta Mobile
-        </div>
-
-
-        <div class="titulo-area">
-            📷 Consultar por foto
-        </div>
-
-        <div class="descricao">
-            Selecione uma foto do documento para realizar a consulta.
-        </div>
-
-
-        <label
-            for="foto"
-            class="seletor"
+    <div class="logo">
+        <img
+            src="logo_base.png"
+            alt="BASE"
+            onerror="this.style.display='none'"
         >
-            📷 SELECIONAR FOTO
-        </label>
+    </div>
 
-        <input
-            id="foto"
-            type="file"
-            accept="image/*"
+    <h1>BASE</h1>
+
+    <div class="subtitulo">
+        Consulta Mobile
+    </div>
+
+
+    <div class="titulo-area">
+        📷 Consultar por foto
+    </div>
+
+    <div class="descricao">
+        Selecione uma foto do documento para localizar o título.
+    </div>
+
+
+    <label
+        for="foto"
+        class="seletor"
+    >
+        📷 SELECIONAR FOTO
+    </label>
+
+    <input
+        id="foto"
+        type="file"
+        accept="image/*"
+    >
+
+
+    <div id="preview-area">
+
+        <img
+            id="preview"
+            alt="Documento selecionado"
         >
 
-
-        <div id="preview-area">
-
-            <img
-                id="preview"
-                alt="Documento selecionado"
-            >
-
-            <div
-                id="nome-arquivo"
-                class="arquivo"
-            ></div>
-
-        </div>
-
-
-        <button
-            id="consultar"
-            type="button"
-        >
-            🔎 CONSULTAR TÍTULO
-        </button>
-
-
-        <div id="resultado"></div>
-
-
-        <div class="rodape">
-            BASE • Consulta de documentos
-        </div>
+        <div
+            id="nome-arquivo"
+            class="arquivo"
+        ></div>
 
     </div>
 
 
-    <script>
-
-        var inputFoto =
-            document.getElementById("foto");
-
-        var previewArea =
-            document.getElementById("preview-area");
-
-        var preview =
-            document.getElementById("preview");
-
-        var nomeArquivo =
-            document.getElementById("nome-arquivo");
-
-        var botaoConsultar =
-            document.getElementById("consultar");
-
-        var resultado =
-            document.getElementById("resultado");
+    <button
+        id="consultar"
+        type="button"
+    >
+        🔎 CONSULTAR TÍTULO
+    </button>
 
 
-        inputFoto.addEventListener(
-            "change",
-            function () {
+    <div id="resultado"></div>
 
-                var arquivo =
-                    inputFoto.files[0];
 
-                if (!arquivo) {
+    <div class="rodape">
+        BASE • Consulta de documentos
+    </div>
+
+</div>
+
+
+<script>
+
+var API_URL =
+    "https://cadastros-cp.onrender.com/consultar";
+
+
+var inputFoto =
+    document.getElementById("foto");
+
+var previewArea =
+    document.getElementById("preview-area");
+
+var preview =
+    document.getElementById("preview");
+
+var nomeArquivo =
+    document.getElementById("nome-arquivo");
+
+var botaoConsultar =
+    document.getElementById("consultar");
+
+var resultado =
+    document.getElementById("resultado");
+
+
+inputFoto.addEventListener(
+    "change",
+    function () {
+
+        var arquivo =
+            inputFoto.files[0];
+
+        if (!arquivo) {
+            return;
+        }
+
+        nomeArquivo.innerHTML =
+            "Arquivo selecionado: " +
+            arquivo.name;
+
+
+        var leitor =
+            new FileReader();
+
+
+        leitor.onload =
+            function (evento) {
+
+                preview.src =
+                    evento.target.result;
+
+                previewArea.style.display =
+                    "block";
+
+                botaoConsultar.style.display =
+                    "block";
+
+                resultado.style.display =
+                    "none";
+            };
+
+
+        leitor.readAsDataURL(
+            arquivo
+        );
+
+    }
+);
+
+
+botaoConsultar.addEventListener(
+    "click",
+    function () {
+
+        var arquivo =
+            inputFoto.files[0];
+
+        if (!arquivo) {
+
+            mostrarResultado(
+                "erro",
+                "Selecione uma foto primeiro."
+            );
+
+            return;
+        }
+
+
+        botaoConsultar.disabled =
+            true;
+
+        botaoConsultar.innerHTML =
+            "⏳ LENDO DOCUMENTO...";
+
+
+        mostrarResultado(
+            "carregando",
+            "⏳ Enviando a foto e lendo o documento..." +
+            "<br><br>" +
+            "Na primeira consulta o servidor gratuito " +
+            "pode levar alguns segundos para iniciar."
+        );
+
+
+        var formulario =
+            new FormData();
+
+        formulario.append(
+            "foto",
+            arquivo
+        );
+
+
+        fetch(
+            API_URL,
+            {
+                method: "POST",
+                body: formulario
+            }
+        )
+
+        .then(
+            function (resposta) {
+
+                return resposta.json();
+            }
+        )
+
+        .then(
+            function (dados) {
+
+                botaoConsultar.disabled =
+                    false;
+
+                botaoConsultar.innerHTML =
+                    "🔎 CONSULTAR TÍTULO";
+
+
+                if (!dados.sucesso) {
+
+                    mostrarResultado(
+                        "erro",
+                        "❌ " +
+                        (
+                            dados.mensagem ||
+                            "Não foi possível processar a foto."
+                        )
+                    );
+
                     return;
                 }
 
 
-                nomeArquivo.innerHTML =
-                    "Arquivo selecionado: " +
-                    arquivo.name;
+                if (dados.titulo) {
+
+                    var html =
+                        "✅ <strong>Título localizado</strong>" +
+                        "<div class='titulo-encontrado'>" +
+                        dados.titulo +
+                        "</div>";
 
 
-                var leitor =
-                    new FileReader();
+                    if (
+                        dados.dados &&
+                        dados.dados.nome
+                    ) {
+
+                        html +=
+                            "<br><strong>Nome:</strong> " +
+                            escaparHTML(
+                                dados.dados.nome
+                            );
+                    }
 
 
-                leitor.onload =
-                    function (evento) {
+                    mostrarResultado(
+                        "sucesso",
+                        html
+                    );
 
-                        preview.src =
-                            evento.target.result;
+                }
 
-                        previewArea.style.display =
-                            "block";
+                else {
 
-                        botaoConsultar.style.display =
-                            "block";
+                    mostrarResultado(
+                        "aviso",
+                        "⚠️ A foto foi lida, mas o título " +
+                        "não foi localizado."
+                    );
 
-                        resultado.style.display =
-                            "none";
-                    };
+                }
+
+            }
+        )
+
+        .catch(
+            function (erro) {
+
+                botaoConsultar.disabled =
+                    false;
+
+                botaoConsultar.innerHTML =
+                    "🔎 CONSULTAR TÍTULO";
 
 
-                leitor.readAsDataURL(
-                    arquivo
+                mostrarResultado(
+                    "erro",
+                    "❌ Não foi possível conectar ao leitor do BASE." +
+                    "<br><br>" +
+                    "Tente novamente em alguns segundos."
                 );
 
             }
         );
 
+    }
+);
 
-        botaoConsultar.addEventListener(
-            "click",
-            function () {
 
-                resultado.style.display =
-                    "block";
+function mostrarResultado(
+    tipo,
+    mensagem
+) {
 
-                resultado.innerHTML =
-                    "✅ Foto recebida corretamente.<br><br>" +
-                    "O próximo passo será ligar esta tela " +
-                    "ao leitor do BASE para identificar o título.";
+    resultado.className =
+        tipo;
 
-            }
-        );
+    resultado.innerHTML =
+        mensagem;
 
-    </script>
+    resultado.style.display =
+        "block";
+}
+
+
+function escaparHTML(
+    texto
+) {
+
+    var div =
+        document.createElement("div");
+
+    div.textContent =
+        texto || "";
+
+    return div.innerHTML;
+}
+
+</script>
 
 </body>
 
