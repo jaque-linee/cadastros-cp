@@ -4,15 +4,14 @@ import gc
 
 from PIL import Image, ImageOps
 
-from processamento_documentos import (
-    ler_documento,
-    extrair_dados,
-)
-
 
 # ============================================================
 # BASE MOBILE
 # PONTE ENTRE A FOTO E O MOTOR DE LEITURA EXISTENTE
+#
+# IMPORTANTE:
+# processamento_documentos NÃO é importado aqui no topo.
+# Ele só será importado DEPOIS que a imagem estiver preparada.
 # ============================================================
 
 
@@ -30,27 +29,35 @@ def somente_numeros(valor):
 
 def preparar_imagem_mobile(
     conteudo,
-    largura_maxima=1400
+    largura_maxima=1200
 ):
     """
-    Reduz somente a imagem enviada pelo Mobile.
+    Prepara somente a foto recebida pelo Mobile.
 
-    O motor OCR continua sendo exatamente o mesmo
-    utilizado pelo sistema principal.
+    O Streamlit não usa esta função e não é alterado.
 
-    A imagem original do Streamlit não é alterada.
+    O OCR e o extrator continuam sendo os mesmos
+    do processamento_documentos.py.
     """
 
-    imagem = Image.open(
-        io.BytesIO(conteudo)
+    print(
+        "[BASE MOBILE] Preparando imagem...",
+        flush=True
     )
 
-    # Corrige orientação de fotos tiradas pelo iPhone.
+    buffer_entrada = io.BytesIO(
+        conteudo
+    )
+
+    imagem = Image.open(
+        buffer_entrada
+    )
+
+    # Corrige orientação gravada pelo iPhone/celular
     imagem = ImageOps.exif_transpose(
         imagem
     )
 
-    # Evita modos de imagem desnecessariamente pesados.
     if imagem.mode != "RGB":
         imagem = imagem.convert(
             "RGB"
@@ -67,29 +74,46 @@ def preparar_imagem_mobile(
     )
 
     # --------------------------------------------------------
-    # REDUZ APENAS SE A FOTO FOR GRANDE
+    # REDUZIR RESOLUÇÃO SOMENTE QUANDO NECESSÁRIO
     # --------------------------------------------------------
 
-    if largura > largura_maxima:
+    maior_lado = max(
+        largura,
+        altura
+    )
+
+    if maior_lado > largura_maxima:
 
         proporcao = (
             largura_maxima
-            / float(largura)
+            / float(maior_lado)
         )
 
-        nova_altura = int(
-            altura * proporcao
+        nova_largura = max(
+            1,
+            int(
+                largura * proporcao
+            )
+        )
+
+        nova_altura = max(
+            1,
+            int(
+                altura * proporcao
+            )
         )
 
         imagem = imagem.resize(
             (
-                largura_maxima,
+                nova_largura,
                 nova_altura
             ),
             Image.Resampling.LANCZOS
         )
 
-    largura_final, altura_final = imagem.size
+    largura_final, altura_final = (
+        imagem.size
+    )
 
     print(
         "[BASE MOBILE] Imagem para OCR:",
@@ -100,42 +124,55 @@ def preparar_imagem_mobile(
     )
 
     # --------------------------------------------------------
-    # CONVERTER NOVAMENTE PARA JPEG
+    # SALVAR UMA VERSÃO LEVE PARA O OCR
     # --------------------------------------------------------
 
-    buffer = io.BytesIO()
+    buffer_saida = io.BytesIO()
 
     imagem.save(
-        buffer,
+        buffer_saida,
         format="JPEG",
-        quality=88,
+        quality=85,
         optimize=True
     )
 
-    conteudo_reduzido = (
-        buffer.getvalue()
+    conteudo_preparado = (
+        buffer_saida.getvalue()
     )
 
-    imagem.close()
-    buffer.close()
+    try:
+        imagem.close()
+    except Exception:
+        pass
 
-    del imagem
-    del buffer
+    try:
+        buffer_entrada.close()
+    except Exception:
+        pass
+
+    try:
+        buffer_saida.close()
+    except Exception:
+        pass
+
+    imagem = None
+    buffer_entrada = None
+    buffer_saida = None
 
     gc.collect()
 
     print(
         "[BASE MOBILE] Foto preparada:",
-        len(conteudo_reduzido),
+        len(conteudo_preparado),
         "bytes",
         flush=True
     )
 
-    return conteudo_reduzido
+    return conteudo_preparado
 
 
 # ============================================================
-# ARQUIVO RECEBIDO PELO MOBILE
+# ARQUIVO COMPATÍVEL COM O MOTOR EXISTENTE
 # ============================================================
 
 class ArquivoMobile:
@@ -143,7 +180,7 @@ class ArquivoMobile:
     def __init__(
         self,
         conteudo,
-        nome="documento.jpg",
+        nome="mobile_ocr.jpg",
         tipo="image/jpeg"
     ):
 
@@ -199,7 +236,6 @@ class ArquivoMobile:
 
         try:
             self._arquivo.close()
-
         except Exception:
             pass
 
@@ -214,6 +250,9 @@ def processar_foto_mobile(
     tipo="image/jpeg"
 ):
 
+    arquivo = None
+    conteudo_preparado = None
+
     if not conteudo:
 
         return {
@@ -223,24 +262,11 @@ def processar_foto_mobile(
             "dados": {}
         }
 
-
-    arquivo = None
-    conteudo_preparado = None
-
-
     try:
 
         # ====================================================
-        # 1. PREPARAR A FOTO
-        #
-        # SOMENTE MOBILE.
-        # NÃO ALTERA O STREAMLIT.
+        # 1. PREPARAR FOTO ANTES DE CARREGAR O OCR
         # ====================================================
-
-        print(
-            "[BASE MOBILE] Preparando imagem...",
-            flush=True
-        )
 
         conteudo_preparado = (
             preparar_imagem_mobile(
@@ -248,18 +274,14 @@ def processar_foto_mobile(
             )
         )
 
-
-        # ====================================================
-        # 2. LIBERAR REFERÊNCIA À FOTO ORIGINAL
-        # ====================================================
-
+        # Libera a referência local à foto original
         conteudo = None
 
         gc.collect()
 
 
         # ====================================================
-        # 3. CRIAR ARQUIVO PARA O MOTOR EXISTENTE
+        # 2. CRIAR ARQUIVO LEVE
         # ====================================================
 
         arquivo = ArquivoMobile(
@@ -268,9 +290,36 @@ def processar_foto_mobile(
             tipo="image/jpeg"
         )
 
+        # A cópia de bytes já está dentro do ArquivoMobile
+        conteudo_preparado = None
+
+        gc.collect()
+
 
         # ====================================================
-        # 4. MESMO OCR DO STREAMLIT
+        # 3. SÓ AGORA IMPORTAR O MOTOR DO SISTEMA
+        #
+        # O STREAMLIT CONTINUA INALTERADO.
+        # ====================================================
+
+        print(
+            "[BASE MOBILE] Carregando motor OCR...",
+            flush=True
+        )
+
+        from processamento_documentos import (
+            ler_documento,
+            extrair_dados,
+        )
+
+        print(
+            "[BASE MOBILE] Motor OCR carregado.",
+            flush=True
+        )
+
+
+        # ====================================================
+        # 4. MESMO LER_DOCUMENTO DO STREAMLIT
         # ====================================================
 
         print(
@@ -281,7 +330,6 @@ def processar_foto_mobile(
         resultado_leitura = ler_documento(
             arquivo
         )
-
 
         print(
             "[BASE MOBILE] ler_documento() finalizado.",
@@ -344,9 +392,7 @@ def processar_foto_mobile(
 
 
         # ====================================================
-        # 7. EXTRAÇÃO
-        #
-        # CONTINUA USANDO O MESMO EXTRATOR DO STREAMLIT.
+        # 7. EXTRAIR DADOS COM O MESMO EXTRATOR
         # ====================================================
 
         print(
@@ -370,12 +416,11 @@ def processar_foto_mobile(
             dados,
             dict
         ):
-
             dados = {}
 
 
         # ====================================================
-        # 8. TÍTULO
+        # 8. NORMALIZAR TÍTULO
         # ====================================================
 
         titulo = somente_numeros(
@@ -392,6 +437,11 @@ def processar_foto_mobile(
                 "titulo"
             ] = titulo
 
+            print(
+                "[BASE MOBILE] Título localizado:",
+                titulo,
+                flush=True
+            )
 
             return {
                 "sucesso": True,
@@ -401,6 +451,11 @@ def processar_foto_mobile(
                 "tipo_leitura": tipo_leitura
             }
 
+
+        print(
+            "[BASE MOBILE] Título não localizado.",
+            flush=True
+        )
 
         return {
             "sucesso": True,
@@ -436,12 +491,10 @@ def processar_foto_mobile(
     finally:
 
         if arquivo is not None:
-
             arquivo.close()
 
-
-        conteudo_preparado = None
-        conteudo = None
         arquivo = None
+        conteudo = None
+        conteudo_preparado = None
 
         gc.collect()
