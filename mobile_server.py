@@ -1,5 +1,6 @@
 import os
 import re
+import gc
 import requests
 
 from flask import Flask, request, jsonify
@@ -38,8 +39,14 @@ def somente_numeros(valor):
     )
 
 
+def resposta_json(dados, status=200):
+    resposta = jsonify(dados)
+    resposta.headers["Cache-Control"] = "no-store"
+    return resposta, status
+
+
 # ============================================================
-# CONSULTAR UM ÚNICO TÍTULO NO GOOGLE SHEETS
+# CONSULTAR TÍTULO NO GOOGLE SHEETS
 # ============================================================
 
 def consultar_titulo_base(titulo):
@@ -59,12 +66,24 @@ def consultar_titulo_base(titulo):
             "cadastro": None
         }
 
+    print(
+        "[BASE MOBILE] Consultando título:",
+        titulo,
+        flush=True
+    )
+
     resposta = requests.get(
         WEBHOOK_URL,
         params={
             "titulo": titulo
         },
         timeout=20
+    )
+
+    print(
+        "[BASE MOBILE] Apps Script respondeu:",
+        resposta.status_code,
+        flush=True
     )
 
     resposta.raise_for_status()
@@ -76,17 +95,13 @@ def consultar_titulo_base(titulo):
         dict
     ):
         raise Exception(
-            "A consulta da BASE retornou um formato inesperado."
+            "A consulta da BASE retornou formato inesperado."
         )
 
-    if dados.get(
-        "error"
-    ):
+    if dados.get("error"):
         raise Exception(
             str(
-                dados.get(
-                    "error"
-                )
+                dados.get("error")
             )
         )
 
@@ -94,7 +109,7 @@ def consultar_titulo_base(titulo):
 
 
 # ============================================================
-# TESTE DA API
+# TESTE GERAL
 # ============================================================
 
 @app.route(
@@ -112,8 +127,156 @@ def inicio():
 
 
 # ============================================================
-# RECEBER FOTO
-# OCR + CONSULTA NA BASE
+# TESTE SIMPLES DE RECEBIMENTO DA FOTO
+#
+# NÃO FAZ OCR.
+# Serve apenas para verificar se a foto chega ao Render.
+# ============================================================
+
+@app.route(
+    "/teste-foto",
+    methods=["POST"]
+)
+def teste_foto():
+
+    try:
+
+        if "foto" not in request.files:
+
+            return resposta_json(
+                {
+                    "sucesso": False,
+                    "etapa": "recebimento",
+                    "mensagem": "Nenhuma foto recebida."
+                },
+                400
+            )
+
+        foto = request.files["foto"]
+
+        conteudo = foto.read()
+
+        tamanho = len(
+            conteudo
+        )
+
+        print(
+            "[BASE MOBILE] Foto recebida:",
+            foto.filename,
+            "-",
+            tamanho,
+            "bytes",
+            flush=True
+        )
+
+        del conteudo
+
+        gc.collect()
+
+        return resposta_json(
+            {
+                "sucesso": True,
+                "etapa": "recebimento",
+                "mensagem": "Foto recebida pelo Render.",
+                "arquivo": foto.filename,
+                "tamanho": tamanho
+            }
+        )
+
+    except Exception as erro:
+
+        print(
+            "[BASE MOBILE] ERRO TESTE FOTO:",
+            repr(erro),
+            flush=True
+        )
+
+        return resposta_json(
+            {
+                "sucesso": False,
+                "etapa": "recebimento",
+                "mensagem": str(erro)
+            },
+            500
+        )
+
+
+# ============================================================
+# TESTE DIRETO DA BASE
+#
+# Exemplo:
+# /teste-base?titulo=040787661740
+#
+# NÃO FAZ OCR.
+# ============================================================
+
+@app.route(
+    "/teste-base",
+    methods=["GET"]
+)
+def teste_base():
+
+    try:
+
+        titulo = somente_numeros(
+            request.args.get(
+                "titulo",
+                ""
+            )
+        )
+
+        if not titulo:
+
+            return resposta_json(
+                {
+                    "sucesso": False,
+                    "etapa": "base",
+                    "mensagem": "Informe um título."
+                },
+                400
+            )
+
+        consulta = consultar_titulo_base(
+            titulo
+        )
+
+        return resposta_json(
+            {
+                "sucesso": True,
+                "etapa": "base",
+                "titulo": titulo,
+                "resultado": consulta
+            }
+        )
+
+    except Exception as erro:
+
+        print(
+            "[BASE MOBILE] ERRO BASE:",
+            repr(erro),
+            flush=True
+        )
+
+        return resposta_json(
+            {
+                "sucesso": False,
+                "etapa": "base",
+                "mensagem": str(erro)
+            },
+            500
+        )
+
+
+# ============================================================
+# CONSULTA COMPLETA
+#
+# FOTO
+#   ↓
+# OCR
+#   ↓
+# TÍTULO
+#   ↓
+# GOOGLE SHEETS
 # ============================================================
 
 @app.route(
@@ -122,20 +285,29 @@ def inicio():
 )
 def consultar():
 
+    conteudo = None
+
     try:
 
         # ----------------------------------------------------
-        # VALIDAR FOTO
+        # 1. RECEBIMENTO
         # ----------------------------------------------------
+
+        print(
+            "[BASE MOBILE] ===== NOVA CONSULTA =====",
+            flush=True
+        )
 
         if "foto" not in request.files:
 
-            return jsonify(
+            return resposta_json(
                 {
                     "sucesso": False,
+                    "etapa": "recebimento",
                     "mensagem": "Nenhuma foto foi enviada."
-                }
-            ), 400
+                },
+                400
+            )
 
 
         foto = request.files[
@@ -145,12 +317,14 @@ def consultar():
 
         if not foto.filename:
 
-            return jsonify(
+            return resposta_json(
                 {
                     "sucesso": False,
+                    "etapa": "recebimento",
                     "mensagem": "Arquivo inválido."
-                }
-            ), 400
+                },
+                400
+            )
 
 
         conteudo = foto.read()
@@ -158,17 +332,35 @@ def consultar():
 
         if not conteudo:
 
-            return jsonify(
+            return resposta_json(
                 {
                     "sucesso": False,
+                    "etapa": "recebimento",
                     "mensagem": "A foto recebida está vazia."
-                }
-            ), 400
+                },
+                400
+            )
+
+
+        print(
+            "[BASE MOBILE] Foto recebida:",
+            foto.filename,
+            "-",
+            len(conteudo),
+            "bytes",
+            flush=True
+        )
 
 
         # ----------------------------------------------------
-        # OCR
+        # 2. OCR
         # ----------------------------------------------------
+
+        print(
+            "[BASE MOBILE] Iniciando OCR...",
+            flush=True
+        )
+
 
         resultado = processar_foto_mobile(
             conteudo=conteudo,
@@ -177,11 +369,44 @@ def consultar():
         )
 
 
+        print(
+            "[BASE MOBILE] OCR finalizado.",
+            flush=True
+        )
+
+
+        # Já não precisamos manter os bytes originais
+        # da foto depois do OCR.
+
+        conteudo = None
+
+        gc.collect()
+
+
+        if not isinstance(
+            resultado,
+            dict
+        ):
+
+            return resposta_json(
+                {
+                    "sucesso": False,
+                    "etapa": "ocr",
+                    "mensagem": "O OCR retornou formato inválido."
+                },
+                500
+            )
+
+
         if not resultado.get(
             "sucesso"
         ):
 
-            return jsonify(
+            resultado[
+                "etapa"
+            ] = "ocr"
+
+            return resposta_json(
                 resultado
             )
 
@@ -194,8 +419,15 @@ def consultar():
         )
 
 
+        print(
+            "[BASE MOBILE] Título lido:",
+            titulo or "NÃO LOCALIZADO",
+            flush=True
+        )
+
+
         # ----------------------------------------------------
-        # FOTO LIDA, MAS SEM TÍTULO
+        # 3. SEM TÍTULO
         # ----------------------------------------------------
 
         if not titulo:
@@ -208,17 +440,33 @@ def consultar():
                 "cadastro"
             ] = None
 
-            return jsonify(
+            resultado[
+                "etapa"
+            ] = "ocr"
+
+            return resposta_json(
                 resultado
             )
 
 
         # ----------------------------------------------------
-        # CONSULTAR SOMENTE ESTE TÍTULO NO APPS SCRIPT
+        # 4. CONSULTA AO SHEETS
         # ----------------------------------------------------
+
+        print(
+            "[BASE MOBILE] OCR OK. Iniciando consulta à BASE...",
+            flush=True
+        )
+
 
         consulta_base = consultar_titulo_base(
             titulo
+        )
+
+
+        print(
+            "[BASE MOBILE] Consulta à BASE finalizada.",
+            flush=True
         )
 
 
@@ -236,7 +484,7 @@ def consultar():
 
 
         # ----------------------------------------------------
-        # TÍTULO ENCONTRADO NA BASE
+        # 5. CADASTRADO
         # ----------------------------------------------------
 
         if (
@@ -257,11 +505,27 @@ def consultar():
 
             resultado[
                 "mensagem"
-            ] = "Título localizado e cadastrado na BASE."
+            ] = (
+                "Título localizado e cadastrado na BASE."
+            )
+
+            resultado[
+                "etapa"
+            ] = "concluido"
+
+
+            print(
+                "[BASE MOBILE] CADASTRADO:",
+                cadastro.get(
+                    "nome",
+                    ""
+                ),
+                flush=True
+            )
 
 
         # ----------------------------------------------------
-        # TÍTULO NÃO ENCONTRADO NA BASE
+        # 6. NÃO CADASTRADO
         # ----------------------------------------------------
 
         else:
@@ -276,52 +540,109 @@ def consultar():
 
             resultado[
                 "mensagem"
-            ] = "Título localizado, mas não cadastrado na BASE."
+            ] = (
+                "Título localizado, mas não cadastrado na BASE."
+            )
+
+            resultado[
+                "etapa"
+            ] = "concluido"
 
 
-        return jsonify(
+            print(
+                "[BASE MOBILE] NÃO CADASTRADO.",
+                flush=True
+            )
+
+
+        gc.collect()
+
+
+        return resposta_json(
             resultado
         )
 
 
+    # ========================================================
+    # TIMEOUT DO GOOGLE
+    # ========================================================
+
     except requests.Timeout:
 
-        return jsonify(
+        print(
+            "[BASE MOBILE] TIMEOUT NA BASE.",
+            flush=True
+        )
+
+        return resposta_json(
             {
                 "sucesso": False,
+                "etapa": "base",
                 "mensagem": (
                     "O documento foi lido, mas a consulta "
                     "ao banco de dados demorou demais."
                 )
-            }
-        ), 504
+            },
+            504
+        )
 
+
+    # ========================================================
+    # ERRO DE CONEXÃO COM GOOGLE
+    # ========================================================
 
     except requests.RequestException as erro:
 
-        return jsonify(
+        print(
+            "[BASE MOBILE] ERRO DE CONEXÃO COM A BASE:",
+            repr(erro),
+            flush=True
+        )
+
+        return resposta_json(
             {
                 "sucesso": False,
+                "etapa": "base",
                 "mensagem": (
                     "O documento foi lido, mas houve erro "
                     "ao consultar o banco de dados: "
                     + str(erro)
                 )
-            }
-        ), 500
+            },
+            500
+        )
 
+
+    # ========================================================
+    # OUTROS ERROS
+    # ========================================================
 
     except Exception as erro:
 
-        return jsonify(
+        print(
+            "[BASE MOBILE] ERRO:",
+            repr(erro),
+            flush=True
+        )
+
+        return resposta_json(
             {
                 "sucesso": False,
+                "etapa": "servidor",
                 "mensagem": (
                     "Erro interno: "
                     + str(erro)
                 )
-            }
-        ), 500
+            },
+            500
+        )
+
+
+    finally:
+
+        conteudo = None
+
+        gc.collect()
 
 
 # ============================================================
