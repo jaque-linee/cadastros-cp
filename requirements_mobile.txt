@@ -10,3 +10,4 @@ rapidocr
 onnxruntime
 PyMuPDF
 pytesseract
+streamlit
