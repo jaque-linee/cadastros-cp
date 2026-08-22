@@ -38,36 +38,32 @@ def somente_numeros(valor):
     )
 
 
-def normalizar_titulo(valor):
-    """
-    Remove pontuação e zeros à esquerda para comparação.
-    """
-
-    numero = somente_numeros(
-        valor
-    )
-
-    if not numero:
-        return ""
-
-    normalizado = numero.lstrip("0")
-
-    return normalizado or "0"
-
-
 # ============================================================
-# CARREGAR BASE DO GOOGLE SHEETS
+# CONSULTAR UM ÚNICO TÍTULO NO GOOGLE SHEETS
 # ============================================================
 
-def carregar_base():
+def consultar_titulo_base(titulo):
 
     if not WEBHOOK_URL:
         raise Exception(
             "WEBHOOK_URL não configurado no servidor."
         )
 
+    titulo = somente_numeros(
+        titulo
+    )
+
+    if not titulo:
+        return {
+            "encontrado": False,
+            "cadastro": None
+        }
+
     resposta = requests.get(
         WEBHOOK_URL,
+        params={
+            "titulo": titulo
+        },
         timeout=20
     )
 
@@ -77,48 +73,24 @@ def carregar_base():
 
     if not isinstance(
         dados,
-        list
+        dict
     ):
         raise Exception(
-            "A base retornou um formato inesperado."
+            "A consulta da BASE retornou um formato inesperado."
         )
 
-    return dados
-
-
-# ============================================================
-# PROCURAR TÍTULO NA BASE
-# ============================================================
-
-def procurar_titulo(
-    titulo,
-    base
-):
-
-    titulo_procurado = normalizar_titulo(
-        titulo
-    )
-
-    if not titulo_procurado:
-        return None
-
-    for pessoa in base:
-
-        titulo_existente = normalizar_titulo(
-            pessoa.get(
-                "titulo",
-                ""
+    if dados.get(
+        "error"
+    ):
+        raise Exception(
+            str(
+                dados.get(
+                    "error"
+                )
             )
         )
 
-        if (
-            titulo_existente
-            and titulo_existente
-            == titulo_procurado
-        ):
-            return pessoa
-
-    return None
+    return dados
 
 
 # ============================================================
@@ -223,7 +195,7 @@ def consultar():
 
 
         # ----------------------------------------------------
-        # NÃO ENCONTROU TÍTULO NA FOTO
+        # FOTO LIDA, MAS SEM TÍTULO
         # ----------------------------------------------------
 
         if not titulo:
@@ -242,27 +214,38 @@ def consultar():
 
 
         # ----------------------------------------------------
-        # CARREGAR BASE
+        # CONSULTAR SOMENTE ESTE TÍTULO NO APPS SCRIPT
         # ----------------------------------------------------
 
-        base = carregar_base()
+        consulta_base = consultar_titulo_base(
+            titulo
+        )
 
 
-        # ----------------------------------------------------
-        # PROCURAR TÍTULO
-        # ----------------------------------------------------
+        encontrado = bool(
+            consulta_base.get(
+                "encontrado",
+                False
+            )
+        )
 
-        cadastro = procurar_titulo(
-            titulo,
-            base
+
+        cadastro = consulta_base.get(
+            "cadastro"
         )
 
 
         # ----------------------------------------------------
-        # ENCONTRADO NA BASE
+        # TÍTULO ENCONTRADO NA BASE
         # ----------------------------------------------------
 
-        if cadastro:
+        if (
+            encontrado
+            and isinstance(
+                cadastro,
+                dict
+            )
+        ):
 
             resultado[
                 "cadastrado"
@@ -270,74 +253,15 @@ def consultar():
 
             resultado[
                 "cadastro"
-            ] = {
-                "nome": str(
-                    cadastro.get(
-                        "nome",
-                        ""
-                    )
-                ).strip(),
+            ] = cadastro
 
-                "titulo": str(
-                    cadastro.get(
-                        "titulo",
-                        ""
-                    )
-                ).strip(),
-
-                "cpf": str(
-                    cadastro.get(
-                        "cpf",
-                        ""
-                    )
-                ).strip(),
-
-                "supervisor": str(
-                    cadastro.get(
-                        "supervisor",
-                        ""
-                    )
-                ).strip(),
-
-                "subsupervisor": str(
-                    cadastro.get(
-                        "subsupervisor",
-                        ""
-                    )
-                ).strip(),
-
-                "comunidade": str(
-                    cadastro.get(
-                        "comunidade",
-                        ""
-                    )
-                ).strip(),
-
-                "domicilio": str(
-                    cadastro.get(
-                        "domicilio",
-                        ""
-                    )
-                ).strip(),
-
-                "status": str(
-                    cadastro.get(
-                        "status",
-                        ""
-                    )
-                ).strip(),
-
-                "situacao": str(
-                    cadastro.get(
-                        "situacao",
-                        ""
-                    )
-                ).strip()
-            }
+            resultado[
+                "mensagem"
+            ] = "Título localizado e cadastrado na BASE."
 
 
         # ----------------------------------------------------
-        # NÃO ENCONTRADO NA BASE
+        # TÍTULO NÃO ENCONTRADO NA BASE
         # ----------------------------------------------------
 
         else:
@@ -350,10 +274,27 @@ def consultar():
                 "cadastro"
             ] = None
 
+            resultado[
+                "mensagem"
+            ] = "Título localizado, mas não cadastrado na BASE."
+
 
         return jsonify(
             resultado
         )
+
+
+    except requests.Timeout:
+
+        return jsonify(
+            {
+                "sucesso": False,
+                "mensagem": (
+                    "O documento foi lido, mas a consulta "
+                    "ao banco de dados demorou demais."
+                )
+            }
+        ), 504
 
 
     except requests.RequestException as erro:
