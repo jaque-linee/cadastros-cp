@@ -131,22 +131,22 @@
         #resultado {
             display: none;
             margin-top: 18px;
-            padding: 16px;
+            padding: 18px;
             border-radius: 12px;
             font-size: 15px;
             line-height: 1.6;
         }
 
-        .sucesso {
+        .cadastrado {
             background: #e8f5e9;
             color: #1b5e20;
-            border: 1px solid #c8e6c9;
+            border: 1px solid #b7dfbb;
         }
 
-        .aviso {
-            background: #fff8e1;
-            color: #7a5200;
-            border: 1px solid #ffe082;
+        .nao-cadastrado {
+            background: #fff3e0;
+            color: #8a4b08;
+            border: 1px solid #ffd19a;
         }
 
         .erro {
@@ -161,10 +161,30 @@
             border: 1px solid #c6daf2;
         }
 
-        .titulo-encontrado {
-            font-size: 22px;
+        .status-grande {
+            font-size: 21px;
             font-weight: bold;
-            margin-top: 5px;
+            margin-bottom: 14px;
+        }
+
+        .titulo-encontrado {
+            font-size: 23px;
+            font-weight: bold;
+            margin: 6px 0 14px 0;
+        }
+
+        .dados {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(0,0,0,0.12);
+        }
+
+        .linha {
+            margin: 5px 0;
+        }
+
+        .rotulo {
+            font-weight: bold;
         }
 
         .rodape {
@@ -201,7 +221,8 @@
     </div>
 
     <div class="descricao">
-        Selecione uma foto do documento para localizar o título.
+        Selecione uma foto do documento para localizar o título
+        e consultar o cadastro na BASE.
     </div>
 
 
@@ -238,7 +259,7 @@
         id="consultar"
         type="button"
     >
-        🔎 CONSULTAR TÍTULO
+        🔎 CONSULTAR NA BASE
     </button>
 
 
@@ -290,7 +311,9 @@ inputFoto.addEventListener(
 
         nomeArquivo.innerHTML =
             "Arquivo selecionado: " +
-            arquivo.name;
+            escaparHTML(
+                arquivo.name
+            );
 
 
         var leitor =
@@ -344,15 +367,14 @@ botaoConsultar.addEventListener(
             true;
 
         botaoConsultar.innerHTML =
-            "⏳ LENDO DOCUMENTO...";
+            "⏳ CONSULTANDO...";
 
 
         mostrarResultado(
             "carregando",
-            "⏳ Enviando a foto e lendo o documento..." +
+            "⏳ Lendo o documento e consultando a BASE..." +
             "<br><br>" +
-            "Na primeira consulta o servidor gratuito " +
-            "pode levar alguns segundos para iniciar."
+            "A primeira consulta pode demorar um pouco."
         );
 
 
@@ -387,7 +409,7 @@ botaoConsultar.addEventListener(
                     false;
 
                 botaoConsultar.innerHTML =
-                    "🔎 CONSULTAR TÍTULO";
+                    "🔎 CONSULTAR NA BASE";
 
 
                 if (!dados.sucesso) {
@@ -395,9 +417,9 @@ botaoConsultar.addEventListener(
                     mostrarResultado(
                         "erro",
                         "❌ " +
-                        (
+                        escaparHTML(
                             dados.mensagem ||
-                            "Não foi possível processar a foto."
+                            "Não foi possível realizar a consulta."
                         )
                     );
 
@@ -405,61 +427,50 @@ botaoConsultar.addEventListener(
                 }
 
 
-                if (dados.titulo) {
-
-                    var html =
-                        "✅ <strong>Título localizado</strong>" +
-                        "<div class='titulo-encontrado'>" +
-                        dados.titulo +
-                        "</div>";
-
-
-                    if (
-                        dados.dados &&
-                        dados.dados.nome
-                    ) {
-
-                        html +=
-                            "<br><strong>Nome:</strong> " +
-                            escaparHTML(
-                                dados.dados.nome
-                            );
-                    }
-
+                if (!dados.titulo) {
 
                     mostrarResultado(
-                        "sucesso",
-                        html
+                        "erro",
+                        "⚠️ O documento foi lido, mas o título não foi localizado."
                     );
 
+                    return;
                 }
 
-                else {
 
-                    mostrarResultado(
-                        "aviso",
-                        "⚠️ A foto foi lida, mas o título " +
-                        "não foi localizado."
+                if (
+                    dados.cadastrado === true &&
+                    dados.cadastro
+                ) {
+
+                    mostrarCadastrado(
+                        dados
                     );
 
+                    return;
                 }
+
+
+                mostrarNaoCadastrado(
+                    dados
+                );
 
             }
         )
 
         .catch(
-            function (erro) {
+            function () {
 
                 botaoConsultar.disabled =
                     false;
 
                 botaoConsultar.innerHTML =
-                    "🔎 CONSULTAR TÍTULO";
+                    "🔎 CONSULTAR NA BASE";
 
 
                 mostrarResultado(
                     "erro",
-                    "❌ Não foi possível conectar ao leitor do BASE." +
+                    "❌ Não foi possível conectar ao BASE." +
                     "<br><br>" +
                     "Tente novamente em alguns segundos."
                 );
@@ -469,6 +480,197 @@ botaoConsultar.addEventListener(
 
     }
 );
+
+
+function mostrarCadastrado(
+    dados
+) {
+
+    var cadastro =
+        dados.cadastro || {};
+
+    var html =
+        "<div class='status-grande'>" +
+        "✅ JÁ CADASTRADO" +
+        "</div>" +
+
+        "<div class='linha'>" +
+        "<span class='rotulo'>Título:</span> " +
+        escaparHTML(
+            dados.titulo
+        ) +
+        "</div>";
+
+
+    if (cadastro.nome) {
+
+        html +=
+            linhaDado(
+                "Nome",
+                cadastro.nome
+            );
+    }
+
+
+    if (cadastro.cpf) {
+
+        html +=
+            linhaDado(
+                "CPF",
+                cadastro.cpf
+            );
+    }
+
+
+    html +=
+        "<div class='dados'>";
+
+
+    if (cadastro.supervisor) {
+
+        html +=
+            linhaDado(
+                "Supervisor",
+                cadastro.supervisor
+            );
+    }
+
+
+    if (cadastro.subsupervisor) {
+
+        html +=
+            linhaDado(
+                "Subsupervisor",
+                cadastro.subsupervisor
+            );
+    }
+
+
+    if (cadastro.comunidade) {
+
+        html +=
+            linhaDado(
+                "Comunidade",
+                cadastro.comunidade
+            );
+    }
+
+
+    if (cadastro.domicilio) {
+
+        html +=
+            linhaDado(
+                "Domicílio",
+                cadastro.domicilio
+            );
+    }
+
+
+    if (cadastro.status) {
+
+        html +=
+            linhaDado(
+                "Status",
+                cadastro.status
+            );
+    }
+
+
+    if (cadastro.situacao) {
+
+        html +=
+            linhaDado(
+                "Situação",
+                cadastro.situacao
+            );
+    }
+
+
+    html +=
+        "</div>";
+
+
+    mostrarResultado(
+        "cadastrado",
+        html
+    );
+}
+
+
+function mostrarNaoCadastrado(
+    dados
+) {
+
+    var nome = "";
+
+    if (
+        dados.dados &&
+        dados.dados.nome
+    ) {
+
+        nome =
+            dados.dados.nome;
+    }
+
+
+    var html =
+        "<div class='status-grande'>" +
+        "⚠️ NÃO CADASTRADO" +
+        "</div>" +
+
+        "<div class='linha'>" +
+        "<span class='rotulo'>Título lido:</span>" +
+        "</div>" +
+
+        "<div class='titulo-encontrado'>" +
+        escaparHTML(
+            dados.titulo
+        ) +
+        "</div>";
+
+
+    if (nome) {
+
+        html +=
+            linhaDado(
+                "Nome lido",
+                nome
+            );
+    }
+
+
+    html +=
+        "<div class='dados'>" +
+        "O título foi localizado no documento, " +
+        "mas não foi encontrado na BASE." +
+        "</div>";
+
+
+    mostrarResultado(
+        "nao-cadastrado",
+        html
+    );
+}
+
+
+function linhaDado(
+    rotulo,
+    valor
+) {
+
+    return (
+        "<div class='linha'>" +
+        "<span class='rotulo'>" +
+        escaparHTML(
+            rotulo
+        ) +
+        ":</span> " +
+        escaparHTML(
+            valor
+        ) +
+        "</div>"
+    );
+}
 
 
 function mostrarResultado(
@@ -492,7 +694,9 @@ function escaparHTML(
 ) {
 
     var div =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
 
     div.textContent =
         texto || "";
