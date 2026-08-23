@@ -3,7 +3,7 @@ requests
 python-dotenv
 Pillow
 PyMuPDF
-numpy
+numpy==1.26.4
 pandas
 pytesseract
 reportlab
