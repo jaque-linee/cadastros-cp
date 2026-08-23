@@ -11,6 +11,3 @@ opencv-python-headless==4.10.0.84
 rapidocr
 onnxruntime
 streamlit-paste-button
-flask
-flask-cors
-gunicorn
