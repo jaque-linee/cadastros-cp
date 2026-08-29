@@ -8,6 +8,13 @@ from streamlit_paste_button import paste_image_button
 
 from leitor_documentos import preparar_documento
 from extrator_documentos import analisar_documentos
+from gemini_documentos import (
+    ler_documento_gemini,
+    pode_chamar_gemini,
+    LIMITE_DOCUMENTOS_SESSAO,
+    LIMITE_ESTIMADO_BRL_SESSAO,
+    MODELO_GEMINI,
+)
 
 
 
@@ -18,6 +25,58 @@ def normalizar_telefone(valor):
     if len(numeros) == 10:
         return f"({numeros[:2]}) {numeros[2:6]}-{numeros[6:]}"
     return numeros
+
+
+
+def _obter_gemini_api_key():
+    """Lê a chave sem expô-la na tela ou no código."""
+    try:
+        valor = st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        valor = ""
+    return str(valor or "").strip()
+
+
+def _inicializar_contador_gemini():
+    padrao = {
+        "documentos": 0,
+        "prompt_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "custo_brl": 0.0,
+        "custo_usd": 0.0,
+    }
+    if "gemini_consumo_sessao" not in st.session_state:
+        st.session_state["gemini_consumo_sessao"] = padrao.copy()
+    return st.session_state["gemini_consumo_sessao"]
+
+
+def _registrar_uso_gemini(uso):
+    consumo = _inicializar_contador_gemini()
+    consumo["documentos"] += 1
+    consumo["prompt_tokens"] += int(uso.get("prompt_tokens", 0) or 0)
+    consumo["output_tokens"] += int(uso.get("output_tokens", 0) or 0)
+    consumo["total_tokens"] += int(uso.get("total_tokens", 0) or 0)
+    consumo["custo_brl"] += float(uso.get("custo_brl_estimado", 0) or 0)
+    consumo["custo_usd"] += float(uso.get("custo_usd_estimado", 0) or 0)
+    st.session_state["gemini_consumo_sessao"] = consumo
+    return consumo
+
+
+def _mostrar_monitor_gemini(local=None):
+    consumo = _inicializar_contador_gemini()
+    texto = (
+        f"🤖 **Gemini ({MODELO_GEMINI})** — "
+        f"{consumo['documentos']}/{LIMITE_DOCUMENTOS_SESSAO} documentos · "
+        f"{consumo['prompt_tokens']:,} tokens entrada · "
+        f"{consumo['output_tokens']:,} tokens saída · "
+        f"**R$ {consumo['custo_brl']:.4f} estimados** · "
+        f"trava: R$ {LIMITE_ESTIMADO_BRL_SESSAO:.2f}"
+    ).replace(",", ".")
+    if local is not None:
+        local.info(texto)
+    else:
+        st.info(texto)
 
 
 def exibir_tela_envio_documentos(
@@ -36,6 +95,9 @@ def exibir_tela_envio_documentos(
     st.subheader(
         "📁 Processamento de Documentos"
     )
+
+    _inicializar_contador_gemini()
+    _mostrar_monitor_gemini()
 
     if "lote_upload_id" not in st.session_state:
         st.session_state["lote_upload_id"] = 0
@@ -131,6 +193,8 @@ def exibir_tela_envio_documentos(
             )
 
             status_area = st.empty()
+            gemini_area = st.empty()
+            _mostrar_monitor_gemini(gemini_area)
 
             for indice, arquivo in enumerate(
                 arquivos
@@ -144,34 +208,79 @@ def exibir_tela_envio_documentos(
                 try:
                     arquivo_bytes = arquivo.getvalue()
 
-                    # Mantém preparar_documento para não alterar a estrutura
-                    # da tela, mas a EXTRAÇÃO CADASTRAL passa pelo motor OCR
-                    # fornecido pelo processamento_documentos.
-                    documento = preparar_documento(
-                        arquivo.name,
-                        arquivo_bytes
+                    # Gemini é o leitor principal neste teste.
+                    # Se houver qualquer falha da API, o RapidOCR atual continua
+                    # funcionando como fallback, sem perder o documento.
+                    api_key_gemini = _obter_gemini_api_key()
+                    consumo_atual = _inicializar_contador_gemini()
+
+                    permitido, motivo_bloqueio = pode_chamar_gemini(
+                        consumo_atual["documentos"],
+                        consumo_atual["custo_brl"]
                     )
 
-                    tipo = documento.get("tipo", "")
+                    dados = None
+                    tipo = ""
+                    texto = ""
+                    itens = []
 
-                    # IMPORTANTE:
-                    # antes, PDFs que possuíam qualquer camada de texto
-                    # desviavam do RapidOCR. Agora todos os documentos de
-                    # cadastro passam pelo mesmo ler_documento/extrair_dados.
-                    arquivo.seek(0)
-                    texto, itens, tipo_ocr = ler_documento(
-                        arquivo
-                    )
+                    if api_key_gemini and permitido:
+                        try:
+                            retorno_gemini = ler_documento_gemini(
+                                arquivo_bytes,
+                                arquivo.name,
+                                api_key_gemini
+                            )
+                            dados = retorno_gemini["dados"]
+                            tipo = "Gemini 2.5 Flash-Lite"
 
-                    if tipo_ocr:
-                        tipo = tipo_ocr
+                            _registrar_uso_gemini(
+                                retorno_gemini["uso"]
+                            )
+                            _mostrar_monitor_gemini(
+                                gemini_area
+                            )
 
-                    dados = extrair_dados(
-                        texto,
-                        itens,
-                        tipo,
-                        arquivo.name
-                    )
+                        except Exception as erro_gemini:
+                            st.warning(
+                                f"{arquivo.name}: Gemini falhou; "
+                                f"usando RapidOCR. {erro_gemini}"
+                            )
+
+                    elif not permitido:
+                        st.warning(
+                            f"Gemini pausado pela trava de segurança: "
+                            f"{motivo_bloqueio} "
+                            "Os próximos documentos usarão RapidOCR."
+                        )
+
+                    elif not api_key_gemini:
+                        st.warning(
+                            "GEMINI_API_KEY não configurada. "
+                            "Usando RapidOCR."
+                        )
+
+                    if dados is None:
+                        documento = preparar_documento(
+                            arquivo.name,
+                            arquivo_bytes
+                        )
+                        tipo = documento.get("tipo", "")
+
+                        arquivo.seek(0)
+                        texto, itens, tipo_ocr = ler_documento(
+                            arquivo
+                        )
+
+                        if tipo_ocr:
+                            tipo = tipo_ocr
+
+                        dados = extrair_dados(
+                            texto,
+                            itens,
+                            tipo,
+                            arquivo.name
+                        )
 
                     duplicado, existente = verificar_duplicidade(
                         dados,
