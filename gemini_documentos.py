@@ -4,12 +4,12 @@ import mimetypes
 import re
 import requests
 
-MODELO_GEMINI = "gemini-2.5-flash-lite"
+MODELO_GEMINI = "gemini-3.5-flash-lite"
 
 # Preço do Gemini 2.5 Flash-Lite por 1 milhão de tokens.
 # Mantido aqui, em um único lugar, para ser fácil atualizar se o Google mudar o preço.
-PRECO_ENTRADA_USD_MILHAO = 0.10
-PRECO_SAIDA_USD_MILHAO = 0.40
+PRECO_ENTRADA_USD_MILHAO = 0.30
+PRECO_SAIDA_USD_MILHAO = 2.50
 
 # Cotação propositalmente conservadora apenas para o painel de estimativa.
 COTACAO_SEGURANCA_BRL_USD = 6.00
@@ -258,4 +258,3 @@ def ler_documento_gemini(arquivo_bytes, nome_arquivo, api_key, timeout=120):
         },
         "modelo": MODELO_GEMINI,
     }
-
