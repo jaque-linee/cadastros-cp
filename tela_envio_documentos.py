@@ -287,25 +287,75 @@ def exibir_tela_envio_documentos(
                         )
 
                         if permitido:
+                            # Campos essenciais recebem prioridade e uma busca
+                            # direcionada. Nome da mãe continua sendo validado,
+                            # mas não pode atrasar demais o lote.
+                            criticos = [
+                                campo for campo in (
+                                    "cpf",
+                                    "titulo",
+                                    "nome",
+                                    "data_nascimento"
+                                )
+                                if campo in campos_alvo
+                            ]
+
+                            if criticos:
+                                alvos_chamada = criticos
+                                timeout_gemini = 18
+                            else:
+                                alvos_chamada = campos_alvo
+                                timeout_gemini = 10
+
                             try:
                                 retorno_gemini = ler_documento_gemini(
                                     arquivo_bytes,
                                     arquivo.name,
                                     api_key_gemini,
-                                    timeout=25,
-                                    campos_alvo=campos_alvo
+                                    timeout=timeout_gemini,
+                                    campos_alvo=alvos_chamada
                                 )
                                 dados = _mesclar_gemini(
                                     dados,
                                     retorno_gemini["dados"],
-                                    campos_alvo
+                                    alvos_chamada
                                 )
                                 _registrar_gemini(retorno_gemini["uso"])
                                 _monitor_gemini(gemini_area)
 
+                                # Se a chamada crítica resolveu rápido, fazemos
+                                # uma segunda conferência curta da mãe somente
+                                # quando ela também estava entre os alvos.
+                                if criticos and "nome_mae" in campos_alvo:
+                                    consumo = _consumo_gemini()
+                                    permitido_mae, _ = pode_chamar_gemini(
+                                        consumo["documentos"],
+                                        consumo["custo_brl"]
+                                    )
+                                    if permitido_mae:
+                                        try:
+                                            retorno_mae = ler_documento_gemini(
+                                                arquivo_bytes,
+                                                arquivo.name,
+                                                api_key_gemini,
+                                                timeout=8,
+                                                campos_alvo=["nome_mae"]
+                                            )
+                                            dados = _mesclar_gemini(
+                                                dados,
+                                                retorno_mae["dados"],
+                                                ["nome_mae"]
+                                            )
+                                            _registrar_gemini(
+                                                retorno_mae["uso"]
+                                            )
+                                            _monitor_gemini(
+                                                gemini_area
+                                            )
+                                        except Exception:
+                                            pass
+
                             except Exception as erro_gemini:
-                                # Não prende o lote: falhou, mantém o RapidOCR
-                                # e segue imediatamente para o próximo arquivo.
                                 st.caption(
                                     f"⚠️ Gemini não completou {arquivo.name}: "
                                     f"{erro_gemini}"
