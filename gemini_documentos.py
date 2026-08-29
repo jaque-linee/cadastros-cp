@@ -2,6 +2,7 @@ import base64
 import json
 import mimetypes
 import re
+import time
 import requests
 
 MODELO_GEMINI = "gemini-3.5-flash-lite"
@@ -190,15 +191,37 @@ def ler_documento_gemini(arquivo_bytes, nome_arquivo, api_key, timeout=120):
         f"{MODELO_GEMINI}:generateContent"
     )
 
-    resposta = requests.post(
-        url,
-        headers={
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
-        },
-        json=payload,
-        timeout=timeout,
-    )
+    # Retry conservador SOMENTE para falhas temporárias do servidor/limite.
+    # A documentação do Gemini informa que respostas HTTP 400/500 com falha
+    # não são cobradas por tokens. Mesmo assim, mantemos apenas 2 novas
+    # tentativas para não gerar chamadas desnecessárias.
+    esperas = (0, 3, 8)
+    resposta = None
+
+    for tentativa, espera in enumerate(esperas, start=1):
+        if espera:
+            time.sleep(espera)
+
+        resposta = requests.post(
+            url,
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
+            json=payload,
+            timeout=timeout,
+        )
+
+        if resposta.ok:
+            break
+
+        # Só repete erros explicitamente temporários.
+        if resposta.status_code not in (429, 500, 503, 504):
+            break
+
+        # Depois da terceira tentativa, encerra e deixa a tela usar RapidOCR.
+        if tentativa == len(esperas):
+            break
 
     if not resposta.ok:
         try:
