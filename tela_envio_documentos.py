@@ -169,7 +169,8 @@ def exibir_tela_envio_documentos(
                     dados = extrair_dados(
                         texto,
                         itens,
-                        tipo
+                        tipo,
+                        nome_arquivo=arquivo.name
                     )
 
                     duplicado, existente = verificar_duplicidade(
