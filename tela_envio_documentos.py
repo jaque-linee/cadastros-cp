@@ -68,32 +68,52 @@ def _monitor_gemini(local=None):
 
 
 def _campos_para_gemini(dados):
-    """Só chama IA para lacunas relevantes do OCR."""
+    """
+    Gemini completa lacunas e SEMPRE confere nome_mae.
+    Filiação é um campo ambíguo para OCR: pode retornar pai em vez da mãe.
+    """
     mapa = {
         "nome": "nome",
         "cpf": "cpf",
         "rg": "rg",
         "data_nascimento": "data_nascimento",
-        "nome_mae": "nome_mae",
         "titulo": "titulo",
         "zona": "zona",
         "secao": "secao",
         "telefone": "telefone",
     }
-    faltantes = []
+
+    alvos = []
+
     for chave, alvo in mapa.items():
         if not str(dados.get(chave, "") or "").strip():
-            faltantes.append(alvo)
-    return faltantes
+            alvos.append(alvo)
+
+    # Mesmo preenchido pelo RapidOCR, este campo precisa ser validado.
+    if "nome_mae" not in alvos:
+        alvos.append("nome_mae")
+
+    return alvos
 
 
 def _mesclar_gemini(dados, dados_gemini, campos_alvo):
-    """Gemini preenche lacunas; não sobrescreve acertos do RapidOCR."""
+    """
+    Gemini preenche lacunas.
+    Para nome_mae, a conferência visual do Gemini pode corrigir o RapidOCR,
+    inclusive quando o OCR capturou o pai por engano.
+    """
     for campo in campos_alvo:
         atual = str(dados.get(campo, "") or "").strip()
         novo = str(dados_gemini.get(campo, "") or "").strip()
+
+        if campo == "nome_mae":
+            if novo:
+                dados[campo] = novo
+            continue
+
         if not atual and novo:
             dados[campo] = novo
+
     return dados
 
 
