@@ -69,29 +69,34 @@ def _monitor_gemini(local=None):
 
 def _campos_para_gemini(dados):
     """
-    Gemini completa lacunas e SEMPRE confere nome_mae.
-    Filiação é um campo ambíguo para OCR: pode retornar pai em vez da mãe.
+    Gemini complementa lacunas e confere filiação.
+    Título, zona e seção formam um conjunto: se QUALQUER um faltar,
+    os três são enviados juntos para leitura no documento inteiro.
     """
-    mapa = {
-        "nome": "nome",
-        "cpf": "cpf",
-        "rg": "rg",
-        "data_nascimento": "data_nascimento",
-        "titulo": "titulo",
-        "zona": "zona",
-        "secao": "secao",
-        "telefone": "telefone",
-    }
-
     alvos = []
 
-    for chave, alvo in mapa.items():
-        if not str(dados.get(chave, "") or "").strip():
-            alvos.append(alvo)
+    for campo in (
+        "nome",
+        "cpf",
+        "rg",
+        "data_nascimento",
+        "telefone",
+    ):
+        if not str(dados.get(campo, "") or "").strip():
+            alvos.append(campo)
 
-    # Mesmo preenchido pelo RapidOCR, este campo precisa ser validado.
-    if "nome_mae" not in alvos:
-        alvos.append("nome_mae")
+    eleitorais = ("titulo", "zona", "secao")
+    if any(
+        not str(dados.get(campo, "") or "").strip()
+        for campo in eleitorais
+    ):
+        for campo in eleitorais:
+            if campo not in alvos:
+                alvos.append(campo)
+
+    # Filiação precisa ser conferida mesmo quando o OCR trouxe um nome:
+    # o primeiro nome do bloco pode ser o pai.
+    alvos.append("nome_mae")
 
     return alvos
 
@@ -107,6 +112,13 @@ def _mesclar_gemini(dados, dados_gemini, campos_alvo):
         novo = str(dados_gemini.get(campo, "") or "").strip()
 
         if campo == "nome_mae":
+            if novo:
+                dados[campo] = novo
+            continue
+
+        # Quando o conjunto eleitoral foi acionado, a leitura direcionada
+        # do Gemini pode corrigir título/zona/seção já preenchidos pelo OCR.
+        if campo in ("titulo", "zona", "secao"):
             if novo:
                 dados[campo] = novo
             continue
@@ -294,6 +306,8 @@ def exibir_tela_envio_documentos(
                                 campo for campo in (
                                     "cpf",
                                     "titulo",
+                                    "zona",
+                                    "secao",
                                     "nome",
                                     "data_nascimento"
                                 )
