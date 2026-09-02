@@ -1,6 +1,7 @@
 import gc
 import uuid
 import io
+import re
 import pandas as pd
 import streamlit as st
 import sheets
@@ -68,6 +69,31 @@ def _monitor_gemini(local=None):
     (local.info if local is not None else st.info)(msg)
 
 
+def _nome_suspeito_para_gemini(valor):
+    """Detecta quando o OCR colocou outro campo no lugar do NOME."""
+    nome = str(valor or "").strip().upper()
+    if not nome:
+        return True
+
+    termos_invalidos = (
+        "ENDEREÇO", "ENDERECO", "CIDADE", "BAIRRO", "COMUNIDADE",
+        "Nº TÍTULO", "N° TÍTULO", "N TITULO", "TÍTULO", "TITULO",
+        "ZONA", "SEÇÃO", "SECAO", "DATA DE NASCIMENTO", "NASCIMENTO",
+        "TELEFONE", "NOME DA MÃE", "NOME DA MAE",
+        "SUPERVISOR", "SUBSUPERVISOR",
+    )
+    if any(termo in nome for termo in termos_invalidos):
+        return True
+    if any(ch.isdigit() for ch in nome):
+        return True
+
+    palavras = re.findall(r"[A-ZÀ-Ü]+", nome)
+    if len(palavras) < 2:
+        return True
+
+    return False
+
+
 def _campos_para_gemini(dados):
     """
     Gemini complementa lacunas e confere filiação.
@@ -83,8 +109,15 @@ def _campos_para_gemini(dados):
         "data_nascimento",
         "telefone",
     ):
-        if not str(dados.get(campo, "") or "").strip():
+        valor = str(dados.get(campo, "") or "").strip()
+
+        if not valor:
             alvos.append(campo)
+            continue
+
+        # Se NOME veio preenchido com outro campo/cidade, pede conferência.
+        if campo == "nome" and _nome_suspeito_para_gemini(valor):
+            alvos.append("nome")
 
     eleitorais = ("titulo", "zona", "secao")
     if any(
@@ -114,6 +147,13 @@ def _mesclar_gemini(dados, dados_gemini, campos_alvo):
 
         if campo == "nome_mae":
             if novo:
+                dados[campo] = novo
+            continue
+
+        # Gemini pode corrigir NOME preenchido pelo OCR somente quando
+        # o valor atual é suspeito. Nome válido continua preservado.
+        if campo == "nome":
+            if novo and (not atual or _nome_suspeito_para_gemini(atual)):
                 dados[campo] = novo
             continue
 
