@@ -72,6 +72,7 @@ def _monitor_gemini(local=None):
 def _nome_suspeito_para_gemini(valor):
     """Detecta quando o OCR colocou outro campo no lugar do NOME."""
     nome = str(valor or "").strip().upper()
+
     if not nome:
         return True
 
@@ -82,8 +83,10 @@ def _nome_suspeito_para_gemini(valor):
         "TELEFONE", "NOME DA MÃE", "NOME DA MAE",
         "SUPERVISOR", "SUBSUPERVISOR",
     )
+
     if any(termo in nome for termo in termos_invalidos):
         return True
+
     if any(ch.isdigit() for ch in nome):
         return True
 
@@ -115,7 +118,6 @@ def _campos_para_gemini(dados):
             alvos.append(campo)
             continue
 
-        # Se NOME veio preenchido com outro campo/cidade, pede conferência.
         if campo == "nome" and _nome_suspeito_para_gemini(valor):
             alvos.append("nome")
 
@@ -150,8 +152,6 @@ def _mesclar_gemini(dados, dados_gemini, campos_alvo):
                 dados[campo] = novo
             continue
 
-        # Gemini pode corrigir NOME preenchido pelo OCR somente quando
-        # o valor atual é suspeito. Nome válido continua preservado.
         if campo == "nome":
             if novo and (not atual or _nome_suspeito_para_gemini(atual)):
                 dados[campo] = novo
@@ -352,10 +352,59 @@ def exibir_tela_envio_documentos(
                         arquivo.name
                     )
 
-                    # HÍBRIDO: RapidOCR primeiro. Gemini somente procura
-                    # campos que ficaram vazios, sem sobrescrever o que já veio.
+                    # HÍBRIDO: RapidOCR primeiro.
+                    # Se o NOME veio suspeito, faz uma chamada EXCLUSIVA ao Gemini
+                    # para o nome antes de qualquer outra conferência.
                     campos_alvo = _campos_para_gemini(dados)
                     api_key_gemini = _obter_gemini_api_key()
+
+                    nome_precisa_gemini = _nome_suspeito_para_gemini(
+                        dados.get("nome", "")
+                    )
+
+                    if nome_precisa_gemini and api_key_gemini:
+                        consumo = _consumo_gemini()
+                        permitido_nome, motivo_nome = pode_chamar_gemini(
+                            consumo["documentos"],
+                            consumo["custo_brl"]
+                        )
+
+                        if permitido_nome:
+                            try:
+                                retorno_nome = ler_documento_gemini(
+                                    arquivo_bytes,
+                                    arquivo.name,
+                                    api_key_gemini,
+                                    timeout=12,
+                                    campos_alvo=["nome"]
+                                )
+
+                                dados = _mesclar_gemini(
+                                    dados,
+                                    retorno_nome["dados"],
+                                    ["nome"]
+                                )
+
+                                _registrar_gemini(retorno_nome["uso"])
+                                _monitor_gemini(gemini_area)
+
+                            except Exception as erro_nome:
+                                st.caption(
+                                    f"⚠️ Gemini não conseguiu conferir o NOME "
+                                    f"de {arquivo.name}: {erro_nome}"
+                                )
+                        else:
+                            st.caption(
+                                f"🔒 Gemini pausado para NOME: {motivo_nome}"
+                            )
+
+                    # Recalcula os alvos após a tentativa exclusiva do NOME.
+                    # Remove nome da chamada geral para não pagar/processar duas vezes.
+                    campos_alvo = [
+                        campo
+                        for campo in _campos_para_gemini(dados)
+                        if campo != "nome"
+                    ]
 
                     if campos_alvo and api_key_gemini:
                         consumo = _consumo_gemini()
@@ -365,16 +414,12 @@ def exibir_tela_envio_documentos(
                         )
 
                         if permitido:
-                            # Campos essenciais recebem prioridade e uma busca
-                            # direcionada. Nome da mãe continua sendo validado,
-                            # mas não pode atrasar demais o lote.
                             criticos = [
                                 campo for campo in (
                                     "cpf",
                                     "titulo",
                                     "zona",
                                     "secao",
-                                    "nome",
                                     "data_nascimento"
                                 )
                                 if campo in campos_alvo
@@ -395,23 +440,23 @@ def exibir_tela_envio_documentos(
                                     timeout=timeout_gemini,
                                     campos_alvo=alvos_chamada
                                 )
+
                                 dados = _mesclar_gemini(
                                     dados,
                                     retorno_gemini["dados"],
                                     alvos_chamada
                                 )
+
                                 _registrar_gemini(retorno_gemini["uso"])
                                 _monitor_gemini(gemini_area)
 
-                                # Se a chamada crítica resolveu rápido, fazemos
-                                # uma segunda conferência curta da mãe somente
-                                # quando ela também estava entre os alvos.
                                 if criticos and "nome_mae" in campos_alvo:
                                     consumo = _consumo_gemini()
                                     permitido_mae, _ = pode_chamar_gemini(
                                         consumo["documentos"],
                                         consumo["custo_brl"]
                                     )
+
                                     if permitido_mae:
                                         try:
                                             retorno_mae = ler_documento_gemini(
@@ -421,11 +466,13 @@ def exibir_tela_envio_documentos(
                                                 timeout=8,
                                                 campos_alvo=["nome_mae"]
                                             )
+
                                             dados = _mesclar_gemini(
                                                 dados,
                                                 retorno_mae["dados"],
                                                 ["nome_mae"]
                                             )
+
                                             _registrar_gemini(
                                                 retorno_mae["uso"]
                                             )
