@@ -518,3 +518,98 @@ def salvar_cadastro(
             ),
             "registro": None
         }
+
+# ============================================================
+# RASCUNHO PERSISTENTE DO LOTE
+# ============================================================
+
+def salvar_rascunho_item(
+    webhook_url,
+    lote_id,
+    item,
+    supervisor,
+    subsupervisor,
+    comunidade,
+    timeout=20
+):
+    """Grava/atualiza um documento do lote na aba RASCUNHOS_LOTE."""
+    try:
+        resposta = requests.post(
+            webhook_url,
+            json={
+                "acao": "salvar_rascunho_item",
+                "lote_id": str(lote_id or ""),
+                "supervisor": normalizar_nome(supervisor),
+                "subsupervisor": normalizar_nome(subsupervisor),
+                "comunidade": normalizar_texto(comunidade),
+                "arquivo": str(item.get("Arquivo", "") or ""),
+                "item": item,
+            },
+            timeout=timeout
+        )
+        resposta.raise_for_status()
+        retorno = resposta.json()
+        return {
+            "sucesso": str(retorno.get("status", "")).upper() == "SUCESSO",
+            "mensagem": str(retorno.get("mensagem", "") or "")
+        }
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "mensagem": f"Não foi possível proteger o rascunho: {erro}"
+        }
+
+
+def carregar_ultimo_rascunho(
+    webhook_url,
+    supervisor,
+    subsupervisor,
+    timeout=20
+):
+    """Recupera o lote pendente mais recente deste supervisor/sub."""
+    try:
+        resposta = requests.get(
+            webhook_url,
+            params={
+                "acao": "rascunho_ultimo",
+                "supervisor": normalizar_nome(supervisor),
+                "subsupervisor": normalizar_nome(subsupervisor),
+            },
+            timeout=timeout
+        )
+        resposta.raise_for_status()
+        retorno = resposta.json()
+        return {
+            "sucesso": bool(retorno.get("sucesso")),
+            "lote_id": str(retorno.get("lote_id", "") or ""),
+            "comunidade": str(retorno.get("comunidade", "") or ""),
+            "resultados": retorno.get("resultados", []) or [],
+            "mensagem": str(retorno.get("mensagem", "") or "")
+        }
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "lote_id": "",
+            "comunidade": "",
+            "resultados": [],
+            "mensagem": f"Não foi possível recuperar o rascunho: {erro}"
+        }
+
+
+def excluir_rascunho_lote(webhook_url, lote_id, timeout=20):
+    """Apaga o rascunho depois que a usuária finaliza o lote."""
+    try:
+        resposta = requests.post(
+            webhook_url,
+            json={
+                "acao": "excluir_rascunho_lote",
+                "lote_id": str(lote_id or "")
+            },
+            timeout=timeout
+        )
+        resposta.raise_for_status()
+        retorno = resposta.json()
+        return str(retorno.get("status", "")).upper() == "SUCESSO"
+    except Exception:
+        return False
+
