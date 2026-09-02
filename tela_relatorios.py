@@ -17,7 +17,7 @@ def exibir_tela_relatorios(base):
 
     tipo_relatorio = st.selectbox(
         "Tipo de relatório",
-        ["👤 Por Nome", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos"],
+        ["👤 Por Nome", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "💰 Pagamentos das Lideranças"],
         key="tipo_relatorio"
     )
 
@@ -666,3 +666,498 @@ def exibir_tela_relatorios(base):
 
                     except Exception as erro_pdf:
                         st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
+
+
+    # ============================================================
+    # RELATÓRIO DE PAGAMENTOS DAS LIDERANÇAS
+    # ============================================================
+    elif tipo_relatorio == "💰 Pagamentos das Lideranças":
+
+        resposta_pagamentos = sheets.carregar_pagamentos_liderancas(
+            WEBHOOK_URL
+        )
+
+        if not resposta_pagamentos.get("sucesso"):
+            st.error(
+                resposta_pagamentos.get(
+                    "mensagem",
+                    "Não foi possível carregar os pagamentos."
+                )
+            )
+            return
+
+        dados_pagamentos = resposta_pagamentos.get("dados", [])
+
+        if not dados_pagamentos:
+            st.info(
+                'Nenhum registro encontrado na aba '
+                '"PAGAMENTOS LIDERANÇAS".'
+            )
+            return
+
+        filtros_disponiveis = relatorios.obter_filtros_pagamentos(
+            dados_pagamentos
+        )
+
+        col_sup, col_sub, col_com = st.columns(3)
+
+        with col_sup:
+            filtro_supervisor = st.selectbox(
+                "Supervisor",
+                ["Todos"] + filtros_disponiveis.get(
+                    "supervisores",
+                    []
+                ),
+                key="relatorio_pagamentos_supervisor"
+            )
+
+        with col_sub:
+            filtro_subsupervisor = st.selectbox(
+                "Subsupervisor",
+                ["Todos"] + filtros_disponiveis.get(
+                    "subsupervisores",
+                    []
+                ),
+                key="relatorio_pagamentos_subsupervisor"
+            )
+
+        with col_com:
+            filtro_comunidade = st.selectbox(
+                "Comunidade",
+                ["Todas"] + filtros_disponiveis.get(
+                    "comunidades",
+                    []
+                ),
+                key="relatorio_pagamentos_comunidade"
+            )
+
+        gerar_pagamentos = st.button(
+            "🔎 Gerar relatório",
+            type="primary",
+            use_container_width=True,
+            key="gerar_relatorio_pagamentos"
+        )
+
+        if gerar_pagamentos:
+            st.session_state[
+                "relatorio_pagamentos_gerado"
+            ] = relatorios.gerar_relatorio_pagamentos(
+                dados_pagamentos=dados_pagamentos,
+                supervisor=(
+                    ""
+                    if filtro_supervisor == "Todos"
+                    else filtro_supervisor
+                ),
+                subsupervisor=(
+                    ""
+                    if filtro_subsupervisor == "Todos"
+                    else filtro_subsupervisor
+                ),
+                comunidade=(
+                    ""
+                    if filtro_comunidade == "Todas"
+                    else filtro_comunidade
+                )
+            )
+
+        resultado = st.session_state.get(
+            "relatorio_pagamentos_gerado"
+        )
+
+        if resultado is not None:
+
+            def moeda(valor):
+                return (
+                    f"R$ {float(valor or 0):,.2f}"
+                    .replace(",", "X")
+                    .replace(".", ",")
+                    .replace("X", ".")
+                )
+
+            st.markdown(
+                """
+                <div style="
+                    background:#ffffff;
+                    border:1px solid #d9e1e8;
+                    border-radius:10px;
+                    padding:10px 14px;
+                    margin:14px 0 12px 0;
+                    font-size:0.95rem;
+                ">
+                    <b>💰 Pagamentos das Lideranças</b>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            col_previsto, col_pago, col_resta = st.columns(3)
+
+            with col_previsto:
+                st.metric(
+                    "💰 TOTAL PREVISTO",
+                    moeda(
+                        resultado.get(
+                            "total_previsto",
+                            0
+                        )
+                    )
+                )
+
+            with col_pago:
+                st.metric(
+                    "✅ PAGO",
+                    moeda(
+                        resultado.get(
+                            "total_pago",
+                            0
+                        )
+                    )
+                )
+
+            with col_resta:
+                st.metric(
+                    "⏳ RESTA PAGAR",
+                    moeda(
+                        resultado.get(
+                            "total_resta_pagar",
+                            0
+                        )
+                    )
+                )
+
+            registros = resultado.get(
+                "registros",
+                []
+            )
+
+            if not registros:
+                st.info(
+                    "Nenhum pagamento encontrado "
+                    "para os filtros selecionados."
+                )
+            else:
+                st.markdown("#### Detalhamento")
+
+                linhas = []
+
+                for registro in registros:
+                    linhas.append({
+                        "Supervisor":
+                            registro.get(
+                                "supervisor",
+                                ""
+                            ),
+                        "Subsupervisor":
+                            registro.get(
+                                "subsupervisor",
+                                ""
+                            ),
+                        "Comunidade":
+                            registro.get(
+                                "comunidade",
+                                ""
+                            ),
+                        "Qtde":
+                            registro.get(
+                                "qtde",
+                                0
+                            ),
+                        "Total":
+                            registro.get(
+                                "total",
+                                0
+                            ),
+                        "Pago":
+                            registro.get(
+                                "pago",
+                                0
+                            ),
+                        "Resta pagar":
+                            registro.get(
+                                "resta_pagar",
+                                0
+                            ),
+                    })
+
+                df_pagamentos = pd.DataFrame(
+                    linhas
+                )
+
+                st.dataframe(
+                    df_pagamentos,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(
+                        38 * len(df_pagamentos) + 38,
+                        600
+                    ),
+                    column_config={
+                        "Supervisor":
+                            st.column_config.TextColumn(
+                                "Supervisor",
+                                width="medium"
+                            ),
+                        "Subsupervisor":
+                            st.column_config.TextColumn(
+                                "Subsupervisor",
+                                width="medium"
+                            ),
+                        "Comunidade":
+                            st.column_config.TextColumn(
+                                "Comunidade",
+                                width="medium"
+                            ),
+                        "Qtde":
+                            st.column_config.NumberColumn(
+                                "Qtde",
+                                format="%d",
+                                width="small"
+                            ),
+                        "Total":
+                            st.column_config.NumberColumn(
+                                "Total",
+                                format="R$ %.2f"
+                            ),
+                        "Pago":
+                            st.column_config.NumberColumn(
+                                "Pago",
+                                format="R$ %.2f"
+                            ),
+                        "Resta pagar":
+                            st.column_config.NumberColumn(
+                                "Resta pagar",
+                                format="R$ %.2f"
+                            ),
+                    }
+                )
+
+                vencimentos = resultado.get(
+                    "vencimentos",
+                    []
+                )
+
+                if vencimentos:
+                    st.markdown(
+                        "#### 📅 Valores por vencimento"
+                    )
+
+                    for vencimento in vencimentos:
+                        st.markdown(
+                            f"""
+                            <div style="
+                                background:#f7f9fb;
+                                border-left:4px solid #0056b3;
+                                padding:8px 12px;
+                                margin-top:12px;
+                                margin-bottom:6px;
+                                border-radius:6px;
+                            ">
+                                <b>{vencimento.get("data", "")}</b>
+                                &nbsp;&nbsp;&nbsp;
+                                <b>{vencimento.get("liderancas", 0)}</b>
+                                liderança(s)
+                                &nbsp;&nbsp;&nbsp;
+                                <b>{vencimento.get("pessoas", 0)}</b>
+                                pessoa(s)
+                                &nbsp;&nbsp;&nbsp;
+                                <b>{moeda(vencimento.get("total", 0))}</b>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                        linhas_vencimento = []
+
+                        for item in vencimento.get(
+                            "itens",
+                            []
+                        ):
+                            lideranca = item.get(
+                                "supervisor",
+                                ""
+                            )
+
+                            if item.get(
+                                "subsupervisor"
+                            ):
+                                lideranca += (
+                                    " / "
+                                    + item.get(
+                                        "subsupervisor",
+                                        ""
+                                    )
+                                )
+
+                            linhas_vencimento.append({
+                                "Liderança":
+                                    lideranca,
+                                "Comunidade":
+                                    item.get(
+                                        "comunidade",
+                                        ""
+                                    ),
+                                "Qtde":
+                                    item.get(
+                                        "qtde",
+                                        0
+                                    ),
+                                "Valor":
+                                    item.get(
+                                        "valor",
+                                        0
+                                    ),
+                            })
+
+                        st.dataframe(
+                            pd.DataFrame(
+                                linhas_vencimento
+                            ),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Liderança":
+                                    st.column_config.TextColumn(
+                                        "Liderança",
+                                        width="large"
+                                    ),
+                                "Comunidade":
+                                    st.column_config.TextColumn(
+                                        "Comunidade",
+                                        width="large"
+                                    ),
+                                "Qtde":
+                                    st.column_config.NumberColumn(
+                                        "Qtde",
+                                        format="%d",
+                                        width="small"
+                                    ),
+                                "Valor":
+                                    st.column_config.NumberColumn(
+                                        "Valor",
+                                        format="R$ %.2f"
+                                    ),
+                            }
+                        )
+
+                try:
+                    pdf_pagamentos = (
+                        relatorios
+                        .gerar_pdf_relatorio_pagamentos(
+                            resultado
+                        )
+                    )
+
+                    coluna_imprimir, coluna_pdf = (
+                        st.columns(2)
+                    )
+
+                    with coluna_imprimir:
+                        pdf_base64 = base64.b64encode(
+                            pdf_pagamentos
+                        ).decode("utf-8")
+
+                        components.html(
+                            f"""
+                            <button
+                                onclick="imprimirPDFPagamentos()"
+                                style="
+                                    width:100%;
+                                    height:38px;
+                                    background:#0056b3;
+                                    color:white;
+                                    border:2px solid #0056b3;
+                                    border-radius:12px;
+                                    font-weight:bold;
+                                    cursor:pointer;
+                                    font-family:sans-serif;
+                                "
+                            >
+                                🖨️ Imprimir
+                            </button>
+
+                            <script>
+                            function imprimirPDFPagamentos() {{
+                                const base64 = "{pdf_base64}";
+                                const binario = atob(base64);
+                                const bytes =
+                                    new Uint8Array(
+                                        binario.length
+                                    );
+
+                                for (
+                                    let i = 0;
+                                    i < binario.length;
+                                    i++
+                                ) {{
+                                    bytes[i] =
+                                        binario.charCodeAt(i);
+                                }}
+
+                                const blob = new Blob(
+                                    [bytes],
+                                    {{
+                                        type:
+                                        "application/pdf"
+                                    }}
+                                );
+
+                                const url =
+                                    URL.createObjectURL(
+                                        blob
+                                    );
+
+                                const janela =
+                                    window.open(
+                                        url,
+                                        "_blank",
+                                        "width=1000,height=800"
+                                    );
+
+                                if (!janela) {{
+                                    alert(
+                                        "O navegador bloqueou "
+                                        + "o pop-up. Permita "
+                                        + "pop-ups para este site."
+                                    );
+                                    return;
+                                }}
+
+                                setTimeout(
+                                    function() {{
+                                        try {{
+                                            janela.focus();
+                                            janela.print();
+                                        }} catch (e) {{
+                                        }}
+                                    }},
+                                    1200
+                                );
+                            }}
+                            </script>
+                            """,
+                            height=45,
+                            scrolling=False
+                        )
+
+                    with coluna_pdf:
+                        st.download_button(
+                            label="📄 Baixar PDF",
+                            data=pdf_pagamentos,
+                            file_name=(
+                                "relatorio_pagamentos_"
+                                "liderancas.pdf"
+                            ),
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key=(
+                                "baixar_pdf_"
+                                "relatorio_pagamentos"
+                            )
+                        )
+
+                except Exception as erro_pdf:
+                    st.error(
+                        "Não foi possível gerar "
+                        f"o PDF: {erro_pdf}"
+                    )
+
