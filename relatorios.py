@@ -2362,11 +2362,11 @@ def gerar_relatorio_pagamentos(
             _chave_pagamentos(original, "RESTA PAGAR")
         )
 
-        # Enquanto a planilha ainda não possuir uma coluna PAGO REAL,
-        # usamos apenas o valor explicitamente informado em PAGO.
-        # Não presumimos pagamento somente porque a data já venceu.
-        pago = _valor_monetario_pagamentos(
-            _chave_pagamentos(original, "PAGO")
+        # Para este controle, PAGO é o que já saiu do saldo a pagar.
+        # Assim: PAGO = TOTAL - RESTA PAGAR.
+        pago = max(
+            0.0,
+            total - resta
         )
 
         vencimentos = []
@@ -2462,6 +2462,7 @@ def gerar_relatorio_pagamentos(
         "tipo": "pagamentos_liderancas",
         "titulo": "Relatório de Pagamentos das Lideranças",
         "total_registros": len(registros),
+        "total_liderancas": len(registros),
         "total_previsto": total_previsto,
         "total_pago": total_pago,
         "total_resta_pagar": total_resta,
@@ -2513,7 +2514,9 @@ def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
             partes.append(f"{rotulo}: {valor}")
 
     topo = (
-        f"Total previsto: "
+        f"Lideranças: {resultado_relatorio.get('total_liderancas', 0)}"
+        f" &nbsp;|&nbsp; Pessoas: {resultado_relatorio.get('total_pessoas', 0)}"
+        f" &nbsp;|&nbsp; Total previsto: "
         f"{_formatar_moeda_pagamentos(resultado_relatorio.get('total_previsto', 0))}"
         f" &nbsp;|&nbsp; Pago: "
         f"{_formatar_moeda_pagamentos(resultado_relatorio.get('total_pago', 0))}"
