@@ -212,6 +212,52 @@ def carregar_concorrentes(webhook_url, timeout=15):
             )
         }
 
+def carregar_pagamentos_liderancas(webhook_url, timeout=15):
+    """
+    Carrega a aba PAGAMENTOS LIDERANÇAS pelo Apps Script.
+
+    O Apps Script devolve uma lista de registros usando os próprios
+    cabeçalhos da planilha, inclusive as colunas de datas.
+    """
+    try:
+        resposta = requests.get(
+            webhook_url,
+            params={"acao": "pagamentos_liderancas"},
+            timeout=timeout,
+        )
+        resposta.raise_for_status()
+
+        dados = resposta.json()
+
+        if isinstance(dados, dict) and dados.get("error"):
+            return {
+                "sucesso": False,
+                "dados": [],
+                "mensagem": str(dados.get("error", "")).strip()
+                or "Não foi possível carregar os pagamentos.",
+            }
+
+        if not isinstance(dados, list):
+            return {
+                "sucesso": False,
+                "dados": [],
+                "mensagem": "Resposta inválida ao carregar os pagamentos.",
+            }
+
+        return {
+            "sucesso": True,
+            "dados": dados,
+            "mensagem": "",
+        }
+
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "dados": [],
+            "mensagem": f"Erro ao carregar pagamentos: {erro}",
+        }
+
+
 def procurar_duplicidade(
     dados_base,
     cpf="",
@@ -612,4 +658,3 @@ def excluir_rascunho_lote(webhook_url, lote_id, timeout=20):
         return str(retorno.get("status", "")).upper() == "SUCESSO"
     except Exception:
         return False
-
