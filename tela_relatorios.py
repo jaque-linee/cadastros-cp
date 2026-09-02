@@ -764,6 +764,31 @@ def exibir_tela_relatorios(base):
             "relatorio_pagamentos_gerado"
         )
 
+        # Recalcula o resultado salvo usando os dados e a lógica atuais.
+        # Evita exibir valores antigos após atualização do relatorios.py.
+        if resultado is not None:
+            resultado = relatorios.gerar_relatorio_pagamentos(
+                dados_pagamentos=dados_pagamentos,
+                supervisor=(
+                    ""
+                    if filtro_supervisor == "Todos"
+                    else filtro_supervisor
+                ),
+                subsupervisor=(
+                    ""
+                    if filtro_subsupervisor == "Todos"
+                    else filtro_subsupervisor
+                ),
+                comunidade=(
+                    ""
+                    if filtro_comunidade == "Todas"
+                    else filtro_comunidade
+                )
+            )
+            st.session_state[
+                "relatorio_pagamentos_gerado"
+            ] = resultado
+
         if resultado is not None:
 
             def moeda(valor):
@@ -790,7 +815,25 @@ def exibir_tela_relatorios(base):
                 unsafe_allow_html=True
             )
 
-            col_previsto, col_pago, col_resta = st.columns(3)
+            col_liderancas, col_pessoas, col_previsto, col_pago, col_resta = st.columns(5)
+
+            with col_liderancas:
+                st.metric(
+                    "👥 LIDERANÇAS",
+                    resultado.get(
+                        "total_liderancas",
+                        resultado.get("total_registros", 0)
+                    )
+                )
+
+            with col_pessoas:
+                st.metric(
+                    "🧑‍🤝‍🧑 PESSOAS",
+                    resultado.get(
+                        "total_pessoas",
+                        0
+                    )
+                )
 
             with col_previsto:
                 st.metric(
