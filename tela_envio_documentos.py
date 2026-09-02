@@ -1,4 +1,5 @@
 import gc
+import uuid
 import io
 import pandas as pd
 import streamlit as st
@@ -151,6 +152,28 @@ def exibir_tela_envio_documentos(
     if "lote_upload_id" not in st.session_state:
         st.session_state["lote_upload_id"] = 0
 
+    # ID persistente do lote atual. O rascunho fica no Google Sheets,
+    # portanto sobrevive a queda/reinício do Streamlit.
+    if "lote_persistente_id" not in st.session_state:
+        st.session_state["lote_persistente_id"] = ""
+
+    if "resultado_lote" not in st.session_state:
+        if st.button("♻️ Recuperar último lote não finalizado", use_container_width=True):
+            recuperado = sheets.carregar_ultimo_rascunho(
+                webhook_url,
+                supervisor,
+                sub
+            )
+            if recuperado.get("sucesso") and recuperado.get("resultados"):
+                st.session_state["resultado_lote"] = recuperado["resultados"]
+                st.session_state["lote_persistente_id"] = recuperado["lote_id"]
+                st.success(
+                    f"Rascunho recuperado: {len(recuperado['resultados'])} documento(s)."
+                )
+                st.rerun()
+            else:
+                st.info("Nenhum lote pendente encontrado para recuperar.")
+
 
     st.caption(
         f"Supervisor: {supervisor} | "
@@ -219,6 +242,9 @@ def exibir_tela_envio_documentos(
             "🔎 Processar Lote"
         ):
             resultados = []
+            st.session_state["lote_persistente_id"] = (
+                "LOTE-" + uuid.uuid4().hex[:12].upper()
+            )
 
             # Carrega as bases concorrentes uma única vez para todo o lote.
             consulta_bases_cruzamento = cruzamento.carregar_bases(
@@ -473,6 +499,19 @@ def exibir_tela_envio_documentos(
                                 dados
                         }
                     )
+
+                    # Protege imediatamente o documento já processado.
+                    # Se o Streamlit cair daqui para frente, este resultado
+                    # poderá ser recuperado sem novo OCR/Gemini.
+                    if resultados:
+                        sheets.salvar_rascunho_item(
+                            webhook_url,
+                            st.session_state.get("lote_persistente_id", ""),
+                            resultados[-1],
+                            supervisor,
+                            sub,
+                            comunidade
+                        )
 
                     del texto
                     del itens
@@ -807,6 +846,28 @@ def exibir_tela_envio_documentos(
                         duplicado_atual
                     )
 
+                # Salva esta conferência imediatamente no rascunho persistente.
+                # Assim as correções já confirmadas não somem se a sessão cair.
+                if st.button(
+                    "💾 Salvar correção deste cadastro",
+                    key=f"salvar_rascunho_{indice_item}_{arquivo_item}"
+                ):
+                    retorno_rascunho = sheets.salvar_rascunho_item(
+                        webhook_url,
+                        st.session_state.get("lote_persistente_id", ""),
+                        item,
+                        supervisor,
+                        sub,
+                        comunidade
+                    )
+                    if retorno_rascunho.get("sucesso"):
+                        st.success("Correção protegida.")
+                    else:
+                        st.error(retorno_rascunho.get(
+                            "mensagem",
+                            "Não foi possível proteger a correção."
+                        ))
+
                 # Se já existe, mostra a referência de forma curta.
                 if item.get("Resultado") == "⚠️ JÁ CADASTRADO":
                     cadastrado_como = str(
@@ -948,7 +1009,17 @@ def exibir_tela_envio_documentos(
                 "🧹 Finalizar lote / Novo lote",
                 use_container_width=True
             ):
+                lote_finalizado_id = st.session_state.get(
+                    "lote_persistente_id", ""
+                )
+                if lote_finalizado_id:
+                    sheets.excluir_rascunho_lote(
+                        webhook_url,
+                        lote_finalizado_id
+                    )
+
                 st.session_state.pop("resultado_lote", None)
+                st.session_state.pop("lote_persistente_id", None)
                 st.session_state.pop("bases_cruzamento_lote", None)
                 st.session_state.pop("_imagem_colada_bytes", None)
 
