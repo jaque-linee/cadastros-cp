@@ -2358,18 +2358,13 @@ def gerar_relatorio_pagamentos(
         total = _valor_monetario_pagamentos(
             _chave_pagamentos(original, "TOTAL")
         )
-        resta = _valor_monetario_pagamentos(
-            _chave_pagamentos(original, "RESTA PAGAR")
-        )
-
-        # Para este controle, PAGO é o que já saiu do saldo a pagar.
-        # Assim: PAGO = TOTAL - RESTA PAGAR.
-        pago = max(
-            0.0,
-            total - resta
-        )
-
+        # Não confiar na coluna RESTA PAGAR para o relatório: ao converter
+        # a faixa do Sheets em Tabela, linhas de total/fórmulas estruturadas
+        # podem alterar esse valor. O saldo é recalculado pelas parcelas
+        # com vencimento FUTURO, preservando a regra original do relatório.
         vencimentos = []
+        resta = 0.0
+        hoje = datetime.now().date()
 
         for cabecalho, valor in (original or {}).items():
             if not _eh_coluna_data_pagamentos(cabecalho):
@@ -2383,6 +2378,12 @@ def gerar_relatorio_pagamentos(
             data_obj = _data_pagamentos(cabecalho)
             data_texto = limpar_texto(cabecalho)
 
+            # RESTA PAGAR = somente parcelas com data posterior a hoje.
+            if data_obj:
+                data_comp = data_obj.date() if hasattr(data_obj, "date") else data_obj
+                if data_comp > hoje:
+                    resta += valor_vencimento
+
             colunas_data.add(data_texto)
 
             vencimentos.append({
@@ -2390,6 +2391,14 @@ def gerar_relatorio_pagamentos(
                 "data_obj": data_obj,
                 "valor": valor_vencimento,
             })
+
+        pago = max(0.0, total - resta)
+
+        # Ignora a linha automática de TOTAL da Tabela do Google Sheets.
+        # Ela chega pela API como um registro sem liderança/comunidade e
+        # duplicaria os valores gerais do relatório.
+        if (not sup and not sub and not com and qtde == 0):
+            continue
 
         registros.append({
             "supervisor": sup,
