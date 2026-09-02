@@ -2192,3 +2192,486 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
     pdf = buffer.getvalue()
     buffer.close()
     return pdf
+
+
+# ============================================================
+# RELATÓRIO DE PAGAMENTOS DAS LIDERANÇAS
+# ============================================================
+
+def _valor_monetario_pagamentos(valor):
+    """Converte valores exibidos pelo Google Sheets para float."""
+    texto = limpar_texto(valor)
+
+    if not texto:
+        return 0.0
+
+    texto = (
+        texto.replace("R$", "")
+        .replace(" ", "")
+        .replace(".", "")
+        .replace(",", ".")
+    )
+
+    try:
+        return float(texto)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _inteiro_pagamentos(valor):
+    texto = limpar_texto(valor)
+
+    if not texto:
+        return 0
+
+    try:
+        return int(float(texto.replace(",", ".")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _chave_pagamentos(registro, nome):
+    """
+    Localiza um campo independentemente de maiúsculas/minúsculas.
+    Os cabeçalhos vindos do Apps Script são mantidos como estão na planilha.
+    """
+    alvo = limpar_texto(nome).upper()
+
+    for chave, valor in (registro or {}).items():
+        if limpar_texto(chave).upper() == alvo:
+            return valor
+
+    return ""
+
+
+def _eh_coluna_data_pagamentos(cabecalho):
+    texto = limpar_texto(cabecalho)
+
+    for formato in ("%d/%m/%Y", "%d/%m/%y", "%d/%m"):
+        try:
+            datetime.strptime(texto, formato)
+            return True
+        except ValueError:
+            pass
+
+    return False
+
+
+def _data_pagamentos(cabecalho):
+    texto = limpar_texto(cabecalho)
+
+    for formato in ("%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(texto, formato)
+        except ValueError:
+            pass
+
+    # Cabeçalhos antigos como 30/09 recebem o ano corrente apenas
+    # para ordenação/exibição do relatório.
+    try:
+        return datetime.strptime(
+            f"{texto}/{datetime.now().year}",
+            "%d/%m/%Y"
+        )
+    except ValueError:
+        return None
+
+
+def _formatar_moeda_pagamentos(valor):
+    numero = float(valor or 0)
+    return (
+        f"R$ {numero:,.2f}"
+        .replace(",", "X")
+        .replace(".", ",")
+        .replace("X", ".")
+    )
+
+
+def obter_filtros_pagamentos(dados_pagamentos):
+    supervisores = set()
+    subsupervisores = set()
+    comunidades = set()
+
+    for registro in dados_pagamentos or []:
+        supervisor = limpar_texto(
+            _chave_pagamentos(registro, "SUPERVISOR")
+        )
+        subsupervisor = limpar_texto(
+            _chave_pagamentos(registro, "SUBSUPERVISOR")
+        )
+        comunidade = limpar_texto(
+            _chave_pagamentos(registro, "COMUNIDADE")
+        )
+
+        if supervisor:
+            supervisores.add(supervisor)
+
+        if subsupervisor:
+            subsupervisores.add(subsupervisor)
+
+        if comunidade:
+            comunidades.add(comunidade)
+
+    return {
+        "supervisores": sorted(supervisores, key=str.upper),
+        "subsupervisores": sorted(subsupervisores, key=str.upper),
+        "comunidades": sorted(comunidades, key=str.upper),
+    }
+
+
+def gerar_relatorio_pagamentos(
+    dados_pagamentos,
+    supervisor="",
+    subsupervisor="",
+    comunidade=""
+):
+    fs = normalizar_filtro(supervisor)
+    fsub = normalizar_filtro(subsupervisor)
+    fc = normalizar_filtro(comunidade)
+
+    registros = []
+    colunas_data = set()
+
+    for original in dados_pagamentos or []:
+        sup = limpar_texto(
+            _chave_pagamentos(original, "SUPERVISOR")
+        )
+        sub = limpar_texto(
+            _chave_pagamentos(original, "SUBSUPERVISOR")
+        )
+        com = limpar_texto(
+            _chave_pagamentos(original, "COMUNIDADE")
+        )
+
+        if fs and normalizar_filtro(sup) != fs:
+            continue
+
+        if fsub and normalizar_filtro(sub) != fsub:
+            continue
+
+        if fc and normalizar_filtro(com) != fc:
+            continue
+
+        qtde = _inteiro_pagamentos(
+            _chave_pagamentos(original, "QTDE")
+        )
+        total = _valor_monetario_pagamentos(
+            _chave_pagamentos(original, "TOTAL")
+        )
+        resta = _valor_monetario_pagamentos(
+            _chave_pagamentos(original, "RESTA PAGAR")
+        )
+
+        # Enquanto a planilha ainda não possuir uma coluna PAGO REAL,
+        # usamos apenas o valor explicitamente informado em PAGO.
+        # Não presumimos pagamento somente porque a data já venceu.
+        pago = _valor_monetario_pagamentos(
+            _chave_pagamentos(original, "PAGO")
+        )
+
+        vencimentos = []
+
+        for cabecalho, valor in (original or {}).items():
+            if not _eh_coluna_data_pagamentos(cabecalho):
+                continue
+
+            valor_vencimento = _valor_monetario_pagamentos(valor)
+
+            if valor_vencimento == 0:
+                continue
+
+            data_obj = _data_pagamentos(cabecalho)
+            data_texto = limpar_texto(cabecalho)
+
+            colunas_data.add(data_texto)
+
+            vencimentos.append({
+                "data": data_texto,
+                "data_obj": data_obj,
+                "valor": valor_vencimento,
+            })
+
+        registros.append({
+            "supervisor": sup,
+            "subsupervisor": sub,
+            "comunidade": com,
+            "qtde": qtde,
+            "total": total,
+            "pago": pago,
+            "resta_pagar": resta,
+            "vencimentos": vencimentos,
+        })
+
+    registros.sort(
+        key=lambda r: (
+            normalizar_filtro(r.get("supervisor", "")),
+            normalizar_filtro(r.get("subsupervisor", "")),
+            normalizar_filtro(r.get("comunidade", "")),
+        )
+    )
+
+    total_previsto = sum(
+        r["total"] for r in registros
+    )
+    total_pago = sum(
+        r["pago"] for r in registros
+    )
+    total_resta = sum(
+        r["resta_pagar"] for r in registros
+    )
+    total_pessoas = sum(
+        r["qtde"] for r in registros
+    )
+
+    resumo_vencimentos = []
+
+    for cabecalho in sorted(
+        colunas_data,
+        key=lambda d: _data_pagamentos(d) or datetime.max
+    ):
+        itens = []
+        total_vencimento = 0.0
+        pessoas = 0
+
+        for registro in registros:
+            for vencimento in registro["vencimentos"]:
+                if vencimento["data"] != cabecalho:
+                    continue
+
+                itens.append({
+                    "supervisor": registro["supervisor"],
+                    "subsupervisor": registro["subsupervisor"],
+                    "comunidade": registro["comunidade"],
+                    "qtde": registro["qtde"],
+                    "valor": vencimento["valor"],
+                })
+
+                total_vencimento += vencimento["valor"]
+                pessoas += registro["qtde"]
+
+        if itens:
+            resumo_vencimentos.append({
+                "data": cabecalho,
+                "total": total_vencimento,
+                "liderancas": len(itens),
+                "pessoas": pessoas,
+                "itens": itens,
+            })
+
+    return {
+        "tipo": "pagamentos_liderancas",
+        "titulo": "Relatório de Pagamentos das Lideranças",
+        "total_registros": len(registros),
+        "total_previsto": total_previsto,
+        "total_pago": total_pago,
+        "total_resta_pagar": total_resta,
+        "total_pessoas": total_pessoas,
+        "filtros": {
+            "supervisor": limpar_texto(supervisor),
+            "subsupervisor": limpar_texto(subsupervisor),
+            "comunidade": limpar_texto(comunidade),
+        },
+        "registros": registros,
+        "vencimentos": resumo_vencimentos,
+    }
+
+
+def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
+    from reportlab.lib.pagesizes import landscape
+
+    buffer = BytesIO()
+
+    documento = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=0.7 * cm,
+        leftMargin=0.7 * cm,
+        topMargin=1.0 * cm,
+        bottomMargin=1.1 * cm,
+        title="Relatório de Pagamentos das Lideranças"
+    )
+
+    estilos = _estilos_pdf()
+
+    elementos = [
+        Paragraph(
+            "RELATÓRIO DE PAGAMENTOS DAS LIDERANÇAS",
+            estilos["titulo"]
+        )
+    ]
+
+    filtros = resultado_relatorio.get("filtros", {})
+    partes = []
+
+    for rotulo, chave in (
+        ("Supervisor", "supervisor"),
+        ("Subsupervisor", "subsupervisor"),
+        ("Comunidade", "comunidade"),
+    ):
+        valor = limpar_texto(filtros.get(chave, ""))
+        if valor:
+            partes.append(f"{rotulo}: {valor}")
+
+    topo = (
+        f"Total previsto: "
+        f"{_formatar_moeda_pagamentos(resultado_relatorio.get('total_previsto', 0))}"
+        f" &nbsp;|&nbsp; Pago: "
+        f"{_formatar_moeda_pagamentos(resultado_relatorio.get('total_pago', 0))}"
+        f" &nbsp;|&nbsp; Resta pagar: "
+        f"{_formatar_moeda_pagamentos(resultado_relatorio.get('total_resta_pagar', 0))}"
+    )
+
+    if partes:
+        topo += "<br/>" + " &nbsp;|&nbsp; ".join(partes)
+
+    elementos += [
+        Paragraph(topo, estilos["subtitulo"]),
+        Spacer(1, 0.35 * cm)
+    ]
+
+    registros = resultado_relatorio.get("registros", [])
+
+    if registros:
+        dados = [[
+            Paragraph("<b>SUPERVISOR</b>", estilos["texto"]),
+            Paragraph("<b>SUBSUPERVISOR</b>", estilos["texto"]),
+            Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
+            Paragraph("<b>QTDE</b>", estilos["texto_centro"]),
+            Paragraph("<b>TOTAL</b>", estilos["texto_centro"]),
+            Paragraph("<b>PAGO</b>", estilos["texto_centro"]),
+            Paragraph("<b>RESTA</b>", estilos["texto_centro"]),
+        ]]
+
+        for registro in registros:
+            dados.append([
+                Paragraph(registro["supervisor"] or "—", estilos["texto"]),
+                Paragraph(registro["subsupervisor"] or "—", estilos["texto"]),
+                Paragraph(registro["comunidade"] or "—", estilos["texto"]),
+                Paragraph(str(registro["qtde"]), estilos["texto_centro"]),
+                Paragraph(
+                    _formatar_moeda_pagamentos(registro["total"]),
+                    estilos["texto_centro"]
+                ),
+                Paragraph(
+                    _formatar_moeda_pagamentos(registro["pago"]),
+                    estilos["texto_centro"]
+                ),
+                Paragraph(
+                    _formatar_moeda_pagamentos(registro["resta_pagar"]),
+                    estilos["texto_centro"]
+                ),
+            ])
+
+        tabela = Table(
+            dados,
+            colWidths=[
+                4.0 * cm,
+                4.0 * cm,
+                4.7 * cm,
+                1.6 * cm,
+                3.0 * cm,
+                3.0 * cm,
+                3.0 * cm,
+            ],
+            repeatRows=1
+        )
+
+        tabela.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F4F7")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9DEE5")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#C9D2DC")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+
+        elementos += [
+            tabela,
+            Spacer(1, 0.5 * cm),
+            Paragraph(
+                "VALORES POR VENCIMENTO",
+                estilos["grupo"]
+            ),
+            Spacer(1, 0.18 * cm)
+        ]
+
+        for vencimento in resultado_relatorio.get("vencimentos", []):
+            elementos.append(
+                Paragraph(
+                    f"<b>{vencimento['data']}</b>"
+                    f" &nbsp;&nbsp;|&nbsp;&nbsp; "
+                    f"{vencimento['liderancas']} liderança(s)"
+                    f" &nbsp;&nbsp;|&nbsp;&nbsp; "
+                    f"{vencimento['pessoas']} pessoa(s)"
+                    f" &nbsp;&nbsp;|&nbsp;&nbsp; "
+                    f"<b>{_formatar_moeda_pagamentos(vencimento['total'])}</b>",
+                    estilos["texto"]
+                )
+            )
+
+            vd = [[
+                Paragraph("<b>LIDERANÇA</b>", estilos["texto"]),
+                Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
+                Paragraph("<b>QTDE</b>", estilos["texto_centro"]),
+                Paragraph("<b>VALOR</b>", estilos["texto_centro"]),
+            ]]
+
+            for item in vencimento["itens"]:
+                lideranca = item["supervisor"]
+
+                if item["subsupervisor"]:
+                    lideranca += f" / {item['subsupervisor']}"
+
+                vd.append([
+                    Paragraph(lideranca or "—", estilos["texto"]),
+                    Paragraph(item["comunidade"] or "—", estilos["texto"]),
+                    Paragraph(str(item["qtde"]), estilos["texto_centro"]),
+                    Paragraph(
+                        _formatar_moeda_pagamentos(item["valor"]),
+                        estilos["texto_centro"]
+                    ),
+                ])
+
+            tv = Table(
+                vd,
+                colWidths=[
+                    8.0 * cm,
+                    8.0 * cm,
+                    2.5 * cm,
+                    4.0 * cm,
+                ],
+                repeatRows=1
+            )
+
+            tv.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F4F7")),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9DEE5")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]))
+
+            elementos += [
+                Spacer(1, 0.10 * cm),
+                tv,
+                Spacer(1, 0.30 * cm)
+            ]
+
+    else:
+        elementos.append(
+            Paragraph(
+                "Nenhum pagamento encontrado.",
+                estilos["texto"]
+            )
+        )
+
+    documento.build(
+        elementos,
+        onFirstPage=_cabecalho_rodape_pdf,
+        onLaterPages=_cabecalho_rodape_pdf
+    )
+
+    pdf = buffer.getvalue()
+    buffer.close()
+
+    return pdf
