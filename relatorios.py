@@ -2478,203 +2478,148 @@ def gerar_relatorio_pagamentos(
 
 
 def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
-    from reportlab.lib.pagesizes import landscape
-
+    """Gera PDF A4 retrato com visual de painel: cards, cabeçalhos azuis e vencimentos destacados."""
     buffer = BytesIO()
 
+    AZUL = colors.HexColor("#0B3478")
+    AZUL2 = colors.HexColor("#1D5FD0")
+    VERDE = colors.HexColor("#237A34")
+    LARANJA = colors.HexColor("#D96600")
+    VERMELHO = colors.HexColor("#C62828")
+    CINZA = colors.HexColor("#D7DCE3")
+    CINZA_CLARO = colors.HexColor("#F5F7FA")
+    TEXTO = colors.HexColor("#101828")
+
     documento = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(A4),
-        rightMargin=0.7 * cm,
-        leftMargin=0.7 * cm,
-        topMargin=1.0 * cm,
-        bottomMargin=1.1 * cm,
+        buffer, pagesize=A4,
+        rightMargin=0.55 * cm, leftMargin=0.55 * cm,
+        topMargin=0.60 * cm, bottomMargin=0.75 * cm,
         title="Relatório de Pagamentos das Lideranças"
     )
 
-    estilos = _estilos_pdf()
+    base = getSampleStyleSheet()
+    titulo = ParagraphStyle("PagTitulo", parent=base["Heading1"], fontName="Helvetica-Bold",
+                            fontSize=16, leading=18, alignment=TA_CENTER, textColor=AZUL,
+                            spaceAfter=4)
+    pequeno = ParagraphStyle("PagPequeno", parent=base["Normal"], fontName="Helvetica",
+                             fontSize=7.8, leading=9.2, textColor=TEXTO)
+    pequeno_b = ParagraphStyle("PagPequenoB", parent=pequeno, fontName="Helvetica-Bold")
+    celula = ParagraphStyle("PagCelula", parent=pequeno, fontSize=7.6, leading=8.8)
+    celula_b = ParagraphStyle("PagCelulaB", parent=celula, fontName="Helvetica-Bold", textColor=colors.white)
+    centro = ParagraphStyle("PagCentro", parent=celula, alignment=TA_CENTER)
+    centro_b = ParagraphStyle("PagCentroB", parent=celula_b, alignment=TA_CENTER)
+    secao = ParagraphStyle("PagSecao", parent=base["Heading2"], fontName="Helvetica-Bold",
+                           fontSize=11.5, leading=13, textColor=AZUL, spaceBefore=3, spaceAfter=3)
+    card_rotulo = ParagraphStyle("PagCardRot", parent=base["Normal"], fontName="Helvetica-Bold",
+                                 fontSize=7.5, leading=9, alignment=TA_CENTER)
+    card_valor = ParagraphStyle("PagCardVal", parent=base["Normal"], fontName="Helvetica-Bold",
+                                fontSize=11.5, leading=13.5, alignment=TA_CENTER, textColor=TEXTO)
 
-    elementos = [
-        Paragraph(
-            "RELATÓRIO DE PAGAMENTOS DAS LIDERANÇAS",
-            estilos["titulo"]
-        )
-    ]
+    elementos = [Paragraph("RELATÓRIO DE PAGAMENTOS DAS LIDERANÇAS", titulo)]
 
+    # Linha de geração e filtros
     filtros = resultado_relatorio.get("filtros", {})
     partes = []
-
-    for rotulo, chave in (
-        ("Supervisor", "supervisor"),
-        ("Subsupervisor", "subsupervisor"),
-        ("Comunidade", "comunidade"),
-    ):
+    for rotulo, chave in (("Supervisor", "supervisor"), ("Subsupervisor", "subsupervisor"), ("Comunidade", "comunidade")):
         valor = limpar_texto(filtros.get(chave, ""))
         if valor:
-            partes.append(f"{rotulo}: {valor}")
-
-    topo = (
-        f"Lideranças: {resultado_relatorio.get('total_liderancas', 0)}"
-        f" &nbsp;|&nbsp; Pessoas: {resultado_relatorio.get('total_pessoas', 0)}"
-        f" &nbsp;|&nbsp; Total previsto: "
-        f"{_formatar_moeda_pagamentos(resultado_relatorio.get('total_previsto', 0))}"
-        f" &nbsp;|&nbsp; Pago: "
-        f"{_formatar_moeda_pagamentos(resultado_relatorio.get('total_pago', 0))}"
-        f" &nbsp;|&nbsp; Resta pagar: "
-        f"{_formatar_moeda_pagamentos(resultado_relatorio.get('total_resta_pagar', 0))}"
-    )
-
+            partes.append(f"<b>{rotulo}:</b> {valor}")
+    linha_info = "Gerado em " + datetime.now().strftime("%d/%m/%Y %H:%M")
     if partes:
-        topo += "<br/>" + " &nbsp;|&nbsp; ".join(partes)
+        linha_info += " &nbsp;&nbsp; | &nbsp;&nbsp; " + " &nbsp; | &nbsp; ".join(partes)
+    elementos += [Paragraph(linha_info, pequeno), Spacer(1, 0.12*cm)]
 
-    elementos += [
-        Paragraph(topo, estilos["subtitulo"]),
-        Spacer(1, 0.35 * cm)
+    # Cards do resumo
+    cards = [
+        ("LIDERANÇAS", str(resultado_relatorio.get("total_liderancas", 0)), AZUL2),
+        ("PESSOAS", str(resultado_relatorio.get("total_pessoas", 0)), VERDE),
+        ("TOTAL PREVISTO", _formatar_moeda_pagamentos(resultado_relatorio.get("total_previsto", 0)), LARANJA),
+        ("PAGO", _formatar_moeda_pagamentos(resultado_relatorio.get("total_pago", 0)), VERDE),
+        ("RESTA PAGAR", _formatar_moeda_pagamentos(resultado_relatorio.get("total_resta_pagar", 0)), VERMELHO),
     ]
+    card_data = [[Paragraph(f'<font color="{cor.hexval()}"><b>{rot}</b></font>', card_rotulo) for rot, val, cor in cards],
+                 [Paragraph(val, card_valor) for rot, val, cor in cards]]
+    cards_t = Table(card_data, colWidths=[3.78*cm]*5, rowHeights=[0.48*cm, 0.70*cm])
+    cards_t.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 0.65, CINZA), ("INNERGRID", (0,0), (-1,-1), 0.35, CINZA),
+        ("BACKGROUND", (0,0), (-1,-1), colors.white),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("LEFTPADDING", (0,0), (-1,-1), 2), ("RIGHTPADDING", (0,0), (-1,-1), 2),
+        ("TOPPADDING", (0,0), (-1,-1), 2), ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+    ]))
+    elementos += [cards_t, Spacer(1, 0.18*cm), Paragraph("PAGAMENTOS POR LIDERANÇA", secao)]
 
     registros = resultado_relatorio.get("registros", [])
-
     if registros:
-        dados = [[
-            Paragraph("<b>SUPERVISOR</b>", estilos["texto"]),
-            Paragraph("<b>SUBSUPERVISOR</b>", estilos["texto"]),
-            Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
-            Paragraph("<b>QTDE</b>", estilos["texto_centro"]),
-            Paragraph("<b>TOTAL</b>", estilos["texto_centro"]),
-            Paragraph("<b>PAGO</b>", estilos["texto_centro"]),
-            Paragraph("<b>RESTA</b>", estilos["texto_centro"]),
-        ]]
-
-        for registro in registros:
+        dados = [[Paragraph("SUPERVISOR", centro_b), Paragraph("SUBSUPERVISOR", centro_b),
+                  Paragraph("COMUNIDADE", centro_b), Paragraph("QTDE", centro_b),
+                  Paragraph("TOTAL", centro_b), Paragraph("PAGO", centro_b), Paragraph("RESTA", centro_b)]]
+        for r in registros:
             dados.append([
-                Paragraph(registro["supervisor"] or "—", estilos["texto"]),
-                Paragraph(registro["subsupervisor"] or "—", estilos["texto"]),
-                Paragraph(registro["comunidade"] or "—", estilos["texto"]),
-                Paragraph(str(registro["qtde"]), estilos["texto_centro"]),
-                Paragraph(
-                    _formatar_moeda_pagamentos(registro["total"]),
-                    estilos["texto_centro"]
-                ),
-                Paragraph(
-                    _formatar_moeda_pagamentos(registro["pago"]),
-                    estilos["texto_centro"]
-                ),
-                Paragraph(
-                    _formatar_moeda_pagamentos(registro["resta_pagar"]),
-                    estilos["texto_centro"]
-                ),
+                Paragraph(r["supervisor"] or "—", celula), Paragraph(r["subsupervisor"] or "—", celula),
+                Paragraph(r["comunidade"] or "—", celula), Paragraph(str(r["qtde"]), centro),
+                Paragraph(_formatar_moeda_pagamentos(r["total"]), centro),
+                Paragraph(_formatar_moeda_pagamentos(r["pago"]), centro),
+                Paragraph(_formatar_moeda_pagamentos(r["resta_pagar"]), centro),
             ])
-
-        tabela = Table(
-            dados,
-            colWidths=[
-                4.0 * cm,
-                4.0 * cm,
-                4.7 * cm,
-                1.6 * cm,
-                3.0 * cm,
-                3.0 * cm,
-                3.0 * cm,
-            ],
-            repeatRows=1
-        )
-
-        tabela.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F4F7")),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9DEE5")),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#C9D2DC")),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 3),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        t = Table(dados, colWidths=[3.35*cm, 3.0*cm, 3.45*cm, 1.15*cm, 2.65*cm, 2.65*cm, 2.65*cm], repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), AZUL), ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("GRID", (0,0), (-1,-1), 0.28, CINZA), ("BOX", (0,0), (-1,-1), 0.5, AZUL),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 2.3), ("RIGHTPADDING", (0,0), (-1,-1), 2.3),
+            ("TOPPADDING", (0,0), (-1,-1), 2.1), ("BOTTOMPADDING", (0,0), (-1,-1), 2.1),
         ]))
+        elementos += [t, Spacer(1, 0.20*cm), Paragraph("VALORES POR VENCIMENTO", secao)]
 
-        elementos += [
-            tabela,
-            Spacer(1, 0.5 * cm),
-            Paragraph(
-                "VALORES POR VENCIMENTO",
-                estilos["grupo"]
-            ),
-            Spacer(1, 0.18 * cm)
-        ]
-
-        for vencimento in resultado_relatorio.get("vencimentos", []):
-            elementos.append(
-                Paragraph(
-                    f"<b>{vencimento['data']}</b>"
-                    f" &nbsp;&nbsp;|&nbsp;&nbsp; "
-                    f"{vencimento['liderancas']} liderança(s)"
-                    f" &nbsp;&nbsp;|&nbsp;&nbsp; "
-                    f"{vencimento['pessoas']} pessoa(s)"
-                    f" &nbsp;&nbsp;|&nbsp;&nbsp; "
-                    f"<b>{_formatar_moeda_pagamentos(vencimento['total'])}</b>",
-                    estilos["texto"]
-                )
-            )
-
-            vd = [[
-                Paragraph("<b>LIDERANÇA</b>", estilos["texto"]),
-                Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
-                Paragraph("<b>QTDE</b>", estilos["texto_centro"]),
-                Paragraph("<b>VALOR</b>", estilos["texto_centro"]),
-            ]]
-
-            for item in vencimento["itens"]:
-                lideranca = item["supervisor"]
-
-                if item["subsupervisor"]:
-                    lideranca += f" / {item['subsupervisor']}"
-
-                vd.append([
-                    Paragraph(lideranca or "—", estilos["texto"]),
-                    Paragraph(item["comunidade"] or "—", estilos["texto"]),
-                    Paragraph(str(item["qtde"]), estilos["texto_centro"]),
-                    Paragraph(
-                        _formatar_moeda_pagamentos(item["valor"]),
-                        estilos["texto_centro"]
-                    ),
-                ])
-
-            tv = Table(
-                vd,
-                colWidths=[
-                    8.0 * cm,
-                    8.0 * cm,
-                    2.5 * cm,
-                    4.0 * cm,
-                ],
-                repeatRows=1
-            )
-
-            tv.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F4F7")),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9DEE5")),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        cores = [AZUL2, VERDE, LARANJA, colors.HexColor("#7A3EB1"), colors.HexColor("#00838F")]
+        for idx, venc in enumerate(resultado_relatorio.get("vencimentos", [])):
+            cor = cores[idx % len(cores)]
+            estilo_data = ParagraphStyle(f"DataV{idx}", parent=base["Normal"], fontName="Helvetica-Bold",
+                                         fontSize=12, leading=14, textColor=cor)
+            estilo_meta = ParagraphStyle(f"MetaV{idx}", parent=base["Normal"], fontName="Helvetica",
+                                         fontSize=8.4, leading=10, textColor=TEXTO, alignment=TA_CENTER)
+            estilo_total = ParagraphStyle(f"TotV{idx}", parent=estilo_meta, fontName="Helvetica-Bold", textColor=cor)
+            cab = Table([[
+                Paragraph(venc["data"], estilo_data),
+                Paragraph(f'{venc["liderancas"]} liderança(s)', estilo_meta),
+                Paragraph(f'{venc["pessoas"]} pessoa(s)', estilo_meta),
+                Paragraph(f'TOTAL: {_formatar_moeda_pagamentos(venc["total"])}', estilo_total),
+            ]], colWidths=[2.5*cm, 4.2*cm, 4.2*cm, 8.0*cm])
+            cab.setStyle(TableStyle([
+                ("BOX", (0,0), (-1,-1), 0.75, cor), ("LINEBEFORE", (1,0), (-1,0), 0.35, cor),
+                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#FAFBFD")),
+                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("LEFTPADDING", (0,0), (-1,-1), 5), ("RIGHTPADDING", (0,0), (-1,-1), 5),
+                ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4),
             ]))
+            elementos.append(cab)
 
-            elementos += [
-                Spacer(1, 0.10 * cm),
-                tv,
-                Spacer(1, 0.30 * cm)
-            ]
-
+            hstyle = ParagraphStyle(f"HV{idx}", parent=celula_b, textColor=cor, fontSize=7.8)
+            hc = ParagraphStyle(f"HCV{idx}", parent=hstyle, alignment=TA_CENTER)
+            vd = [[Paragraph("LIDERANÇA", hstyle), Paragraph("COMUNIDADE", hstyle), Paragraph("QTDE", hc), Paragraph("VALOR", hc)]]
+            for item in venc["itens"]:
+                lideranca = item["supervisor"] + (f' / {item["subsupervisor"]}' if item["subsupervisor"] else "")
+                vd.append([Paragraph(lideranca or "—", celula), Paragraph(item["comunidade"] or "—", celula),
+                           Paragraph(str(item["qtde"]), centro), Paragraph(_formatar_moeda_pagamentos(item["valor"]), centro)])
+            tv = Table(vd, colWidths=[6.55*cm, 6.25*cm, 2.0*cm, 4.1*cm], repeatRows=1)
+            tv.setStyle(TableStyle([
+                ("BACKGROUND", (0,0), (-1,0), CINZA_CLARO), ("GRID", (0,0), (-1,-1), 0.28, CINZA),
+                ("BOX", (0,0), (-1,-1), 0.55, cor), ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("LEFTPADDING", (0,0), (-1,-1), 3), ("RIGHTPADDING", (0,0), (-1,-1), 3),
+                ("TOPPADDING", (0,0), (-1,-1), 2.2), ("BOTTOMPADDING", (0,0), (-1,-1), 2.2),
+            ]))
+            elementos += [tv, Spacer(1, 0.16*cm)]
     else:
-        elementos.append(
-            Paragraph(
-                "Nenhum pagamento encontrado.",
-                estilos["texto"]
-            )
-        )
+        elementos.append(Paragraph("Nenhum pagamento encontrado.", pequeno))
 
-    documento.build(
-        elementos,
-        onFirstPage=_cabecalho_rodape_pdf,
-        onLaterPages=_cabecalho_rodape_pdf
-    )
+    def rodape(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#667085"))
+        canvas.drawString(0.65*cm, 0.38*cm, "Relatório de Pagamentos das Lideranças")
+        canvas.drawRightString(A4[0]-0.65*cm, 0.38*cm, f"Página {doc.page}")
+        canvas.restoreState()
 
-    pdf = buffer.getvalue()
-    buffer.close()
-
-    return pdf
+    documento.build(elementos, onFirstPage=rodape, onLaterPages=rodape)
+    pdf = buffer.getvalue(); buffer.close(); return pdf
