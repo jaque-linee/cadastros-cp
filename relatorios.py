@@ -2730,7 +2730,7 @@ def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
 
         # Larguras pensadas para 7 datas; se novas datas forem criadas,
         # as colunas de data se ajustam automaticamente ao espaço disponível.
-        fixas = [3.05 * cm, 2.75 * cm, 2.95 * cm, 1.00 * cm, 1.15 * cm]
+        fixas = [2.95 * cm, 2.65 * cm, 2.80 * cm, 1.05 * cm, 1.45 * cm]
         finais = [1.90 * cm, 1.90 * cm]
         restante = largura_util - sum(fixas) - sum(finais)
         largura_data = restante / max(1, len(colunas_data))
@@ -2803,4 +2803,3 @@ def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
     pdf = buffer.getvalue()
     buffer.close()
     return pdf
-
