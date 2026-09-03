@@ -258,6 +258,42 @@ def carregar_pagamentos_liderancas(webhook_url, timeout=15):
         }
 
 
+
+def carregar_liderancas_controle(webhook_url, timeout=15):
+    """Carrega a aba LIDERANÇAS CONTROLE para obter a coluna ATUAL."""
+    try:
+        resposta = requests.get(
+            webhook_url,
+            params={"acao": "liderancas_controle"},
+            timeout=timeout,
+        )
+        resposta.raise_for_status()
+        dados = resposta.json()
+
+        if isinstance(dados, dict) and dados.get("error"):
+            return {
+                "sucesso": False,
+                "dados": [],
+                "mensagem": str(dados.get("error", "")).strip()
+                or "Não foi possível carregar LIDERANÇAS CONTROLE.",
+            }
+
+        if not isinstance(dados, list):
+            return {
+                "sucesso": False,
+                "dados": [],
+                "mensagem": "Resposta inválida ao carregar LIDERANÇAS CONTROLE.",
+            }
+
+        return {"sucesso": True, "dados": dados, "mensagem": ""}
+
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "dados": [],
+            "mensagem": f"Erro ao carregar LIDERANÇAS CONTROLE: {erro}",
+        }
+
 def procurar_duplicidade(
     dados_base,
     cpf="",
