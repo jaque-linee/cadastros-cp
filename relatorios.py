@@ -2586,7 +2586,7 @@ def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
         fontSize=7.5, leading=9, textColor=TEXTO
     )
     celula = ParagraphStyle(
-        "PagCelulaNovo", parent=pequeno, fontSize=6.8, leading=8.0
+        "PagCelulaNovo", parent=pequeno, fontSize=7.5, leading=8.8
     )
     celula_b = ParagraphStyle(
         "PagCelulaBNovo", parent=celula, fontName="Helvetica-Bold", textColor=colors.white
@@ -2730,8 +2730,8 @@ def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
 
         # Larguras pensadas para 7 datas; se novas datas forem criadas,
         # as colunas de data se ajustam automaticamente ao espaço disponível.
-        fixas = [3.15 * cm, 2.85 * cm, 3.05 * cm, 0.90 * cm, 0.90 * cm]
-        finais = [1.85 * cm, 1.85 * cm]
+        fixas = [3.05 * cm, 2.75 * cm, 2.95 * cm, 1.00 * cm, 1.15 * cm]
+        finais = [1.90 * cm, 1.90 * cm]
         restante = largura_util - sum(fixas) - sum(finais)
         largura_data = restante / max(1, len(colunas_data))
         larguras = fixas + [largura_data] * len(colunas_data) + finais
@@ -2745,8 +2745,8 @@ def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 1.8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 1.8),
-            ("TOPPADDING", (0, 0), (-1, -1), 2.0),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.0),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.4),
             ("BACKGROUND", (4, 1), (4, -1), CINZA_CLARO),
         ]))
         elementos += [tabela, Spacer(1, 0.13 * cm)]
