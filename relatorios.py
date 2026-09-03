@@ -4,6 +4,7 @@
 
 from io import BytesIO
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import html
 from cruzamento import buscar_titulo
 
@@ -482,8 +483,8 @@ def _cabecalho_rodape_pdf(
         )
     )
 
-    data_geracao = datetime.now().strftime(
-        "%d/%m/%Y %H:%M"
+    data_geracao = datetime.now(ZoneInfo("America/Maceio")).strftime(
+    "%d/%m/%Y %H:%M"
     )
 
     canvas.drawString(
@@ -2533,7 +2534,7 @@ def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
         valor = limpar_texto(filtros.get(chave, ""))
         if valor:
             partes.append(f"<b>{rotulo}:</b> {valor}")
-    linha_info = "Gerado em " + datetime.now().strftime("%d/%m/%Y %H:%M")
+    linha_info = "Gerado em " + datetime.now(ZoneInfo("America/Maceio")).strftime("%d/%m/%Y %H:%M")
     if partes:
         linha_info += " &nbsp;&nbsp; | &nbsp;&nbsp; " + " &nbsp; | &nbsp; ".join(partes)
     elementos += [Paragraph(linha_info, pequeno), Spacer(1, 0.12*cm)]
