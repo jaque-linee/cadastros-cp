@@ -688,6 +688,21 @@ def exibir_tela_relatorios(base):
 
         dados_pagamentos = resposta_pagamentos.get("dados", [])
 
+        resposta_controle = sheets.carregar_liderancas_controle(
+            WEBHOOK_URL
+        )
+
+        if not resposta_controle.get("sucesso"):
+            st.error(
+                resposta_controle.get(
+                    "mensagem",
+                    "Não foi possível carregar LIDERANÇAS CONTROLE."
+                )
+            )
+            return
+
+        dados_liderancas_controle = resposta_controle.get("dados", [])
+
         if not dados_pagamentos:
             st.info(
                 'Nenhum registro encontrado na aba '
@@ -743,6 +758,7 @@ def exibir_tela_relatorios(base):
                 "relatorio_pagamentos_gerado"
             ] = relatorios.gerar_relatorio_pagamentos(
                 dados_pagamentos=dados_pagamentos,
+                dados_liderancas_controle=dados_liderancas_controle,
                 supervisor=(
                     ""
                     if filtro_supervisor == "Todos"
@@ -769,6 +785,7 @@ def exibir_tela_relatorios(base):
         if resultado is not None:
             resultado = relatorios.gerar_relatorio_pagamentos(
                 dados_pagamentos=dados_pagamentos,
+                dados_liderancas_controle=dados_liderancas_controle,
                 supervisor=(
                     ""
                     if filtro_supervisor == "Todos"
@@ -829,10 +846,9 @@ def exibir_tela_relatorios(base):
             with col_pessoas:
                 st.metric(
                     "🧑‍🤝‍🧑 PESSOAS",
-                    resultado.get(
-                        "total_pessoas",
-                        0
-                    )
+                    resultado.get("total_pessoas", 0),
+                    delta=f'ATUAL: {resultado.get("total_atual", 0)}',
+                    delta_color="off"
                 )
 
             with col_previsto:
@@ -882,45 +898,25 @@ def exibir_tela_relatorios(base):
                 st.markdown("#### Detalhamento")
 
                 linhas = []
+                colunas_data = resultado.get("colunas_data", [])
 
                 for registro in registros:
-                    linhas.append({
-                        "Supervisor":
-                            registro.get(
-                                "supervisor",
-                                ""
-                            ),
-                        "Subsupervisor":
-                            registro.get(
-                                "subsupervisor",
-                                ""
-                            ),
-                        "Comunidade":
-                            registro.get(
-                                "comunidade",
-                                ""
-                            ),
-                        "Qtde":
-                            registro.get(
-                                "qtde",
-                                0
-                            ),
-                        "Total":
-                            registro.get(
-                                "total",
-                                0
-                            ),
-                        "Pago":
-                            registro.get(
-                                "pago",
-                                0
-                            ),
-                        "Resta pagar":
-                            registro.get(
-                                "resta_pagar",
-                                0
-                            ),
-                    })
+                    linha = {
+                        "Supervisor": registro.get("supervisor", ""),
+                        "Subsupervisor": registro.get("subsupervisor", ""),
+                        "Comunidade": registro.get("comunidade", ""),
+                        "Qtde": registro.get("qtde", 0),
+                        "Atual": registro.get("atual", 0),
+                    }
+
+                    for data in colunas_data:
+                        linha[data] = registro.get(
+                            "valores_datas", {}
+                        ).get(data, 0)
+
+                    linha["Pago"] = registro.get("pago", 0)
+                    linha["Resta pagar"] = registro.get("resta_pagar", 0)
+                    linhas.append(linha)
 
                 df_pagamentos = pd.DataFrame(
                     linhas
