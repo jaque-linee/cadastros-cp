@@ -7,6 +7,8 @@ import streamlit.components.v1 as components
 import relatorios
 import sheets
 
+st.error(f"RELATORIOS CARREGADO DE: {relatorios.__file__}")
+
 WEBHOOK_URL = st.secrets["WEBHOOK_URL"]
 
 
