@@ -12,8 +12,6 @@ from leitor_documentos import preparar_documento
 from extrator_documentos import analisar_documentos
 from gemini_documentos import (
     ler_documento_gemini,
-    pode_chamar_gemini,
-    LIMITE_DOCUMENTOS_SESSAO,
     LIMITE_ESTIMADO_BRL_SESSAO,
     MODELO_GEMINI,
 )
@@ -35,6 +33,22 @@ def _obter_gemini_api_key():
         return str(st.secrets.get("GEMINI_API_KEY", "") or "").strip()
     except Exception:
         return ""
+
+
+def _pode_chamar_gemini_financeiro(custo_brl_estimado):
+    """
+    Trava local baseada SOMENTE no custo estimado acumulado da sessão.
+    O contador de chamadas continua sendo exibido, mas não bloqueia o Gemini.
+    """
+    custo = float(custo_brl_estimado or 0)
+
+    if custo >= LIMITE_ESTIMADO_BRL_SESSAO:
+        return False, (
+            f"Limite financeiro de segurança atingido: "
+            f"R$ {LIMITE_ESTIMADO_BRL_SESSAO:.2f} estimados nesta sessão."
+        )
+
+    return True, ""
 
 
 def _consumo_gemini():
@@ -62,9 +76,10 @@ def _monitor_gemini(local=None):
     c = _consumo_gemini()
     msg = (
         f"🤖 Gemini híbrido ({MODELO_GEMINI}) — "
-        f"{c['documentos']}/{LIMITE_DOCUMENTOS_SESSAO} chamadas úteis · "
+        f"{c['documentos']} chamadas úteis · "
         f"{c['prompt_tokens']} tokens entrada · {c['output_tokens']} saída · "
-        f"**R$ {c['custo_brl']:.4f} estimados** · trava R$ {LIMITE_ESTIMADO_BRL_SESSAO:.2f}"
+        f"**R$ {c['custo_brl']:.4f} estimados** · "
+        f"trava financeira R$ {LIMITE_ESTIMADO_BRL_SESSAO:.2f}"
     )
     (local.info if local is not None else st.info)(msg)
 
@@ -364,8 +379,7 @@ def exibir_tela_envio_documentos(
 
                     if nome_precisa_gemini and api_key_gemini:
                         consumo = _consumo_gemini()
-                        permitido_nome, motivo_nome = pode_chamar_gemini(
-                            consumo["documentos"],
+                        permitido_nome, motivo_nome = _pode_chamar_gemini_financeiro(
                             consumo["custo_brl"]
                         )
 
@@ -408,8 +422,7 @@ def exibir_tela_envio_documentos(
 
                     if campos_alvo and api_key_gemini:
                         consumo = _consumo_gemini()
-                        permitido, motivo = pode_chamar_gemini(
-                            consumo["documentos"],
+                        permitido, motivo = _pode_chamar_gemini_financeiro(
                             consumo["custo_brl"]
                         )
 
@@ -452,8 +465,7 @@ def exibir_tela_envio_documentos(
 
                                 if criticos and "nome_mae" in campos_alvo:
                                     consumo = _consumo_gemini()
-                                    permitido_mae, _ = pode_chamar_gemini(
-                                        consumo["documentos"],
+                                    permitido_mae, _ = _pode_chamar_gemini_financeiro(
                                         consumo["custo_brl"]
                                     )
 
