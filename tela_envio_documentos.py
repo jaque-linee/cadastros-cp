@@ -13,6 +13,7 @@ from extrator_documentos import analisar_documentos
 from gemini_documentos import (
     ler_documento_gemini,
     ler_nome_ficha_gemini,
+    ler_telefone_ficha_gemini,
     LIMITE_ESTIMADO_BRL_SESSAO,
     MODELO_GEMINI,
 )
@@ -501,12 +502,31 @@ def exibir_tela_envio_documentos(
                                 f"🔒 Gemini pausado para NOME: {motivo_nome}"
                             )
 
+                    # FICHA: confere TELEFONE em recorte exclusivo.
+                    # Documentos comuns não passam por esta rotina.
+                    if eh_ficha_cadastral and api_key_gemini:
+                        consumo = _consumo_gemini()
+                        permitido_tel, motivo_tel = _pode_chamar_gemini_financeiro(consumo["custo_brl"])
+                        if permitido_tel:
+                            try:
+                                retorno_tel = ler_telefone_ficha_gemini(arquivo_bytes, arquivo.name, api_key_gemini, timeout=12)
+                                telefone_ficha = str(retorno_tel.get("dados", {}).get("telefone", "") or "").strip()
+                                if len(telefone_ficha) in (10, 11):
+                                    dados["telefone"] = telefone_ficha
+                                _registrar_gemini(retorno_tel["uso"])
+                                _monitor_gemini(gemini_area)
+                            except Exception as erro_tel:
+                                st.caption(f"⚠️ Gemini não conseguiu conferir o TELEFONE de {arquivo.name}: {erro_tel}")
+                        else:
+                            st.caption(f"🔒 Gemini pausado para TELEFONE: {motivo_tel}")
+
                     # Recalcula os alvos após a tentativa exclusiva do NOME.
                     # Remove nome da chamada geral para não pagar/processar duas vezes.
                     campos_alvo = [
                         campo
                         for campo in _campos_para_gemini(dados)
                         if campo != "nome"
+                        and not (eh_ficha_cadastral and campo == "telefone")
                     ]
 
                     if campos_alvo and api_key_gemini:
