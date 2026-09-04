@@ -280,6 +280,49 @@ def _recortar_faixa_nome_ficha(arquivo_bytes, nome_arquivo):
     return saida.getvalue()
 
 
+
+def _recortar_faixa_telefone_ficha(arquivo_bytes, nome_arquivo):
+    """Recorta só a região do TELEFONE nas fichas reconhecidas."""
+    nome = str(nome_arquivo or "").lower()
+    if nome.endswith(".pdf"):
+        doc = fitz.open(stream=arquivo_bytes, filetype="pdf")
+        if not doc.page_count:
+            raise RuntimeError("PDF sem páginas.")
+        page = doc.load_page(0)
+        pix = page.get_pixmap(matrix=fitz.Matrix(3.0, 3.0), alpha=False)
+        img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        doc.close()
+    else:
+        img = Image.open(io.BytesIO(arquivo_bytes)).convert("RGB")
+    w, h = img.size
+    recorte = img.crop((int(w * 0.34), int(h * 0.66), w, h))
+    if recorte.width < 1600:
+        fator = 1600 / recorte.width
+        recorte = recorte.resize((int(recorte.width*fator), int(recorte.height*fator)), Image.Resampling.LANCZOS)
+    saida = io.BytesIO()
+    recorte.save(saida, format="PNG", optimize=True)
+    return saida.getvalue()
+
+
+def ler_telefone_ficha_gemini(arquivo_bytes, nome_arquivo, api_key, timeout=12):
+    """Leitura especializada do TELEFONE, somente para ficha cadastral."""
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY não configurada nos Secrets do Streamlit.")
+    recorte = _recortar_faixa_telefone_ficha(arquivo_bytes, nome_arquivo)
+    prompt = """
+Esta imagem é um recorte da parte inferior de uma ficha cadastral manuscrita.
+Leia SOMENTE o número escrito ao lado do rótulo TELEFONE:.
+Ignore DATA DE NASCIMENTO e qualquer outro número.
+Não invente dígitos. Se não puder ler com segurança, devolva vazio.
+Retorne somente dígitos e exclusivamente JSON: {"telefone":"..."}.
+""".strip()
+    schema = {"type":"OBJECT","properties":{"telefone":{"type":"STRING"}},"required":["telefone"]}
+    dados, uso = _post_gemini(recorte, "image/png", prompt, schema, api_key, timeout)
+    telefone = re.sub(r"\\D", "", str(dados.get("telefone", "") or ""))
+    if len(telefone) not in (10, 11):
+        telefone = ""
+    return {"dados":{"telefone":telefone},"uso":uso,"modelo":MODELO_GEMINI}
+
 def ler_nome_ficha_gemini(arquivo_bytes, nome_arquivo, api_key, timeout=12):
     """
     Leitura ESPECIALIZADA, acionada somente quando a tela já confirmou
