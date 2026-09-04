@@ -85,11 +85,20 @@ def _monitor_gemini(local=None):
     (local.info if local is not None else st.info)(msg)
 
 
-def _eh_ficha_cadastral(texto, itens):
+def _eh_ficha_cadastral(texto, itens, nome_arquivo=""):
     """
     Reconhece a ficha pelo CONJUNTO de rótulos impressos.
     Não depende do nome do arquivo e não ativa com um simples 'NOME'.
     """
+    # Arquivos produzidos pelo nosso separador têm um padrão inequívoco.
+    # Isso NÃO afeta RG/CNH/título/fotos/PDFs comuns.
+    nome_arq = str(nome_arquivo or "").upper()
+    if re.search(
+        r"CADASTRO[_ -]*\d+.*PAG[_ -]*\d+.*BLOCO[_ -]*\d+",
+        nome_arq
+    ):
+        return True
+
     partes = [str(texto or "")]
 
     for item in (itens or []):
@@ -424,7 +433,7 @@ def exibir_tela_envio_documentos(
 
                     # Tratamento especializado só é permitido quando o
                     # próprio OCR reconhece o conjunto de rótulos da ficha.
-                    eh_ficha_cadastral = _eh_ficha_cadastral(texto, itens)
+                    eh_ficha_cadastral = _eh_ficha_cadastral(texto, itens, arquivo.name)
 
                     # HÍBRIDO: RapidOCR primeiro.
                     # Se o NOME veio suspeito, faz uma chamada EXCLUSIVA ao Gemini
@@ -432,8 +441,12 @@ def exibir_tela_envio_documentos(
                     campos_alvo = _campos_para_gemini(dados)
                     api_key_gemini = _obter_gemini_api_key()
 
-                    nome_precisa_gemini = _nome_suspeito_para_gemini(
-                        dados.get("nome", "")
+                    # Nas fichas geradas pelo separador, SEMPRE confere o NOME
+                    # pela leitura especializada. Em documentos comuns, mantém a
+                    # regra anterior e só chama Gemini quando o nome for suspeito.
+                    nome_precisa_gemini = (
+                        eh_ficha_cadastral
+                        or _nome_suspeito_para_gemini(dados.get("nome", ""))
                     )
 
                     if nome_precisa_gemini and api_key_gemini:
@@ -462,11 +475,18 @@ def exibir_tela_envio_documentos(
                                         campos_alvo=["nome"]
                                     )
 
-                                dados = _mesclar_gemini(
-                                    dados,
-                                    retorno_nome["dados"],
-                                    ["nome"]
-                                )
+                                if eh_ficha_cadastral:
+                                    nome_ficha = str(
+                                        retorno_nome.get("dados", {}).get("nome", "") or ""
+                                    ).strip().upper()
+                                    if nome_ficha:
+                                        dados["nome"] = nome_ficha
+                                else:
+                                    dados = _mesclar_gemini(
+                                        dados,
+                                        retorno_nome["dados"],
+                                        ["nome"]
+                                    )
 
                                 _registrar_gemini(retorno_nome["uso"])
                                 _monitor_gemini(gemini_area)
