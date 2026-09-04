@@ -58,6 +58,22 @@ def carregar_base(webhook_url, timeout=15):
                 )
             }
 
+        # Compatibilidade com a nova coluna final da TABELA:
+        # ID FAMÍLIA / ID FAMILIA -> id_familia
+        for registro in dados:
+            if not isinstance(registro, dict):
+                continue
+
+            if "id_familia" not in registro:
+                valor_familia = (
+                    registro.get("ID FAMÍLIA")
+                    or registro.get("ID FAMILIA")
+                    or registro.get("id família")
+                    or registro.get("id familia")
+                    or ""
+                )
+                registro["id_familia"] = normalizar_texto(valor_familia)
+
         return {
             "sucesso": True,
             "dados": dados,
