@@ -1185,6 +1185,367 @@ def gerar_html_relatorio_nome(resultado_relatorio):
     </html>
     """
 
+
+# ============================================================
+# RELATÓRIO POR FAMÍLIA
+# ============================================================
+
+def _obter_id_familia(registro):
+    """Aceita a chave normalizada e também o cabeçalho original da planilha."""
+    for chave in (
+        "id_familia",
+        "ID FAMÍLIA",
+        "ID FAMILIA",
+        "id família",
+        "id familia",
+    ):
+        valor = limpar_texto((registro or {}).get(chave, ""))
+        if valor:
+            return valor
+    return ""
+
+
+def obter_filtros_familia(dados_base):
+    """Filtros do relatório por família, seguindo os mesmos campos do relatório por nome."""
+    return obter_filtros_nome(dados_base)
+
+
+def filtrar_relatorio_familia(
+    dados_base,
+    supervisor="",
+    subsupervisor="",
+    situacao=""
+):
+    fs = normalizar_filtro(supervisor)
+    fsub = normalizar_filtro(subsupervisor)
+    fsi = normalizar_filtro(situacao)
+
+    registros = []
+
+    for r in dados_base or []:
+        sup = limpar_texto(r.get("supervisor", ""))
+        sub = limpar_texto(r.get("subsupervisor", ""))
+        sit = limpar_texto(r.get("situacao", ""))
+
+        if fs and normalizar_filtro(sup) != fs:
+            continue
+        if fsub and normalizar_filtro(sub) != fsub:
+            continue
+        if fsi and normalizar_filtro(sit) != fsi:
+            continue
+
+        registros.append({
+            "supervisor": sup,
+            "subsupervisor": sub,
+            "id_familia": _obter_id_familia(r),
+            "nome": limpar_texto(r.get("nome", "")),
+            "comunidade": limpar_texto(r.get("comunidade", "")),
+            "telefone": limpar_texto(r.get("telefone", "")),
+            "situacao": sit
+        })
+
+    registros.sort(
+        key=lambda x: (
+            normalizar_filtro(x["supervisor"]),
+            normalizar_filtro(x["subsupervisor"]),
+            normalizar_filtro(x["id_familia"]) if x["id_familia"] else "ZZZZZZZZ",
+            normalizar_filtro(x["nome"])
+        )
+    )
+    return registros
+
+
+def agrupar_relatorio_familia(registros):
+    """
+    Supervisor -> Subsupervisor -> Família -> Integrantes.
+    Registros sem ID FAMÍLIA ficam em Cadastros Individuais.
+    """
+    mapa = {}
+
+    for r in registros:
+        sup = limpar_texto(r.get("supervisor", "")) or "SEM SUPERVISOR"
+        sub = limpar_texto(r.get("subsupervisor", "")) or "SEM SUBSUPERVISOR"
+        chave_grupo = (normalizar_filtro(sup), normalizar_filtro(sub))
+
+        if chave_grupo not in mapa:
+            mapa[chave_grupo] = {
+                "supervisor": sup,
+                "subsupervisor": sub,
+                "familias_mapa": {},
+                "individuais": []
+            }
+
+        id_familia = limpar_texto(r.get("id_familia", ""))
+
+        if id_familia:
+            chave_familia = normalizar_filtro(id_familia)
+            if chave_familia not in mapa[chave_grupo]["familias_mapa"]:
+                mapa[chave_grupo]["familias_mapa"][chave_familia] = {
+                    "id_familia": id_familia,
+                    "integrantes": []
+                }
+            mapa[chave_grupo]["familias_mapa"][chave_familia]["integrantes"].append(r)
+        else:
+            mapa[chave_grupo]["individuais"].append(r)
+
+    grupos = []
+
+    for chave in sorted(mapa):
+        g = mapa[chave]
+        familias = list(g["familias_mapa"].values())
+
+        familias.sort(
+            key=lambda f: (
+                normalizar_filtro(f["id_familia"])
+            )
+        )
+
+        for familia in familias:
+            familia["integrantes"].sort(
+                key=lambda r: normalizar_filtro(r.get("nome", ""))
+            )
+
+        g["individuais"].sort(
+            key=lambda r: normalizar_filtro(r.get("nome", ""))
+        )
+
+        grupos.append({
+            "supervisor": g["supervisor"],
+            "subsupervisor": g["subsupervisor"],
+            "familias": familias,
+            "individuais": g["individuais"]
+        })
+
+    return grupos
+
+
+def gerar_relatorio_familia(
+    dados_base,
+    supervisor="",
+    subsupervisor="",
+    situacao=""
+):
+    registros = filtrar_relatorio_familia(
+        dados_base=dados_base,
+        supervisor=supervisor,
+        subsupervisor=subsupervisor,
+        situacao=situacao
+    )
+
+    grupos = agrupar_relatorio_familia(registros)
+
+    ids_familia = {
+        normalizar_filtro(r["id_familia"])
+        for r in registros
+        if limpar_texto(r.get("id_familia", ""))
+    }
+
+    total_individuais = sum(
+        1 for r in registros
+        if not limpar_texto(r.get("id_familia", ""))
+    )
+
+    total_pessoas_em_familias = len(registros) - total_individuais
+
+    return {
+        "tipo": "familia",
+        "titulo": "Relatório por Família",
+        "total_pessoas": len(registros),
+        "total_familias": len(ids_familia),
+        "total_pessoas_em_familias": total_pessoas_em_familias,
+        "total_individuais": total_individuais,
+        "filtros": {
+            "supervisor": limpar_texto(supervisor),
+            "subsupervisor": limpar_texto(subsupervisor),
+            "situacao": limpar_texto(situacao)
+        },
+        "registros": registros,
+        "grupos": grupos
+    }
+
+
+def gerar_pdf_relatorio_familia(resultado_relatorio):
+    """PDF A4 retrato agrupado por Supervisor, Subsupervisor e ID FAMÍLIA."""
+    buffer = BytesIO()
+
+    documento = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=0.9 * cm,
+        leftMargin=0.9 * cm,
+        topMargin=1.0 * cm,
+        bottomMargin=1.2 * cm,
+        title="Relatório por Família"
+    )
+
+    estilos = _estilos_pdf()
+    elementos = [
+        Paragraph("RELATÓRIO POR FAMÍLIA", estilos["titulo"])
+    ]
+
+    total_pessoas = resultado_relatorio.get("total_pessoas", 0)
+    total_familias = resultado_relatorio.get("total_familias", 0)
+    total_em_familias = resultado_relatorio.get("total_pessoas_em_familias", 0)
+    total_individuais = resultado_relatorio.get("total_individuais", 0)
+
+    resumo = (
+        f"Famílias: <b>{total_familias}</b>"
+        f" &nbsp;|&nbsp; Pessoas em famílias: <b>{total_em_familias}</b>"
+        f" &nbsp;|&nbsp; Individuais: <b>{total_individuais}</b>"
+        f" &nbsp;|&nbsp; Total de pessoas: <b>{total_pessoas}</b>"
+    )
+
+    filtros = resultado_relatorio.get("filtros", {})
+    partes_filtro = []
+    for rotulo, chave in (
+        ("Supervisor", "supervisor"),
+        ("Subsupervisor", "subsupervisor"),
+        ("Situação", "situacao")
+    ):
+        valor = limpar_texto(filtros.get(chave, ""))
+        if valor:
+            partes_filtro.append(f"{rotulo}: {valor}")
+
+    if partes_filtro:
+        resumo += "<br/>" + " &nbsp;|&nbsp; ".join(partes_filtro)
+
+    elementos += [
+        Paragraph(resumo, estilos["subtitulo"]),
+        Spacer(1, 0.35 * cm)
+    ]
+
+    grupos = resultado_relatorio.get("grupos", [])
+
+    if not grupos:
+        elementos.append(
+            Paragraph("Nenhum registro encontrado.", estilos["texto"])
+        )
+    else:
+        for indice_grupo, grupo in enumerate(grupos):
+            sup = limpar_texto(grupo.get("supervisor", "")) or "SEM SUPERVISOR"
+            sub = limpar_texto(grupo.get("subsupervisor", "")) or "SEM SUBSUPERVISOR"
+
+            identificacao = Table(
+                [[Paragraph(
+                    f"<b>SUPERVISOR:</b> {sup}"
+                    f" &nbsp;&nbsp;&nbsp; <b>SUBSUPERVISOR:</b> {sub}",
+                    estilos["grupo"]
+                )]],
+                colWidths=[18.7 * cm]
+            )
+            identificacao.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EAF2F8")),
+                ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#AEB9C4")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            elementos.append(identificacao)
+            elementos.append(Spacer(1, 0.18 * cm))
+
+            for familia in grupo.get("familias", []):
+                fid = limpar_texto(familia.get("id_familia", "")) or "SEM ID"
+                integrantes = familia.get("integrantes", [])
+
+                dados = [[
+                    Paragraph(
+                        f"<b>FAMÍLIA {fid}</b>"
+                        f" &nbsp;&nbsp;&nbsp; <b>{len(integrantes)} PESSOA(S)</b>",
+                        estilos["grupo"]
+                    ),
+                    "", "", ""
+                ], [
+                    Paragraph("<b>Nº</b>", estilos["texto_centro"]),
+                    Paragraph("<b>NOME</b>", estilos["texto"]),
+                    Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
+                    Paragraph("<b>TELEFONE</b>", estilos["texto"])
+                ]]
+
+                for n, r in enumerate(integrantes, 1):
+                    dados.append([
+                        Paragraph(str(n), estilos["texto_centro"]),
+                        Paragraph(limpar_texto(r.get("nome", "")) or "—", estilos["texto"]),
+                        Paragraph(limpar_texto(r.get("comunidade", "")) or "—", estilos["texto"]),
+                        Paragraph(limpar_texto(r.get("telefone", "")) or "—", estilos["texto"])
+                    ])
+
+                tabela = Table(
+                    dados,
+                    colWidths=[0.9 * cm, 8.0 * cm, 5.0 * cm, 4.8 * cm],
+                    repeatRows=2
+                )
+                tabela.setStyle(TableStyle([
+                    ("SPAN", (0, 0), (-1, 0)),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DCE6EF")),
+                    ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#F2F4F7")),
+                    ("GRID", (0, 1), (-1, -1), 0.25, colors.HexColor("#D9DEE5")),
+                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#B8C2CC")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+                ]))
+                elementos += [tabela, Spacer(1, 0.22 * cm)]
+
+            individuais = grupo.get("individuais", [])
+            if individuais:
+                dados = [[
+                    Paragraph(
+                        f"<b>CADASTROS INDIVIDUAIS</b>"
+                        f" &nbsp;&nbsp;&nbsp; <b>{len(individuais)} PESSOA(S)</b>",
+                        estilos["grupo"]
+                    ),
+                    "", "", ""
+                ], [
+                    Paragraph("<b>Nº</b>", estilos["texto_centro"]),
+                    Paragraph("<b>NOME</b>", estilos["texto"]),
+                    Paragraph("<b>COMUNIDADE</b>", estilos["texto"]),
+                    Paragraph("<b>TELEFONE</b>", estilos["texto"])
+                ]]
+
+                for n, r in enumerate(individuais, 1):
+                    dados.append([
+                        Paragraph(str(n), estilos["texto_centro"]),
+                        Paragraph(limpar_texto(r.get("nome", "")) or "—", estilos["texto"]),
+                        Paragraph(limpar_texto(r.get("comunidade", "")) or "—", estilos["texto"]),
+                        Paragraph(limpar_texto(r.get("telefone", "")) or "—", estilos["texto"])
+                    ])
+
+                tabela_ind = Table(
+                    dados,
+                    colWidths=[0.9 * cm, 8.0 * cm, 5.0 * cm, 4.8 * cm],
+                    repeatRows=2
+                )
+                tabela_ind.setStyle(TableStyle([
+                    ("SPAN", (0, 0), (-1, 0)),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EEEEEE")),
+                    ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#F7F7F7")),
+                    ("GRID", (0, 1), (-1, -1), 0.25, colors.HexColor("#D9DEE5")),
+                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#B8C2CC")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+                ]))
+                elementos += [tabela_ind, Spacer(1, 0.22 * cm)]
+
+            if indice_grupo < len(grupos) - 1:
+                elementos.append(Spacer(1, 0.28 * cm))
+
+    documento.build(
+        elementos,
+        onFirstPage=_cabecalho_rodape_pdf,
+        onLaterPages=_cabecalho_rodape_pdf
+    )
+
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
+
+
 # ============================================================
 # RELATÓRIO POR ZONA
 # ============================================================
