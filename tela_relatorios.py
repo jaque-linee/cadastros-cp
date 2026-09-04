@@ -19,7 +19,7 @@ def exibir_tela_relatorios(base):
 
     tipo_relatorio = st.selectbox(
         "Tipo de relatório",
-        ["👤 Por Nome", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "💰 Pagamentos das Lideranças"],
+        ["👤 Por Nome", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "💰 Pagamentos das Lideranças"],
         key="tipo_relatorio"
     )
 
@@ -155,6 +155,85 @@ def exibir_tela_relatorios(base):
                             key="baixar_pdf_relatorio_nome"
                         )
 
+                except Exception as erro_pdf:
+                    st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
+
+    # ============================================================
+    # RELATÓRIO POR FAMÍLIA
+    # ============================================================
+    elif tipo_relatorio == "👨‍👩‍👧‍👦 Por Família":
+        filtros_disponiveis = relatorios.obter_filtros_familia(base)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            filtro_supervisor = st.selectbox("Supervisor", ["Todos"] + filtros_disponiveis.get("supervisores", []), key="relatorio_familia_supervisor")
+        with c2:
+            filtro_subsupervisor = st.selectbox("Subsupervisor", ["Todos"] + filtros_disponiveis.get("subsupervisores", []), key="relatorio_familia_subsupervisor")
+        with c3:
+            filtro_situacao = st.selectbox("Situação", ["Todas"] + filtros_disponiveis.get("situacoes", []), key="relatorio_familia_situacao")
+
+        if st.button("🔎 Gerar relatório", type="primary", use_container_width=True, key="gerar_relatorio_familia"):
+            st.session_state["relatorio_familia_gerado"] = relatorios.gerar_relatorio_familia(
+                dados_base=base,
+                supervisor="" if filtro_supervisor == "Todos" else filtro_supervisor,
+                subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
+                situacao="" if filtro_situacao == "Todas" else filtro_situacao
+            )
+
+        resultado_familia = st.session_state.get("relatorio_familia_gerado")
+        if resultado_familia is not None:
+            total_pessoas = resultado_familia.get("total_pessoas", 0)
+            total_familias = resultado_familia.get("total_familias", 0)
+            total_individuais = resultado_familia.get("total_individuais", 0)
+
+            st.markdown(
+                f"""<div style="background:#fff;border:1px solid #d9e1e8;border-radius:10px;padding:10px 14px;margin:14px 0 12px 0;font-size:.95rem;">
+                <b>👨‍👩‍👧‍👦 Relatório por Família</b>&nbsp;&nbsp;
+                <b>{total_familias}</b> família(s)&nbsp;&nbsp;
+                <b>{total_pessoas}</b> pessoa(s)&nbsp;&nbsp;
+                <b>{total_individuais}</b> individual(is)</div>""",
+                unsafe_allow_html=True
+            )
+
+            if total_pessoas == 0:
+                st.info("Nenhum cadastro encontrado para os filtros selecionados.")
+            else:
+                for grupo in resultado_familia.get("grupos", []):
+                    sup = str(grupo.get("supervisor", "SEM SUPERVISOR")).strip()
+                    sub = str(grupo.get("subsupervisor", "SEM SUBSUPERVISOR")).strip()
+                    st.markdown(f"### {sup} — {sub}")
+
+                    for familia in grupo.get("familias", []):
+                        fid = str(familia.get("id_familia", "")).strip()
+                        integrantes = familia.get("integrantes", [])
+                        st.markdown(f"**Família {fid} — {len(integrantes)} pessoa(s)**")
+                        linhas = [{
+                            "Nº": i,
+                            "Nome": str(r.get("nome","")).strip(),
+                            "Comunidade": str(r.get("comunidade","")).strip(),
+                            "Telefone": str(r.get("telefone","")).strip()
+                        } for i,r in enumerate(integrantes,1)]
+                        st.dataframe(pd.DataFrame(linhas), use_container_width=True, hide_index=True)
+
+                    individuais = grupo.get("individuais", [])
+                    if individuais:
+                        st.markdown(f"**Cadastros Individuais — {len(individuais)} pessoa(s)**")
+                        linhas = [{
+                            "Nº": i,
+                            "Nome": str(r.get("nome","")).strip(),
+                            "Comunidade": str(r.get("comunidade","")).strip(),
+                            "Telefone": str(r.get("telefone","")).strip()
+                        } for i,r in enumerate(individuais,1)]
+                        st.dataframe(pd.DataFrame(linhas), use_container_width=True, hide_index=True)
+
+                try:
+                    pdf_familia = relatorios.gerar_pdf_relatorio_familia(resultado_familia)
+                    ci, cp = st.columns(2)
+                    with ci:
+                        b64 = base64.b64encode(pdf_familia).decode("utf-8")
+                        components.html(f"""<button onclick="pf()" style="width:100%;height:38px;background:#0056b3;color:white;border:2px solid #0056b3;border-radius:12px;font-weight:bold;cursor:pointer;">🖨️ Imprimir</button>
+<script>function pf(){{const b=atob("{b64}"),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);const u=URL.createObjectURL(new Blob([a],{{type:"application/pdf"}})),w=window.open(u,"_blank","width=1000,height=800");if(!w){{alert("Permita pop-ups para este site.");return;}}setTimeout(()=>{{w.focus();w.print();}},1200);}}</script>""", height=45, scrolling=False)
+                    with cp:
+                        st.download_button("📄 Baixar PDF", pdf_familia, "relatorio_por_familia.pdf", "application/pdf", use_container_width=True, key="baixar_pdf_relatorio_familia")
                 except Exception as erro_pdf:
                     st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
 
@@ -1201,4 +1280,3 @@ def exibir_tela_relatorios(base):
                         "Não foi possível gerar "
                         f"o PDF: {erro_pdf}"
                     )
-
