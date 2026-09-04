@@ -12,6 +12,7 @@ from leitor_documentos import preparar_documento
 from extrator_documentos import analisar_documentos
 from gemini_documentos import (
     ler_documento_gemini,
+    ler_nome_ficha_gemini,
     LIMITE_ESTIMADO_BRL_SESSAO,
     MODELO_GEMINI,
 )
@@ -82,6 +83,60 @@ def _monitor_gemini(local=None):
         f"trava financeira R$ {LIMITE_ESTIMADO_BRL_SESSAO:.2f}"
     )
     (local.info if local is not None else st.info)(msg)
+
+
+def _eh_ficha_cadastral(texto, itens):
+    """
+    Reconhece a ficha pelo CONJUNTO de rótulos impressos.
+    Não depende do nome do arquivo e não ativa com um simples 'NOME'.
+    """
+    partes = [str(texto or "")]
+
+    for item in (itens or []):
+        try:
+            if isinstance(item, dict):
+                partes.extend(str(v) for v in item.values() if isinstance(v, str))
+            elif isinstance(item, (list, tuple)):
+                partes.extend(str(v) for v in item if isinstance(v, str))
+            else:
+                partes.append(str(item))
+        except Exception:
+            pass
+
+    bruto = " ".join(partes).upper()
+    bruto = (
+        bruto.replace("Ç", "C")
+             .replace("Ã", "A")
+             .replace("Á", "A")
+             .replace("À", "A")
+             .replace("Â", "A")
+             .replace("É", "E")
+             .replace("Ê", "E")
+             .replace("Í", "I")
+             .replace("Ó", "O")
+             .replace("Ô", "O")
+             .replace("Õ", "O")
+             .replace("Ú", "U")
+    )
+
+    grupos = (
+        ("ENDERECO",),
+        ("TITULO",),
+        ("ZONA",),
+        ("SECAO",),
+        ("COMUNIDADE",),
+        ("NASCIMENTO",),
+        ("TELEFONE",),
+        ("MAE",),
+    )
+
+    encontrados = sum(
+        1 for alternativas in grupos
+        if any(termo in bruto for termo in alternativas)
+    )
+
+    # Exige vários rótulos característicos juntos.
+    return encontrados >= 5
 
 
 def _nome_suspeito_para_gemini(valor):
@@ -367,6 +422,10 @@ def exibir_tela_envio_documentos(
                         arquivo.name
                     )
 
+                    # Tratamento especializado só é permitido quando o
+                    # próprio OCR reconhece o conjunto de rótulos da ficha.
+                    eh_ficha_cadastral = _eh_ficha_cadastral(texto, itens)
+
                     # HÍBRIDO: RapidOCR primeiro.
                     # Se o NOME veio suspeito, faz uma chamada EXCLUSIVA ao Gemini
                     # para o nome antes de qualquer outra conferência.
@@ -385,13 +444,23 @@ def exibir_tela_envio_documentos(
 
                         if permitido_nome:
                             try:
-                                retorno_nome = ler_documento_gemini(
-                                    arquivo_bytes,
-                                    arquivo.name,
-                                    api_key_gemini,
-                                    timeout=12,
-                                    campos_alvo=["nome"]
-                                )
+                                if eh_ficha_cadastral:
+                                    retorno_nome = ler_nome_ficha_gemini(
+                                        arquivo_bytes,
+                                        arquivo.name,
+                                        api_key_gemini,
+                                        timeout=12
+                                    )
+                                else:
+                                    # RG, CNH, título, PDFs e imagens comuns:
+                                    # fluxo anterior permanece intacto.
+                                    retorno_nome = ler_documento_gemini(
+                                        arquivo_bytes,
+                                        arquivo.name,
+                                        api_key_gemini,
+                                        timeout=12,
+                                        campos_alvo=["nome"]
+                                    )
 
                                 dados = _mesclar_gemini(
                                     dados,
