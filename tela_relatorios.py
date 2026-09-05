@@ -139,6 +139,95 @@ def exibir_tela_relatorios(base):
             st.session_state["relatorio_nome_gerado"] = resultado_nome
             st.session_state["relatorio_nome_organizacao_gerada"] = organizacao_nome
 
+        # Se a opção de organização mudou depois da última geração,
+        # gera novamente o relatório com os filtros atuais. Assim,
+        # "Alfabética" desfaz imediatamente o agrupamento por telefone
+        # e "Juntar telefones iguais" aplica novamente os blocos.
+        organizacao_gerada = st.session_state.get(
+            "relatorio_nome_organizacao_gerada"
+        )
+
+        if (
+            st.session_state.get("relatorio_nome_gerado") is not None
+            and organizacao_gerada != organizacao_nome
+        ):
+            resultado_nome = relatorios.gerar_relatorio_nome(
+                dados_base=base,
+                supervisor="" if filtro_supervisor == "Todos" else filtro_supervisor,
+                subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
+                situacao="" if filtro_situacao == "Todas" else filtro_situacao
+            )
+
+            if organizacao_nome == "Juntar telefones iguais":
+                def _normalizar_telefone_nome_troca(valor):
+                    numeros = "".join(
+                        caractere for caractere in str(valor or "")
+                        if caractere.isdigit()
+                    )
+                    if len(numeros) == 13 and numeros.startswith("55"):
+                        numeros = numeros[2:]
+                    return numeros
+
+                for grupo in resultado_nome.get("grupos", []):
+                    registros = list(grupo.get("registros", []))
+                    registros.sort(
+                        key=lambda r: str(r.get("nome", "")).strip().upper()
+                    )
+
+                    contagem_telefone = {}
+                    for registro in registros:
+                        telefone = _normalizar_telefone_nome_troca(
+                            registro.get("telefone", "")
+                        )
+                        if telefone:
+                            contagem_telefone[telefone] = (
+                                contagem_telefone.get(telefone, 0) + 1
+                            )
+
+                    ordenados = []
+                    telefones_ja_inseridos = set()
+
+                    for registro in registros:
+                        telefone = _normalizar_telefone_nome_troca(
+                            registro.get("telefone", "")
+                        )
+
+                        if (
+                            telefone
+                            and contagem_telefone.get(telefone, 0) > 1
+                        ):
+                            if telefone in telefones_ja_inseridos:
+                                continue
+
+                            bloco = [
+                                item for item in registros
+                                if _normalizar_telefone_nome_troca(
+                                    item.get("telefone", "")
+                                ) == telefone
+                            ]
+                            bloco.sort(
+                                key=lambda r: str(
+                                    r.get("nome", "")
+                                ).strip().upper()
+                            )
+                            ordenados.extend(bloco)
+                            telefones_ja_inseridos.add(telefone)
+                        else:
+                            ordenados.append(registro)
+
+                    grupo["registros"] = ordenados
+
+                resultado_nome["registros"] = [
+                    registro
+                    for grupo in resultado_nome.get("grupos", [])
+                    for registro in grupo.get("registros", [])
+                ]
+
+            st.session_state["relatorio_nome_gerado"] = resultado_nome
+            st.session_state[
+                "relatorio_nome_organizacao_gerada"
+            ] = organizacao_nome
+
         resultado_relatorio = st.session_state.get("relatorio_nome_gerado")
 
         if resultado_relatorio is not None:
