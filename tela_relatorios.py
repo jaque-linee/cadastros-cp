@@ -50,94 +50,96 @@ def exibir_tela_relatorios(base):
                 key="relatorio_nome_situacao"
             )
 
+        organizacao_nome = st.radio(
+            "Organização",
+            ["Alfabética", "Juntar telefones iguais"],
+            horizontal=True,
+            key="relatorio_nome_organizacao"
+        )
+
         gerar_relatorio = st.button("🔎 Gerar relatório", type="primary", use_container_width=True, key="gerar_relatorio_nome")
 
         if gerar_relatorio:
-            st.session_state["relatorio_nome_gerado"] = relatorios.gerar_relatorio_nome(
+            resultado_nome = relatorios.gerar_relatorio_nome(
                 dados_base=base,
                 supervisor="" if filtro_supervisor == "Todos" else filtro_supervisor,
                 subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
                 situacao="" if filtro_situacao == "Todas" else filtro_situacao
             )
 
-        resultado_relatorio = st.session_state.get("relatorio_nome_gerado")
-
-        # Ordenação final do Relatório por Nome:
-        # mantém os nomes em ordem alfabética, mas transforma cada
-        # telefone repetido em um bloco contínuo. Esta ordenação é feita
-        # aqui também para garantir que tanto a tela quanto o PDF recebam
-        # exatamente a mesma sequência.
-        if resultado_relatorio is not None:
-            def _telefone_nome_chave(valor):
-                numeros = "".join(
-                    c for c in str(valor or "")
-                    if c.isdigit()
-                )
-                if len(numeros) == 13 and numeros.startswith("55"):
-                    numeros = numeros[2:]
-                return numeros
-
-            for grupo in resultado_relatorio.get("grupos", []):
-                itens = list(grupo.get("registros", []))
-
-                itens.sort(
-                    key=lambda r: str(
-                        r.get("nome", "")
-                    ).strip().upper()
-                )
-
-                contagens = {}
-                for r in itens:
-                    tel = _telefone_nome_chave(
-                        r.get("telefone", "")
+            if organizacao_nome == "Juntar telefones iguais":
+                def _normalizar_telefone_nome(valor):
+                    numeros = "".join(
+                        caractere for caractere in str(valor or "")
+                        if caractere.isdigit()
                     )
-                    if tel:
-                        contagens[tel] = contagens.get(tel, 0) + 1
+                    if len(numeros) == 13 and numeros.startswith("55"):
+                        numeros = numeros[2:]
+                    return numeros
 
-                saida = []
-                usados = set()
+                for grupo in resultado_nome.get("grupos", []):
+                    registros = list(grupo.get("registros", []))
 
-                for indice, r in enumerate(itens):
-                    if indice in usados:
-                        continue
-
-                    tel = _telefone_nome_chave(
-                        r.get("telefone", "")
+                    # Parte sempre da ordem alfabética normal.
+                    registros.sort(
+                        key=lambda r: str(r.get("nome", "")).strip().upper()
                     )
 
-                    if tel and contagens.get(tel, 0) > 1:
-                        iguais = [
-                            (j, outro)
-                            for j, outro in enumerate(itens)
-                            if (
-                                j not in usados
-                                and _telefone_nome_chave(
-                                    outro.get("telefone", "")
-                                ) == tel
+                    contagem_telefone = {}
+                    for registro in registros:
+                        telefone = _normalizar_telefone_nome(
+                            registro.get("telefone", "")
+                        )
+                        if telefone:
+                            contagem_telefone[telefone] = (
+                                contagem_telefone.get(telefone, 0) + 1
                             )
-                        ]
 
-                        iguais.sort(
-                            key=lambda par: str(
-                                par[1].get("nome", "")
-                            ).strip().upper()
+                    # Cada telefone repetido vira um bloco na posição
+                    # alfabética do primeiro nome que usa aquele número.
+                    ordenados = []
+                    telefones_ja_inseridos = set()
+
+                    for registro in registros:
+                        telefone = _normalizar_telefone_nome(
+                            registro.get("telefone", "")
                         )
 
-                        for j, outro in iguais:
-                            saida.append(outro)
-                            usados.add(j)
-                    else:
-                        saida.append(r)
-                        usados.add(indice)
+                        if (
+                            telefone
+                            and contagem_telefone.get(telefone, 0) > 1
+                        ):
+                            if telefone in telefones_ja_inseridos:
+                                continue
 
-                grupo["registros"] = saida
+                            bloco = [
+                                item for item in registros
+                                if _normalizar_telefone_nome(
+                                    item.get("telefone", "")
+                                ) == telefone
+                            ]
+                            bloco.sort(
+                                key=lambda r: str(
+                                    r.get("nome", "")
+                                ).strip().upper()
+                            )
+                            ordenados.extend(bloco)
+                            telefones_ja_inseridos.add(telefone)
+                        else:
+                            ordenados.append(registro)
 
-            # Mantém também a lista geral coerente com os grupos.
-            resultado_relatorio["registros"] = [
-                r
-                for grupo in resultado_relatorio.get("grupos", [])
-                for r in grupo.get("registros", [])
-            ]
+                    grupo["registros"] = ordenados
+
+                resultado_nome["registros"] = [
+                    registro
+                    for grupo in resultado_nome.get("grupos", [])
+                    for registro in grupo.get("registros", [])
+                ]
+
+            st.session_state["relatorio_nome_gerado"] = resultado_nome
+            st.session_state["relatorio_nome_organizacao_gerada"] = organizacao_nome
+
+        resultado_relatorio = st.session_state.get("relatorio_nome_gerado")
 
         if resultado_relatorio is not None:
             total_relatorio = resultado_relatorio.get("total", 0)
