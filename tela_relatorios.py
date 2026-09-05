@@ -7,8 +7,6 @@ import streamlit.components.v1 as components
 import relatorios
 import sheets
 
-st.error(f"RELATORIOS CARREGADO DE: {relatorios.__file__}")
-
 WEBHOOK_URL = st.secrets["WEBHOOK_URL"]
 
 
@@ -63,6 +61,83 @@ def exibir_tela_relatorios(base):
             )
 
         resultado_relatorio = st.session_state.get("relatorio_nome_gerado")
+
+        # Ordenação final do Relatório por Nome:
+        # mantém os nomes em ordem alfabética, mas transforma cada
+        # telefone repetido em um bloco contínuo. Esta ordenação é feita
+        # aqui também para garantir que tanto a tela quanto o PDF recebam
+        # exatamente a mesma sequência.
+        if resultado_relatorio is not None:
+            def _telefone_nome_chave(valor):
+                numeros = "".join(
+                    c for c in str(valor or "")
+                    if c.isdigit()
+                )
+                if len(numeros) == 13 and numeros.startswith("55"):
+                    numeros = numeros[2:]
+                return numeros
+
+            for grupo in resultado_relatorio.get("grupos", []):
+                itens = list(grupo.get("registros", []))
+
+                itens.sort(
+                    key=lambda r: str(
+                        r.get("nome", "")
+                    ).strip().upper()
+                )
+
+                contagens = {}
+                for r in itens:
+                    tel = _telefone_nome_chave(
+                        r.get("telefone", "")
+                    )
+                    if tel:
+                        contagens[tel] = contagens.get(tel, 0) + 1
+
+                saida = []
+                usados = set()
+
+                for indice, r in enumerate(itens):
+                    if indice in usados:
+                        continue
+
+                    tel = _telefone_nome_chave(
+                        r.get("telefone", "")
+                    )
+
+                    if tel and contagens.get(tel, 0) > 1:
+                        iguais = [
+                            (j, outro)
+                            for j, outro in enumerate(itens)
+                            if (
+                                j not in usados
+                                and _telefone_nome_chave(
+                                    outro.get("telefone", "")
+                                ) == tel
+                            )
+                        ]
+
+                        iguais.sort(
+                            key=lambda par: str(
+                                par[1].get("nome", "")
+                            ).strip().upper()
+                        )
+
+                        for j, outro in iguais:
+                            saida.append(outro)
+                            usados.add(j)
+                    else:
+                        saida.append(r)
+                        usados.add(indice)
+
+                grupo["registros"] = saida
+
+            # Mantém também a lista geral coerente com os grupos.
+            resultado_relatorio["registros"] = [
+                r
+                for grupo in resultado_relatorio.get("grupos", [])
+                for r in grupo.get("registros", [])
+            ]
 
         if resultado_relatorio is not None:
             total_relatorio = resultado_relatorio.get("total", 0)
