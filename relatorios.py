@@ -230,6 +230,8 @@ def filtrar_relatorio_nome(
             }
         )
 
+    # Primeiro mantém a ordem normal:
+    # Supervisor -> Subsupervisor -> Nome.
     registros.sort(
         key=lambda item: (
             normalizar_filtro(
@@ -246,7 +248,127 @@ def filtrar_relatorio_nome(
         )
     )
 
-    return registros
+    # Dentro de cada Supervisor/Subsupervisor, telefones repetidos
+    # ficam juntos. Telefones únicos continuam seguindo a ordem
+    # alfabética normal dos nomes.
+    def chave_telefone(valor):
+        numeros = "".join(
+            caractere
+            for caractere in limpar_texto(valor)
+            if caractere.isdigit()
+        )
+
+        # Aceita também número salvo com +55 / 55 na frente.
+        if len(numeros) == 13 and numeros.startswith("55"):
+            numeros = numeros[2:]
+
+        return numeros
+
+    registros_ordenados = []
+    inicio = 0
+
+    while inicio < len(registros):
+        supervisor_atual = normalizar_filtro(
+            registros[inicio]["supervisor"]
+        )
+        subsupervisor_atual = normalizar_filtro(
+            registros[inicio]["subsupervisor"]
+        )
+
+        fim = inicio
+
+        while (
+            fim < len(registros)
+            and normalizar_filtro(
+                registros[fim]["supervisor"]
+            ) == supervisor_atual
+            and normalizar_filtro(
+                registros[fim]["subsupervisor"]
+            ) == subsupervisor_atual
+        ):
+            fim += 1
+
+        grupo = registros[inicio:fim]
+
+        contagem_telefone = {}
+
+        for item in grupo:
+            telefone = chave_telefone(
+                item.get(
+                    "telefone",
+                    ""
+                )
+            )
+
+            if telefone:
+                contagem_telefone[telefone] = (
+                    contagem_telefone.get(
+                        telefone,
+                        0
+                    )
+                    + 1
+                )
+
+        usados = set()
+
+        for indice, item in enumerate(grupo):
+            if indice in usados:
+                continue
+
+            telefone = chave_telefone(
+                item.get(
+                    "telefone",
+                    ""
+                )
+            )
+
+            if (
+                telefone
+                and contagem_telefone.get(
+                    telefone,
+                    0
+                ) > 1
+            ):
+                iguais = [
+                    (outro_indice, outro_item)
+                    for outro_indice, outro_item
+                    in enumerate(grupo)
+                    if (
+                        outro_indice not in usados
+                        and chave_telefone(
+                            outro_item.get(
+                                "telefone",
+                                ""
+                            )
+                        ) == telefone
+                    )
+                ]
+
+                iguais.sort(
+                    key=lambda par: normalizar_filtro(
+                        par[1]["nome"]
+                    )
+                )
+
+                for outro_indice, outro_item in iguais:
+                    registros_ordenados.append(
+                        outro_item
+                    )
+                    usados.add(
+                        outro_indice
+                    )
+
+            else:
+                registros_ordenados.append(
+                    item
+                )
+                usados.add(
+                    indice
+                )
+
+        inicio = fim
+
+    return registros_ordenados
 
 
 # ============================================================
