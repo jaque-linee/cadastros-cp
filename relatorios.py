@@ -377,70 +377,114 @@ def filtrar_relatorio_nome(
 
 def agrupar_relatorio_nome(registros):
     """
-    Agrupa o relatório por:
+    Agrupa por Supervisor/Subsupervisor e faz a ordenação FINAL
+    dentro de cada grupo.
 
-    Supervisor
-        ↓
-    Subsupervisor
-        ↓
-    Pessoas
+    Regra:
+    - telefones repetidos ficam juntos;
+    - dentro do mesmo telefone, nomes em ordem alfabética;
+    - telefones únicos permanecem na ordem alfabética geral.
     """
 
-    grupos = []
+    def normalizar_telefone(valor):
+        numeros = "".join(
+            c for c in limpar_texto(valor)
+            if c.isdigit()
+        )
 
-    grupo_atual = None
-    chave_atual = None
+        if len(numeros) == 13 and numeros.startswith("55"):
+            numeros = numeros[2:]
+
+        return numeros
+
+    grupos_mapa = {}
 
     for registro in registros:
-
         supervisor = limpar_texto(
-            registro.get(
-                "supervisor",
-                ""
-            )
-        )
+            registro.get("supervisor", "")
+        ) or "SEM SUPERVISOR"
 
         subsupervisor = limpar_texto(
-            registro.get(
-                "subsupervisor",
-                ""
-            )
-        )
+            registro.get("subsupervisor", "")
+        ) or "SEM SUBSUPERVISOR"
 
         chave = (
-            normalizar_filtro(
-                supervisor
-            ),
-            normalizar_filtro(
-                subsupervisor
-            )
+            normalizar_filtro(supervisor),
+            normalizar_filtro(subsupervisor)
         )
 
-        if chave != chave_atual:
-
-            grupo_atual = {
-                "supervisor":
-                    supervisor
-                    or "SEM SUPERVISOR",
-
-                "subsupervisor":
-                    subsupervisor
-                    or "SEM SUBSUPERVISOR",
-
+        if chave not in grupos_mapa:
+            grupos_mapa[chave] = {
+                "supervisor": supervisor,
+                "subsupervisor": subsupervisor,
                 "registros": []
             }
 
-            grupos.append(
-                grupo_atual
+        grupos_mapa[chave]["registros"].append(registro)
+
+    grupos = []
+
+    for chave in sorted(grupos_mapa):
+        grupo = grupos_mapa[chave]
+        itens = grupo["registros"]
+
+        # Começa alfabeticamente.
+        itens.sort(
+            key=lambda r: normalizar_filtro(
+                r.get("nome", "")
+            )
+        )
+
+        # Descobre quais telefones realmente se repetem.
+        contagens = {}
+        for r in itens:
+            tel = normalizar_telefone(
+                r.get("telefone", "")
+            )
+            if tel:
+                contagens[tel] = contagens.get(tel, 0) + 1
+
+        # Cada telefone repetido vira um bloco.
+        # O bloco ocupa a posição alfabética do primeiro nome
+        # daquele telefone.
+        blocos = []
+        telefones_ja_adicionados = set()
+
+        for r in itens:
+            tel = normalizar_telefone(
+                r.get("telefone", "")
             )
 
-            chave_atual = chave
+            if tel and contagens.get(tel, 0) > 1:
+                if tel in telefones_ja_adicionados:
+                    continue
 
-        grupo_atual[
-            "registros"
-        ].append(
-            registro
-        )
+                integrantes = [
+                    x for x in itens
+                    if normalizar_telefone(
+                        x.get("telefone", "")
+                    ) == tel
+                ]
+
+                integrantes.sort(
+                    key=lambda x: normalizar_filtro(
+                        x.get("nome", "")
+                    )
+                )
+
+                blocos.append(integrantes)
+                telefones_ja_adicionados.add(tel)
+
+            else:
+                blocos.append([r])
+
+        grupo["registros"] = [
+            pessoa
+            for bloco in blocos
+            for pessoa in bloco
+        ]
+
+        grupos.append(grupo)
 
     return grupos
 
