@@ -136,6 +136,21 @@ def exibir_tela_relatorios(base):
                     for registro in grupo.get("registros", [])
                 ]
 
+            # IMPORTANTE: a opção Alfabética força A-Z aqui,
+            # independentemente de qualquer ordenação existente em relatorios.py.
+            if organizacao_nome == "Alfabética":
+                for grupo in resultado_nome.get("grupos", []):
+                    grupo["registros"] = sorted(
+                        list(grupo.get("registros", [])),
+                        key=lambda r: str(r.get("nome", "")).strip().upper()
+                    )
+
+                resultado_nome["registros"] = [
+                    registro
+                    for grupo in resultado_nome.get("grupos", [])
+                    for registro in grupo.get("registros", [])
+                ]
+
             st.session_state["relatorio_nome_gerado"] = resultado_nome
             st.session_state["relatorio_nome_organizacao_gerada"] = organizacao_nome
 
@@ -216,6 +231,20 @@ def exibir_tela_relatorios(base):
                             ordenados.append(registro)
 
                     grupo["registros"] = ordenados
+
+                resultado_nome["registros"] = [
+                    registro
+                    for grupo in resultado_nome.get("grupos", [])
+                    for registro in grupo.get("registros", [])
+                ]
+
+            # Ao trocar para Alfabética, força A-Z também neste caminho.
+            if organizacao_nome == "Alfabética":
+                for grupo in resultado_nome.get("grupos", []):
+                    grupo["registros"] = sorted(
+                        list(grupo.get("registros", [])),
+                        key=lambda r: str(r.get("nome", "")).strip().upper()
+                    )
 
                 resultado_nome["registros"] = [
                     registro
