@@ -3,10 +3,10 @@ requests
 python-dotenv
 Pillow
 pymupdf
-numpy
+numpy==1.26.4
 pandas
 reportlab
-opencv-python-headless
+opencv-python-headless==4.8.1.78
 rapidocr
 onnxruntime
 streamlit-paste-button
