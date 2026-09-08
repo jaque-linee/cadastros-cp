@@ -9,7 +9,6 @@ dependencies:
   - pip
   - libgl
   - libglib
-  - opencv
   - numpy=1.26.4
   - pip:
       - streamlit
