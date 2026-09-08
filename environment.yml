@@ -21,4 +21,4 @@ dependencies:
       - reportlab
       - rapidocr-onnxruntime==1.3.25
       - onnxruntime
-      - streamlit-paste-button
+      - - streamlit-paste-button==0.1.2
