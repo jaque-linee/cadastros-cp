@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageOps, ImageEnhance
 import fitz
-from rapidocr import RapidOCR
+from rapidocr_onnxruntime import RapidOCR
 
 from validacoes import (
     somente_numeros,
