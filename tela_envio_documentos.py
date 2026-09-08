@@ -6,7 +6,10 @@ import pandas as pd
 import streamlit as st
 import sheets
 import cruzamento
-from streamlit_paste_button import paste_image_button
+try:
+    from streamlit_paste_button import paste_image_button
+except ImportError:
+    paste_image_button = None
 
 from leitor_documentos import preparar_documento
 from extrator_documentos import analisar_documentos
