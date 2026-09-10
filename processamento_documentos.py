@@ -311,6 +311,23 @@ def executar_ocr_pdf(arquivo):
                 texto
             )
 
+        # Segunda passada dos campos manuscritos também para PDF.
+        telefone_ocr = encontrar_telefone_ocr(itens)
+        if not telefone_ocr:
+            telefone_ocr = recuperar_telefone_na_imagem(imagem, itens)
+        if telefone_ocr:
+            itens.extend([
+                {"texto":"TELEFONE","confianca":1.0,"pagina":numero_pagina+1,"largura_pagina":imagem.width,"altura_pagina":imagem.height,"x":0.0,"y":0.0,"x_relativo":0.0,"y_relativo":0.0,"box":None},
+                {"texto":telefone_ocr,"confianca":1.0,"pagina":numero_pagina+1,"largura_pagina":imagem.width,"altura_pagina":imagem.height,"x":0.0,"y":20.0,"x_relativo":0.0,"y_relativo":0.01,"box":None}
+            ])
+
+        rg_ocr = recuperar_rg_na_imagem(imagem, itens)
+        if rg_ocr:
+            itens.extend([
+                {"texto":"RG","confianca":1.0,"pagina":numero_pagina+1,"largura_pagina":imagem.width,"altura_pagina":imagem.height,"x":0.0,"y":40.0,"x_relativo":0.0,"y_relativo":0.02,"box":None},
+                {"texto":rg_ocr,"confianca":1.0,"pagina":numero_pagina+1,"largura_pagina":imagem.width,"altura_pagina":imagem.height,"x":0.0,"y":60.0,"x_relativo":0.0,"y_relativo":0.03,"box":None}
+            ])
+
         todos_itens.extend(
             itens
         )
@@ -391,6 +408,13 @@ def ler_documento(arquivo):
             "y": 20.0,
             "box": None,
         })
+
+    # Segunda passada direcionada para RG manuscrito em imagem.
+    rg_ocr = recuperar_rg_na_imagem(imagem, itens)
+    if rg_ocr:
+        texto = (texto + "\nRG\n" + rg_ocr).strip()
+        itens.append({"texto":"RG","confianca":1.0,"x":0.0,"y":40.0,"box":None})
+        itens.append({"texto":rg_ocr,"confianca":1.0,"x":0.0,"y":60.0,"box":None})
 
     del imagem
     gc.collect()
@@ -1344,6 +1368,43 @@ def recuperar_telefone_na_imagem(imagem, itens):
             melhores.sort(reverse=True)
             return _formatar_telefone_ocr(melhores[0][1])
 
+    return ""
+
+
+def recuperar_rg_na_imagem(imagem, itens):
+    """Segunda passada perto de RG/IDENTIDADE para tentar número manuscrito."""
+    rotulos = []
+    for item in itens:
+        r = normalizar_rotulo(item.get("texto", ""))
+        if r == "RG" or "IDENTIDADE" in r or "REGISTROGERAL" in r or "DOCIDENTIDADE" in r:
+            rotulos.append(item)
+    if not rotulos:
+        return ""
+    base = preparar_imagem(imagem)
+    w, h = base.size
+    for rotulo in rotulos:
+        x, y = int(float(rotulo.get("x", 0))), int(float(rotulo.get("y", 0)))
+        recorte = base.crop((max(0,x-150), max(0,y-100), min(w,x+1200), min(h,y+420)))
+        if recorte.width < 2 or recorte.height < 2:
+            continue
+        recorte = recorte.resize((recorte.width*2, recorte.height*2), Image.Resampling.LANCZOS)
+        recorte = ImageOps.grayscale(recorte)
+        recorte = ImageOps.autocontrast(recorte)
+        recorte = ImageEnhance.Contrast(recorte).enhance(1.65)
+        resultado = obter_rapidocr()(np.array(recorte))
+        textos = getattr(resultado, "txts", None)
+        scores = getattr(resultado, "scores", None)
+        if textos is None: textos = []
+        if scores is None: scores = []
+        candidatos = []
+        for i, txt in enumerate(textos):
+            numero = somente_numeros(str(txt or ""))
+            if 6 <= len(numero) <= 10:
+                score = float(scores[i]) if i < len(scores) else 0.0
+                candidatos.append((score, numero))
+        if candidatos:
+            candidatos.sort(reverse=True)
+            return candidatos[0][1]
     return ""
 
 
