@@ -1379,7 +1379,7 @@ def encontrar_telefone_ocr(itens):
     pontos, numero = candidatos[0]
 
     # Limiar conservador: se não reconheceu de verdade, deixa vazio.
-    return numero if pontos >= 80 else ""
+    return numero if pontos >= 70 else ""
 
 
 def _ocr_pagina_em_rotacoes(imagem):
@@ -1426,27 +1426,146 @@ def _obter_ocr_lateral_compartilhado(imagem):
 
 
 
+def _ocr_recorte_telefone(recorte):
+    """OCR leve em um pequeno recorte; retorna blocos no formato do extrator."""
+    if recorte.width < 40 or recorte.height < 40:
+        return []
+
+    # Amplia apenas o pequeno recorte, nunca a página inteira.
+    maior = max(recorte.size)
+    if maior < 1400:
+        escala = min(2.0, 1400 / max(1, maior))
+        recorte = recorte.resize(
+            (max(1, int(recorte.width * escala)),
+             max(1, int(recorte.height * escala))),
+            Image.Resampling.LANCZOS
+        )
+
+    cinza = ImageOps.grayscale(recorte)
+    cinza = ImageOps.autocontrast(cinza)
+    cinza = ImageEnhance.Contrast(cinza).enhance(1.55)
+
+    resultado = obter_rapidocr()(np.array(cinza))
+    return _itens_resultado_ocr(resultado, cinza.width, cinza.height)
+
+
+def _telefone_em_textos_soltos(itens):
+    """
+    Extrai celular reconhecido em recorte mesmo sem o rótulo FONE.
+    Mantém proteção contra CPF e exige padrão plausível de telefone.
+    """
+    candidatos = []
+
+    # Blocos individuais.
+    for i, item in enumerate(itens):
+        bruto = str(item.get("texto", "") or "")
+        numero = somente_numeros(bruto)
+
+        if len(numero) == 11 and cpf_valido(numero):
+            continue
+
+        plausivel = (
+            (len(numero) == 11 and numero[2] == "9")
+            or (len(numero) == 9 and numero[0] == "9")
+            or len(numero) == 10
+            or len(numero) == 8
+        )
+        if plausivel:
+            pontos = float(item.get("confianca", 0) or 0) * 30
+            if len(numero) in (9, 11) and (numero[0] == "9" or (len(numero) == 11 and numero[2] == "9")):
+                pontos += 80
+            if "-" in bruto:
+                pontos += 20
+            candidatos.append((pontos, _normalizar_telefone_82(numero)))
+
+    # Manuscrito pode sair quebrado em dois blocos próximos.
+    for i in range(len(itens)):
+        for j in range(i + 1, min(i + 3, len(itens))):
+            a, b = itens[i], itens[j]
+            try:
+                dx = abs(float(a.get("x_relativo", 0)) - float(b.get("x_relativo", 0)))
+                dy = abs(float(a.get("y_relativo", 0)) - float(b.get("y_relativo", 0)))
+            except Exception:
+                continue
+            if dx > 0.35 or dy > 0.15:
+                continue
+
+            combinado = somente_numeros(str(a.get("texto","")) + str(b.get("texto","")))
+            if len(combinado) == 11 and cpf_valido(combinado):
+                continue
+            if (
+                (len(combinado) == 11 and combinado[2] == "9")
+                or (len(combinado) == 9 and combinado[0] == "9")
+            ):
+                conf = (
+                    float(a.get("confianca", 0) or 0)
+                    + float(b.get("confianca", 0) or 0)
+                ) / 2
+                candidatos.append((70 + conf * 30, _normalizar_telefone_82(combinado)))
+
+    candidatos = [(p, n) for p, n in candidatos if n]
+    if not candidatos:
+        return ""
+
+    candidatos.sort(reverse=True)
+    return candidatos[0][1] if candidatos[0][0] >= 65 else ""
+
+
 def recuperar_telefone_na_imagem(imagem, itens):
     """
-    Procura telefone na página INTEIRA e em todas as orientações.
-    Primeiro usa a leitura já existente; depois gira a página e relê.
+    Fallback rápido para telefone manuscrito.
+
+    1) Usa o OCR principal, sem custo extra.
+    2) Se não achou, relê SOMENTE faixas estreitas das quatro bordas.
+    3) As bordas laterais são giradas para que escrita vertical fique horizontal.
+    4) Para assim que encontra um telefone plausível.
+
+    Não faz OCR adicional da página inteira.
     """
     tel = encontrar_telefone_ocr(itens)
     if tel:
         return tel
 
-    melhores = []
-    for novos in _obter_ocr_lateral_compartilhado(imagem):
-        tel = encontrar_telefone_ocr(novos)
-        if tel:
-            conf = max([float(x.get("confianca", 0) or 0) for x in novos] or [0])
-            melhores.append((conf, tel))
+    base = ImageOps.exif_transpose(imagem).convert("RGB")
+    w, h = base.size
 
-    if melhores:
-        melhores.sort(reverse=True)
-        return melhores[0][1]
+    # Faixas relativamente estreitas: cobrem anotações nas margens sem
+    # transformar o fallback em novo OCR da página inteira.
+    margem_x = max(120, int(w * 0.22))
+    margem_y = max(100, int(h * 0.18))
+
+    recortes = [
+        # esquerda e direita: tenta escrita normal no recorte e escrita vertical
+        ("esquerda", base.crop((0, 0, min(w, margem_x), h))),
+        ("direita", base.crop((max(0, w - margem_x), 0, w, h))),
+        # topo e rodapé
+        ("topo", base.crop((0, 0, w, min(h, margem_y)))),
+        ("rodape", base.crop((0, max(0, h - margem_y), w, h))),
+    ]
+
+    for nome, recorte in recortes:
+        variantes = [recorte]
+
+        # Nas laterais, o manuscrito frequentemente está a 90 graus.
+        if nome in ("esquerda", "direita"):
+            variantes.append(recorte.transpose(Image.Transpose.ROTATE_90))
+            variantes.append(recorte.transpose(Image.Transpose.ROTATE_270))
+
+        for variante in variantes:
+            novos = _ocr_recorte_telefone(variante)
+
+            # Primeiro tenta a lógica completa com FONE/TELEFONE.
+            tel = encontrar_telefone_ocr(novos)
+            if tel:
+                return tel
+
+            # Depois aceita número telefônico plausível no pequeno recorte.
+            tel = _telefone_em_textos_soltos(novos)
+            if tel:
+                return tel
 
     return ""
+
 
 
 def _encontrar_rg_perto_rotulo(itens):
@@ -1501,19 +1620,12 @@ def _encontrar_rg_perto_rotulo(itens):
 
 def recuperar_rg_na_imagem(imagem, itens):
     """
-    Tenta RG/REGISTRO GERAL primeiro nos blocos atuais e depois
-    relê a página inteira nas quatro orientações.
+    MODO RÁPIDO:
+    não gira nem relê a página.
+    Procura RG / REGISTRO GERAL / IDENTIDADE nos blocos do OCR principal.
     """
-    rg = _encontrar_rg_perto_rotulo(itens)
-    if rg:
-        return rg
+    return _encontrar_rg_perto_rotulo(itens)
 
-    for novos in _obter_ocr_lateral_compartilhado(imagem):
-        rg = _encontrar_rg_perto_rotulo(novos)
-        if rg:
-            return rg
-
-    return ""
 
 
 # ============================================================
