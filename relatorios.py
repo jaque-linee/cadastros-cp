@@ -1372,18 +1372,33 @@ def _obter_id_familia(registro):
 
 
 def obter_filtros_familia(dados_base):
-    """Filtros do relatório por família, seguindo os mesmos campos do relatório por nome."""
-    return obter_filtros_nome(dados_base)
+    """Filtros do relatório por família, incluindo os IDs de família disponíveis."""
+    filtros = obter_filtros_nome(dados_base)
+
+    familias = {
+        _obter_id_familia(registro)
+        for registro in dados_base or []
+        if _obter_id_familia(registro)
+    }
+
+    filtros["familias"] = sorted(
+        familias,
+        key=lambda valor: normalizar_filtro(valor)
+    )
+
+    return filtros
 
 
 def filtrar_relatorio_familia(
     dados_base,
     supervisor="",
     subsupervisor="",
+    familia="",
     situacao=""
 ):
     fs = normalizar_filtro(supervisor)
     fsub = normalizar_filtro(subsupervisor)
+    ffam = normalizar_filtro(familia)
     fsi = normalizar_filtro(situacao)
 
     registros = []
@@ -1392,10 +1407,13 @@ def filtrar_relatorio_familia(
         sup = limpar_texto(r.get("supervisor", ""))
         sub = limpar_texto(r.get("subsupervisor", ""))
         sit = limpar_texto(r.get("situacao", ""))
+        id_familia = _obter_id_familia(r)
 
         if fs and normalizar_filtro(sup) != fs:
             continue
         if fsub and normalizar_filtro(sub) != fsub:
+            continue
+        if ffam and normalizar_filtro(id_familia) != ffam:
             continue
         if fsi and normalizar_filtro(sit) != fsi:
             continue
@@ -1403,7 +1421,7 @@ def filtrar_relatorio_familia(
         registros.append({
             "supervisor": sup,
             "subsupervisor": sub,
-            "id_familia": _obter_id_familia(r),
+            "id_familia": id_familia,
             "nome": limpar_texto(r.get("nome", "")),
             "comunidade": limpar_texto(r.get("comunidade", "")),
             "telefone": limpar_texto(r.get("telefone", "")),
@@ -1489,12 +1507,14 @@ def gerar_relatorio_familia(
     dados_base,
     supervisor="",
     subsupervisor="",
+    familia="",
     situacao=""
 ):
     registros = filtrar_relatorio_familia(
         dados_base=dados_base,
         supervisor=supervisor,
         subsupervisor=subsupervisor,
+        familia=familia,
         situacao=situacao
     )
 
@@ -1523,6 +1543,7 @@ def gerar_relatorio_familia(
         "filtros": {
             "supervisor": limpar_texto(supervisor),
             "subsupervisor": limpar_texto(subsupervisor),
+            "familia": limpar_texto(familia),
             "situacao": limpar_texto(situacao)
         },
         "registros": registros,
@@ -1566,6 +1587,7 @@ def gerar_pdf_relatorio_familia(resultado_relatorio):
     for rotulo, chave in (
         ("Supervisor", "supervisor"),
         ("Subsupervisor", "subsupervisor"),
+        ("Família", "familia"),
         ("Situação", "situacao")
     ):
         valor = limpar_texto(filtros.get(chave, ""))
