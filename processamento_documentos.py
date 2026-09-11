@@ -1384,28 +1384,46 @@ def encontrar_telefone_ocr(itens):
 
 def _ocr_pagina_em_rotacoes(imagem):
     """
-    Faz OCR da página inteira em 0/90/180/270 graus.
-    Isso permite achar telefone manuscrito na lateral, invertido ou em outro ponto.
+    FALLBACK OTIMIZADO.
+    A orientação normal (0°) já foi lida pelo fluxo principal.
+    Aqui só tentamos as duas orientações laterais, 90° e 270°,
+    que são as necessárias para anotações manuscritas na margem.
+
+    Não fazemos 180° nem uma segunda versão contrastada da página inteira:
+    isso evita multiplicar o custo do OCR em lotes grandes.
     """
     base = preparar_imagem(imagem)
-    rotacoes = [
-        base,
+
+    # Reduz páginas muito grandes somente no fallback.
+    # Mantém resolução suficiente para números, mas corta bastante o custo.
+    max_lado = 1800
+    maior = max(base.size)
+    if maior > max_lado:
+        escala = max_lado / maior
+        base = base.resize(
+            (max(1, int(base.width * escala)),
+             max(1, int(base.height * escala))),
+            Image.Resampling.LANCZOS
+        )
+
+    for rot in (
         base.transpose(Image.Transpose.ROTATE_90),
-        base.transpose(Image.Transpose.ROTATE_180),
         base.transpose(Image.Transpose.ROTATE_270),
-    ]
+    ):
+        resultado = obter_rapidocr()(np.array(rot))
+        yield _itens_resultado_ocr(resultado, rot.width, rot.height)
 
-    for rot in rotacoes:
-        # Duas versões: normal e reforçada para manuscrito fraco.
-        versoes = [rot]
-        cinza = ImageOps.grayscale(rot)
-        cinza = ImageOps.autocontrast(cinza)
-        cinza = ImageEnhance.Contrast(cinza).enhance(1.8)
-        versoes.append(cinza)
+_CACHE_OCR_LATERAL = {}
 
-        for versao in versoes:
-            resultado = obter_rapidocr()(np.array(versao))
-            yield _itens_resultado_ocr(resultado, versao.width, versao.height)
+
+def _obter_ocr_lateral_compartilhado(imagem):
+    """Executa o fallback lateral no máximo uma vez por imagem e compartilha telefone/RG."""
+    chave = id(imagem)
+    if chave not in _CACHE_OCR_LATERAL:
+        _CACHE_OCR_LATERAL.clear()  # só precisamos da imagem corrente
+        _CACHE_OCR_LATERAL[chave] = list(_ocr_pagina_em_rotacoes(imagem))
+    return _CACHE_OCR_LATERAL[chave]
+
 
 
 def recuperar_telefone_na_imagem(imagem, itens):
@@ -1418,10 +1436,9 @@ def recuperar_telefone_na_imagem(imagem, itens):
         return tel
 
     melhores = []
-    for novos in _ocr_pagina_em_rotacoes(imagem):
+    for novos in _obter_ocr_lateral_compartilhado(imagem):
         tel = encontrar_telefone_ocr(novos)
         if tel:
-            # Guarda confiança média dos blocos que participaram da leitura.
             conf = max([float(x.get("confianca", 0) or 0) for x in novos] or [0])
             melhores.append((conf, tel))
 
@@ -1491,7 +1508,7 @@ def recuperar_rg_na_imagem(imagem, itens):
     if rg:
         return rg
 
-    for novos in _ocr_pagina_em_rotacoes(imagem):
+    for novos in _obter_ocr_lateral_compartilhado(imagem):
         rg = _encontrar_rg_perto_rotulo(novos)
         if rg:
             return rg
