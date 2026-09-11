@@ -358,12 +358,14 @@ def exibir_tela_relatorios(base):
     # ============================================================
     elif tipo_relatorio == "👨‍👩‍👧‍👦 Por Família":
         filtros_disponiveis = relatorios.obter_filtros_familia(base)
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             filtro_supervisor = st.selectbox("Supervisor", ["Todos"] + filtros_disponiveis.get("supervisores", []), key="relatorio_familia_supervisor")
         with c2:
             filtro_subsupervisor = st.selectbox("Subsupervisor", ["Todos"] + filtros_disponiveis.get("subsupervisores", []), key="relatorio_familia_subsupervisor")
         with c3:
+            filtro_familia = st.selectbox("Família", ["Todas"] + filtros_disponiveis.get("familias", []), key="relatorio_familia_id")
+        with c4:
             filtro_situacao = st.selectbox("Situação", ["Todas"] + filtros_disponiveis.get("situacoes", []), key="relatorio_familia_situacao")
 
         if st.button("🔎 Gerar relatório", type="primary", use_container_width=True, key="gerar_relatorio_familia"):
@@ -371,6 +373,7 @@ def exibir_tela_relatorios(base):
                 dados_base=base,
                 supervisor="" if filtro_supervisor == "Todos" else filtro_supervisor,
                 subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
+                familia="" if filtro_familia == "Todas" else filtro_familia,
                 situacao="" if filtro_situacao == "Todas" else filtro_situacao
             )
 
