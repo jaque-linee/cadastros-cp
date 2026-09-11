@@ -642,6 +642,8 @@ def exibir_tela_envio_documentos(
 
                     existente_nome = ""
                     existente_sup = ""
+                    existente_sub = ""
+                    existente_comunidade = ""
 
                     if duplicado and existente:
                         existente_nome = str(
@@ -654,6 +656,20 @@ def exibir_tela_envio_documentos(
                         existente_sup = str(
                             existente.get(
                                 "supervisor",
+                                ""
+                            )
+                        )
+
+                        existente_sub = str(
+                            existente.get(
+                                "subsupervisor",
+                                ""
+                            )
+                        )
+
+                        existente_comunidade = str(
+                            existente.get(
+                                "comunidade",
                                 ""
                             )
                         )
@@ -699,6 +715,12 @@ def exibir_tela_envio_documentos(
 
                             "Supervisor atual":
                                 existente_sup,
+
+                            "Subsupervisor atual":
+                                existente_sub,
+
+                            "Comunidade atual":
+                                existente_comunidade,
 
                             "Bases encontradas":
                                 bases_encontradas,
@@ -766,6 +788,12 @@ def exibir_tela_envio_documentos(
                                 "",
 
                             "Supervisor atual":
+                                "",
+
+                            "Subsupervisor atual":
+                                "",
+
+                            "Comunidade atual":
                                 ""
                         }
                     )
@@ -1087,6 +1115,12 @@ def exibir_tela_envio_documentos(
                     supervisor_atual = str(
                         item.get("Supervisor atual", "") or ""
                     ).strip()
+                    subsupervisor_atual = str(
+                        item.get("Subsupervisor atual", "") or ""
+                    ).strip()
+                    comunidade_atual = str(
+                        item.get("Comunidade atual", "") or ""
+                    ).strip()
 
                     detalhes_duplicado = []
 
@@ -1098,6 +1132,16 @@ def exibir_tela_envio_documentos(
                     if supervisor_atual:
                         detalhes_duplicado.append(
                             f"supervisor atual: {supervisor_atual}"
+                        )
+
+                    if subsupervisor_atual:
+                        detalhes_duplicado.append(
+                            f"sub atual: {subsupervisor_atual}"
+                        )
+
+                    if comunidade_atual:
+                        detalhes_duplicado.append(
+                            f"comunidade atual: {comunidade_atual}"
                         )
 
                     if detalhes_duplicado:
