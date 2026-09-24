@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit.components.v1 as components
 
 import relatorios
+import relatorio_contatos
 import sheets
 
 WEBHOOK_URL = st.secrets["WEBHOOK_URL"]
@@ -17,7 +18,7 @@ def exibir_tela_relatorios(base):
 
     tipo_relatorio = st.selectbox(
         "Tipo de relatório",
-        ["👤 Por Nome", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "💰 Pagamentos das Lideranças"],
+        ["👤 Por Nome", "📞 Contatos Resumidos", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "💰 Pagamentos das Lideranças"],
         key="tipo_relatorio"
     )
 
@@ -350,6 +351,139 @@ def exibir_tela_relatorios(base):
                             key="baixar_pdf_relatorio_nome"
                         )
 
+                except Exception as erro_pdf:
+                    st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
+
+    # ============================================================
+    # RELATÓRIO DE CONTATOS RESUMIDO
+    # ============================================================
+    elif tipo_relatorio == "📞 Contatos Resumidos":
+        filtros = relatorio_contatos.obter_filtros_contatos(base)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            filtro_supervisor = st.selectbox(
+                "Supervisor", ["Todos"] + filtros.get("supervisores", []),
+                key="contatos_supervisor"
+            )
+        with c2:
+            filtro_subsupervisor = st.selectbox(
+                "Subsupervisor", ["Todos"] + filtros.get("subsupervisores", []),
+                key="contatos_subsupervisor"
+            )
+        with c3:
+            filtro_comunidade = st.selectbox(
+                "Comunidade", ["Todas"] + filtros.get("comunidades", []),
+                key="contatos_comunidade"
+            )
+
+        c4, c5 = st.columns([2, 1])
+        with c4:
+            filtro_situacao = st.selectbox(
+                "Situação", ["Todas"] + filtros.get("situacoes", []),
+                key="contatos_situacao"
+            )
+        with c5:
+            somente_telefone = st.checkbox(
+                "Somente com telefone", value=True,
+                key="contatos_somente_telefone"
+            )
+
+        if st.button(
+            "🔎 Gerar relatório", type="primary", use_container_width=True,
+            key="gerar_relatorio_contatos"
+        ):
+            st.session_state["relatorio_contatos_gerado"] = (
+                relatorio_contatos.gerar_relatorio_contatos(
+                    dados_base=base,
+                    supervisor="" if filtro_supervisor == "Todos" else filtro_supervisor,
+                    subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
+                    comunidade="" if filtro_comunidade == "Todas" else filtro_comunidade,
+                    situacao="" if filtro_situacao == "Todas" else filtro_situacao,
+                    somente_com_telefone=somente_telefone
+                )
+            )
+
+        resultado_contatos = st.session_state.get("relatorio_contatos_gerado")
+
+        if resultado_contatos is not None:
+            total = resultado_contatos.get("total", 0)
+            com_tel = resultado_contatos.get("total_com_telefone", 0)
+
+            st.markdown(
+                f"""<div style="background:#fff;border:1px solid #d9e1e8;
+                border-radius:10px;padding:10px 14px;margin:14px 0 12px 0;">
+                <b>📞 Relatório de Contatos</b>&nbsp;&nbsp;
+                <b>{total}</b> cadastro(s)&nbsp;&nbsp;
+                <b>{com_tel}</b> com telefone</div>""",
+                unsafe_allow_html=True
+            )
+
+            if total == 0:
+                st.info("Nenhum cadastro encontrado para os filtros selecionados.")
+            else:
+                for gs in resultado_contatos.get("grupos", []):
+                    st.markdown(
+                        f"### {gs.get('supervisor','SEM SUPERVISOR')} "
+                        f"— {gs.get('total',0)} cadastro(s)"
+                    )
+                    for gsub in gs.get("subs", []):
+                        st.markdown(
+                            f"**SUB: {gsub.get('subsupervisor','SEM SUBSUPERVISOR')} "
+                            f"— {gsub.get('total',0)}**"
+                        )
+                        for gc in gsub.get("comunidades", []):
+                            st.caption(
+                                f"COMUNIDADE: {gc.get('comunidade','SEM COMUNIDADE')} "
+                                f"— {gc.get('total',0)}"
+                            )
+                            linhas = [{
+                                "Nº": i,
+                                "Nome": r.get("nome",""),
+                                "Telefone": r.get("telefone_formatado","")
+                            } for i, r in enumerate(gc.get("registros", []), 1)]
+
+                            st.dataframe(
+                                pd.DataFrame(linhas),
+                                use_container_width=True,
+                                hide_index=True,
+                                height=min(34 * len(linhas) + 34, 420)
+                            )
+
+                try:
+                    pdf_contatos = relatorio_contatos.gerar_pdf_relatorio_contatos(
+                        resultado_contatos
+                    )
+                    ci, cp = st.columns(2)
+
+                    with ci:
+                        b64 = base64.b64encode(pdf_contatos).decode("utf-8")
+                        components.html(
+                            f"""<button onclick="pc()" style="width:100%;height:38px;
+                            background:#0056b3;color:white;border:2px solid #0056b3;
+                            border-radius:12px;font-weight:bold;cursor:pointer;">
+                            🖨️ Imprimir</button>
+                            <script>
+                            function pc(){{
+                                const b=atob("{b64}"),a=new Uint8Array(b.length);
+                                for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);
+                                const u=URL.createObjectURL(new Blob([a],{{type:"application/pdf"}}));
+                                const w=window.open(u,"_blank","width=1000,height=800");
+                                if(!w){{alert("Permita pop-ups para este site.");return;}}
+                                setTimeout(()=>{{w.focus();w.print();}},1200);
+                            }}
+                            </script>""",
+                            height=45, scrolling=False
+                        )
+
+                    with cp:
+                        st.download_button(
+                            "📄 Baixar PDF", pdf_contatos,
+                            "relatorio_contatos_resumido.pdf",
+                            "application/pdf",
+                            use_container_width=True,
+                            key="baixar_pdf_relatorio_contatos"
+                        )
                 except Exception as erro_pdf:
                     st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
 
