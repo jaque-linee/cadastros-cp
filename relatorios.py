@@ -4042,3 +4042,389 @@ def gerar_pdf_relatorio_pagamentos_resumidos(resultado_relatorio):
     pdf = buffer.getvalue()
     buffer.close()
     return pdf
+
+
+
+# ============================================================
+# PAGAMENTOS RESUMIDOS - VERSÃO TABELA DINÂMICA
+# A TABELA DINÂMICA é a fonte oficial de SUP/SUB/COM/ATUAL.
+# ============================================================
+
+def obter_filtros_pagamentos_resumidos(dados_pagamentos, dados_tabela_dinamica=None):
+    supervisores, subsupervisores, comunidades = set(), set(), set()
+
+    for registro in dados_tabela_dinamica or []:
+        sup = limpar_texto(_chave_pagamentos(registro, "SUPERVISOR"))
+        sub = limpar_texto(_chave_pagamentos(registro, "SUBSUPERVISOR"))
+        com = limpar_texto(_chave_pagamentos(registro, "COMUNIDADE"))
+        if sup:
+            supervisores.add(sup)
+        if sub:
+            subsupervisores.add(sub)
+        if com:
+            comunidades.add(com)
+
+    return {
+        "supervisores": sorted(supervisores, key=str.upper),
+        "subsupervisores": sorted(subsupervisores, key=str.upper),
+        "comunidades": sorted(comunidades, key=str.upper),
+    }
+
+
+def _chave_resumido_tabela_dinamica(supervisor, subsupervisor, comunidade):
+    return (
+        normalizar_filtro(supervisor),
+        normalizar_filtro(subsupervisor),
+        normalizar_filtro(comunidade),
+    )
+
+
+def gerar_relatorio_pagamentos_resumidos(
+    dados_pagamentos,
+    dados_tabela_dinamica=None,
+    supervisor="",
+    subsupervisor="",
+    comunidade=""
+):
+    fs = normalizar_filtro(supervisor)
+    fsub = normalizar_filtro(subsupervisor)
+    fc = normalizar_filtro(comunidade)
+
+    # --------------------------------------------------------
+    # PAGAMENTOS: indexa valores financeiros por SUP/SUB/COM.
+    # --------------------------------------------------------
+    colunas_data = set()
+    for original in dados_pagamentos or []:
+        for cabecalho in (original or {}).keys():
+            if _eh_coluna_data_pagamentos(cabecalho):
+                colunas_data.add(limpar_texto(cabecalho))
+
+    colunas_data = sorted(
+        colunas_data,
+        key=lambda d: _data_pagamentos(d) or datetime.max
+    )
+    hoje = datetime.now(ZoneInfo("America/Maceio")).date()
+    pagamentos = {}
+
+    for original in dados_pagamentos or []:
+        sup = limpar_texto(_chave_pagamentos(original, "SUPERVISOR"))
+        sub = limpar_texto(_chave_pagamentos(original, "SUBSUPERVISOR"))
+        com = limpar_texto(_chave_pagamentos(original, "COMUNIDADE"))
+        if not sup and not sub and not com:
+            continue
+
+        chave = _chave_resumido_tabela_dinamica(sup, sub, com)
+        item = pagamentos.setdefault(chave, {
+            "qtde": 0,
+            "pago": 0.0,
+            "a_pagar": 0.0,
+            "total": 0.0,
+        })
+
+        qtde = _inteiro_pagamentos(_chave_pagamentos(original, "QTDE"))
+        total = _valor_monetario_pagamentos(_chave_pagamentos(original, "TOTAL"))
+        pago = 0.0
+        futuro = 0.0
+
+        for cabecalho in colunas_data:
+            valor = _valor_monetario_pagamentos(
+                _chave_pagamentos(original, cabecalho)
+            )
+            data_obj = _data_pagamentos(cabecalho)
+            if valor and data_obj:
+                if data_obj.date() <= hoje:
+                    pago += valor
+                else:
+                    futuro += valor
+
+        a_pagar = futuro + max(0.0, total - pago - futuro)
+
+        item["qtde"] += qtde
+        item["pago"] += pago
+        item["a_pagar"] += a_pagar
+        item["total"] += total
+
+    # --------------------------------------------------------
+    # TABELA DINÂMICA: BASE PRINCIPAL.
+    # Nenhuma liderança dela é descartada por não ter pagamento.
+    # --------------------------------------------------------
+    dinamica = {}
+
+    for original in dados_tabela_dinamica or []:
+        sup = limpar_texto(_chave_pagamentos(original, "SUPERVISOR"))
+        sub = limpar_texto(_chave_pagamentos(original, "SUBSUPERVISOR"))
+        com = limpar_texto(_chave_pagamentos(original, "COMUNIDADE"))
+
+        if not sup and not sub and not com:
+            continue
+
+        chave = _chave_resumido_tabela_dinamica(sup, sub, com)
+        item = dinamica.setdefault(chave, {
+            "supervisor": sup,
+            "subsupervisor": sub,
+            "comunidade": com,
+            "atual": 0,
+        })
+        item["atual"] += _inteiro_pagamentos(
+            _chave_pagamentos(original, "ATUAL")
+        )
+
+    registros = []
+
+    for chave, base in dinamica.items():
+        if fs and normalizar_filtro(base["supervisor"]) != fs:
+            continue
+        if fsub and normalizar_filtro(base["subsupervisor"]) != fsub:
+            continue
+        if fc and normalizar_filtro(base["comunidade"]) != fc:
+            continue
+
+        financeiro = pagamentos.get(chave, {
+            "qtde": 0,
+            "pago": 0.0,
+            "a_pagar": 0.0,
+            "total": 0.0,
+        })
+
+        qtde = int(financeiro["qtde"])
+        atual = int(base["atual"])
+
+        registros.append({
+            "supervisor": base["supervisor"],
+            "subsupervisor": base["subsupervisor"],
+            "comunidade": base["comunidade"],
+            "qtde": qtde,
+            "atual": atual,
+            "diferenca": qtde - atual,
+            "pago": financeiro["pago"],
+            "a_pagar": financeiro["a_pagar"],
+            "total": financeiro["total"],
+        })
+
+    registros.sort(
+        key=lambda r: (
+            normalizar_filtro(r["supervisor"]),
+            normalizar_filtro(r["subsupervisor"]),
+            normalizar_filtro(r["comunidade"]),
+        )
+    )
+
+    return {
+        "tipo": "pagamentos_resumidos",
+        "titulo": "Relatório de Pagamentos Resumidos",
+        "total_liderancas": len(registros),
+        "total_qtde": sum(r["qtde"] for r in registros),
+        "total_atual": sum(r["atual"] for r in registros),
+        "total_diferenca": sum(r["diferenca"] for r in registros),
+        "total_pago": sum(r["pago"] for r in registros),
+        "total_a_pagar": sum(r["a_pagar"] for r in registros),
+        "total_geral": sum(r["total"] for r in registros),
+        "filtros": {
+            "supervisor": limpar_texto(supervisor),
+            "subsupervisor": limpar_texto(subsupervisor),
+            "comunidade": limpar_texto(comunidade),
+        },
+        "registros": registros,
+    }
+
+
+def gerar_pdf_relatorio_pagamentos_resumidos(resultado_relatorio):
+    buffer = BytesIO()
+    pagina = landscape(A4)
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=pagina,
+        rightMargin=0.55 * cm,
+        leftMargin=0.55 * cm,
+        topMargin=0.55 * cm,
+        bottomMargin=0.65 * cm,
+    )
+
+    base = getSampleStyleSheet()
+
+    AZUL = colors.HexColor("#175CD3")
+    AZUL2 = colors.HexColor("#1570EF")
+    VERDE = colors.HexColor("#039855")
+    LARANJA = colors.HexColor("#DC6803")
+    VERMELHO = colors.HexColor("#D92D20")
+    ROXO = colors.HexColor("#6938EF")
+    CINZA = colors.HexColor("#475467")
+    FUNDO = colors.HexColor("#F2F4F7")
+    BORDA = colors.HexColor("#D0D5DD")
+    TEXTO = colors.HexColor("#101828")
+
+    titulo = ParagraphStyle(
+        "PagResTituloFinal",
+        parent=base["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=15,
+        leading=17,
+        alignment=TA_CENTER,
+        textColor=TEXTO,
+        spaceAfter=2,
+    )
+    pequeno = ParagraphStyle(
+        "PagResPequenoFinal",
+        parent=base["Normal"],
+        fontSize=7.3,
+        leading=8.5,
+        alignment=TA_CENTER,
+        textColor=CINZA,
+    )
+    celula = ParagraphStyle(
+        "PagResCelulaFinal",
+        parent=base["Normal"],
+        fontSize=6.4,
+        leading=7.5,
+        textColor=TEXTO,
+    )
+    centro = ParagraphStyle(
+        "PagResCentroFinal",
+        parent=celula,
+        alignment=TA_CENTER,
+    )
+    cab = ParagraphStyle(
+        "PagResCabFinal",
+        parent=centro,
+        fontName="Helvetica-Bold",
+        textColor=colors.white,
+        fontSize=6.2,
+        leading=7.1,
+    )
+    card_rotulo = ParagraphStyle(
+        "PagResCardRotFinal",
+        parent=base["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=6.8,
+        leading=8,
+        alignment=TA_CENTER,
+    )
+    card_valor = ParagraphStyle(
+        "PagResCardValFinal",
+        parent=base["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=10.2,
+        leading=11.5,
+        alignment=TA_CENTER,
+        textColor=TEXTO,
+    )
+
+    elementos = [
+        Paragraph("RELATÓRIO DE PAGAMENTOS RESUMIDOS", titulo),
+        Paragraph("Conferência com a Tabela Dinâmica", pequeno),
+    ]
+
+    filtros = resultado_relatorio.get("filtros", {})
+    partes = []
+    for rotulo, chave in (
+        ("Supervisor", "supervisor"),
+        ("Subsupervisor", "subsupervisor"),
+        ("Comunidade", "comunidade"),
+    ):
+        valor = limpar_texto(filtros.get(chave, ""))
+        if valor:
+            partes.append(f"<b>{rotulo}:</b> {valor}")
+
+    info = "Gerado em " + datetime.now(
+        ZoneInfo("America/Maceio")
+    ).strftime("%d/%m/%Y %H:%M")
+    if partes:
+        info += " &nbsp; | &nbsp; " + " &nbsp; | &nbsp; ".join(partes)
+
+    elementos += [Paragraph(info, pequeno), Spacer(1, 0.12 * cm)]
+
+    cards = [
+        ("LIDERANÇAS", str(resultado_relatorio.get("total_liderancas", 0)), AZUL2),
+        ("QTDE", str(resultado_relatorio.get("total_qtde", 0)), AZUL),
+        ("ATUAL", str(resultado_relatorio.get("total_atual", 0)), VERDE),
+        ("DIFERENÇA", str(resultado_relatorio.get("total_diferenca", 0)), LARANJA),
+        ("TOTAL PAGO", _formatar_moeda_pagamentos(resultado_relatorio.get("total_pago", 0)), VERDE),
+        ("A PAGAR", _formatar_moeda_pagamentos(resultado_relatorio.get("total_a_pagar", 0)), VERMELHO),
+        ("TOTAL", _formatar_moeda_pagamentos(resultado_relatorio.get("total_geral", 0)), ROXO),
+    ]
+
+    card_data = [
+        [Paragraph(f'<font color="{cor.hexval()}"><b>{rot}</b></font>', card_rotulo)
+         for rot, valor, cor in cards],
+        [Paragraph(valor, card_valor) for rot, valor, cor in cards],
+    ]
+
+    cards_tabela = Table(
+        card_data,
+        colWidths=[(pagina[0] - 1.10 * cm) / 7.0] * 7,
+        rowHeights=[0.42 * cm, 0.62 * cm],
+    )
+    cards_tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), FUNDO),
+        ("BOX", (0, 0), (-1, -1), 0.55, BORDA),
+        ("INNERGRID", (0, 0), (-1, -1), 0.35, BORDA),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    elementos += [cards_tabela, Spacer(1, 0.16 * cm)]
+
+    cabecalhos = [
+        "SUPERVISOR",
+        "SUBSUPERVISOR",
+        "COMUNIDADE",
+        "QTDE",
+        "ATUAL",
+        "DIF.",
+        "TOTAL PAGO",
+        "A PAGAR",
+        "TOTAL",
+    ]
+    dados = [[Paragraph(x, cab) for x in cabecalhos]]
+
+    for r in resultado_relatorio.get("registros", []):
+        dados.append([
+            Paragraph(limpar_texto(r.get("supervisor", "")) or "—", celula),
+            Paragraph(limpar_texto(r.get("subsupervisor", "")) or "—", celula),
+            Paragraph(limpar_texto(r.get("comunidade", "")) or "—", celula),
+            Paragraph(str(r.get("qtde", 0)), centro),
+            Paragraph(str(r.get("atual", 0)), centro),
+            Paragraph(str(r.get("diferenca", 0)), centro),
+            Paragraph(_formatar_moeda_pagamentos(r.get("pago", 0)), centro),
+            Paragraph(_formatar_moeda_pagamentos(r.get("a_pagar", 0)), centro),
+            Paragraph(_formatar_moeda_pagamentos(r.get("total", 0)), centro),
+        ])
+
+    dados.append([
+        Paragraph("<b>TOTAIS</b>", celula),
+        "",
+        "",
+        Paragraph(f"<b>{resultado_relatorio.get('total_qtde', 0)}</b>", centro),
+        Paragraph(f"<b>{resultado_relatorio.get('total_atual', 0)}</b>", centro),
+        Paragraph(f"<b>{resultado_relatorio.get('total_diferenca', 0)}</b>", centro),
+        Paragraph(f"<b>{_formatar_moeda_pagamentos(resultado_relatorio.get('total_pago', 0))}</b>", centro),
+        Paragraph(f"<b>{_formatar_moeda_pagamentos(resultado_relatorio.get('total_a_pagar', 0))}</b>", centro),
+        Paragraph(f"<b>{_formatar_moeda_pagamentos(resultado_relatorio.get('total_geral', 0))}</b>", centro),
+    ])
+
+    larguras = [4.2, 4.2, 3.6, 1.35, 1.35, 1.45, 2.45, 2.35, 2.45]
+    util = pagina[0] - 1.10 * cm
+    fator = util / (sum(larguras) * cm)
+
+    tabela = Table(
+        dados,
+        colWidths=[x * cm * fator for x in larguras],
+        repeatRows=1,
+    )
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), CINZA),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.28, BORDA),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("BACKGROUND", (0, -1), (-1, -1), FUNDO),
+        ("SPAN", (0, -1), (2, -1)),
+    ]))
+
+    elementos.append(tabela)
+    doc.build(elementos)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
