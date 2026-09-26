@@ -1485,6 +1485,7 @@ def exibir_tela_relatorios(base):
     elif tipo_relatorio == "💰 Pagamentos Resumidos":
         rp = sheets.carregar_pagamentos_liderancas(WEBHOOK_URL)
         rd = sheets.carregar_tabela_dinamica(WEBHOOK_URL)
+        rc = sheets.carregar_liderancas_controle(WEBHOOK_URL)
 
         if not rp.get("sucesso"):
             st.error(rp.get("mensagem", "Não foi possível carregar os pagamentos."))
@@ -1494,8 +1495,13 @@ def exibir_tela_relatorios(base):
             st.error(rd.get("mensagem", "Não foi possível carregar a TABELA DINÂMICA."))
             return
 
+        if not rc.get("sucesso"):
+            st.error(rc.get("mensagem", "Não foi possível carregar LIDERANÇAS CONTROLE."))
+            return
+
         dados_pagamentos = rp.get("dados", [])
         dados_dinamica = rd.get("dados", [])
+        dados_controle = rc.get("dados", [])
 
         filtros = relatorios.obter_filtros_pagamentos_resumidos(
             dados_pagamentos,
@@ -1535,6 +1541,7 @@ def exibir_tela_relatorios(base):
                 relatorios.gerar_relatorio_pagamentos_resumidos(
                     dados_pagamentos=dados_pagamentos,
                     dados_tabela_dinamica=dados_dinamica,
+                    dados_liderancas_controle=dados_controle,
                     supervisor="" if sup == "Todos" else sup,
                     subsupervisor="" if sub == "Todos" else sub,
                     comunidade="" if com == "Todas" else com
@@ -1639,4 +1646,3 @@ def exibir_tela_relatorios(base):
 
                 except Exception as erro_pdf:
                     st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
-
