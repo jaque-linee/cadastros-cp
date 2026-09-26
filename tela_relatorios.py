@@ -5,7 +5,6 @@ import pandas as pd
 import streamlit.components.v1 as components
 
 import relatorios
-import relatorio_contatos
 import sheets
 
 WEBHOOK_URL = st.secrets["WEBHOOK_URL"]
@@ -18,7 +17,7 @@ def exibir_tela_relatorios(base):
 
     tipo_relatorio = st.selectbox(
         "Tipo de relatório",
-        ["👤 Por Nome", "📞 Contatos Resumidos", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "💰 Pagamentos das Lideranças"],
+        ["👤 Por Nome", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "💰 Pagamentos Resumidos"],
         key="tipo_relatorio"
     )
 
@@ -351,139 +350,6 @@ def exibir_tela_relatorios(base):
                             key="baixar_pdf_relatorio_nome"
                         )
 
-                except Exception as erro_pdf:
-                    st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
-
-    # ============================================================
-    # RELATÓRIO DE CONTATOS RESUMIDO
-    # ============================================================
-    elif tipo_relatorio == "📞 Contatos Resumidos":
-        filtros = relatorio_contatos.obter_filtros_contatos(base)
-
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            filtro_supervisor = st.selectbox(
-                "Supervisor", ["Todos"] + filtros.get("supervisores", []),
-                key="contatos_supervisor"
-            )
-        with c2:
-            filtro_subsupervisor = st.selectbox(
-                "Subsupervisor", ["Todos"] + filtros.get("subsupervisores", []),
-                key="contatos_subsupervisor"
-            )
-        with c3:
-            filtro_comunidade = st.selectbox(
-                "Comunidade", ["Todas"] + filtros.get("comunidades", []),
-                key="contatos_comunidade"
-            )
-
-        c4, c5 = st.columns([2, 1])
-        with c4:
-            filtro_situacao = st.selectbox(
-                "Situação", ["Todas"] + filtros.get("situacoes", []),
-                key="contatos_situacao"
-            )
-        with c5:
-            somente_telefone = st.checkbox(
-                "Somente com telefone", value=True,
-                key="contatos_somente_telefone"
-            )
-
-        if st.button(
-            "🔎 Gerar relatório", type="primary", use_container_width=True,
-            key="gerar_relatorio_contatos"
-        ):
-            st.session_state["relatorio_contatos_gerado"] = (
-                relatorio_contatos.gerar_relatorio_contatos(
-                    dados_base=base,
-                    supervisor="" if filtro_supervisor == "Todos" else filtro_supervisor,
-                    subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
-                    comunidade="" if filtro_comunidade == "Todas" else filtro_comunidade,
-                    situacao="" if filtro_situacao == "Todas" else filtro_situacao,
-                    somente_com_telefone=somente_telefone
-                )
-            )
-
-        resultado_contatos = st.session_state.get("relatorio_contatos_gerado")
-
-        if resultado_contatos is not None:
-            total = resultado_contatos.get("total", 0)
-            com_tel = resultado_contatos.get("total_com_telefone", 0)
-
-            st.markdown(
-                f"""<div style="background:#fff;border:1px solid #d9e1e8;
-                border-radius:10px;padding:10px 14px;margin:14px 0 12px 0;">
-                <b>📞 Relatório de Contatos</b>&nbsp;&nbsp;
-                <b>{total}</b> cadastro(s)&nbsp;&nbsp;
-                <b>{com_tel}</b> com telefone</div>""",
-                unsafe_allow_html=True
-            )
-
-            if total == 0:
-                st.info("Nenhum cadastro encontrado para os filtros selecionados.")
-            else:
-                for gs in resultado_contatos.get("grupos", []):
-                    st.markdown(
-                        f"### {gs.get('supervisor','SEM SUPERVISOR')} "
-                        f"— {gs.get('total',0)} cadastro(s)"
-                    )
-                    for gsub in gs.get("subs", []):
-                        st.markdown(
-                            f"**SUB: {gsub.get('subsupervisor','SEM SUBSUPERVISOR')} "
-                            f"— {gsub.get('total',0)}**"
-                        )
-                        for gc in gsub.get("comunidades", []):
-                            st.caption(
-                                f"COMUNIDADE: {gc.get('comunidade','SEM COMUNIDADE')} "
-                                f"— {gc.get('total',0)}"
-                            )
-                            linhas = [{
-                                "Nº": i,
-                                "Nome": r.get("nome",""),
-                                "Telefone": r.get("telefone_formatado","")
-                            } for i, r in enumerate(gc.get("registros", []), 1)]
-
-                            st.dataframe(
-                                pd.DataFrame(linhas),
-                                use_container_width=True,
-                                hide_index=True,
-                                height=min(34 * len(linhas) + 34, 420)
-                            )
-
-                try:
-                    pdf_contatos = relatorio_contatos.gerar_pdf_relatorio_contatos(
-                        resultado_contatos
-                    )
-                    ci, cp = st.columns(2)
-
-                    with ci:
-                        b64 = base64.b64encode(pdf_contatos).decode("utf-8")
-                        components.html(
-                            f"""<button onclick="pc()" style="width:100%;height:38px;
-                            background:#0056b3;color:white;border:2px solid #0056b3;
-                            border-radius:12px;font-weight:bold;cursor:pointer;">
-                            🖨️ Imprimir</button>
-                            <script>
-                            function pc(){{
-                                const b=atob("{b64}"),a=new Uint8Array(b.length);
-                                for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);
-                                const u=URL.createObjectURL(new Blob([a],{{type:"application/pdf"}}));
-                                const w=window.open(u,"_blank","width=1000,height=800");
-                                if(!w){{alert("Permita pop-ups para este site.");return;}}
-                                setTimeout(()=>{{w.focus();w.print();}},1200);
-                            }}
-                            </script>""",
-                            height=45, scrolling=False
-                        )
-
-                    with cp:
-                        st.download_button(
-                            "📄 Baixar PDF", pdf_contatos,
-                            "relatorio_contatos_resumido.pdf",
-                            "application/pdf",
-                            use_container_width=True,
-                            key="baixar_pdf_relatorio_contatos"
-                        )
                 except Exception as erro_pdf:
                     st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
 
@@ -1082,9 +948,9 @@ def exibir_tela_relatorios(base):
 
 
     # ============================================================
-    # RELATÓRIO DE PAGAMENTOS DAS LIDERANÇAS
+    # RELATÓRIO DE PAGAMENTOS RESUMIDOS
     # ============================================================
-    elif tipo_relatorio == "💰 Pagamentos das Lideranças":
+    elif tipo_relatorio == "💰 Pagamentos Resumidos":
 
         resposta_pagamentos = sheets.carregar_pagamentos_liderancas(
             WEBHOOK_URL
@@ -1116,15 +982,15 @@ def exibir_tela_relatorios(base):
 
         dados_liderancas_controle = resposta_controle.get("dados", [])
 
-        if not dados_pagamentos:
+        if not dados_pagamentos and not dados_liderancas_controle:
             st.info(
-                'Nenhum registro encontrado na aba '
-                '"PAGAMENTOS LIDERANÇAS".'
+                "Nenhuma liderança encontrada para gerar o relatório."
             )
             return
 
         filtros_disponiveis = relatorios.obter_filtros_pagamentos(
-            dados_pagamentos
+            dados_pagamentos,
+            dados_liderancas_controle
         )
 
         col_sup, col_sub, col_com = st.columns(3)
@@ -1166,54 +1032,42 @@ def exibir_tela_relatorios(base):
             key="gerar_relatorio_pagamentos"
         )
 
+        parametros_pagamentos = {
+            "dados_pagamentos": dados_pagamentos,
+            "dados_liderancas_controle": dados_liderancas_controle,
+            "supervisor": (
+                ""
+                if filtro_supervisor == "Todos"
+                else filtro_supervisor
+            ),
+            "subsupervisor": (
+                ""
+                if filtro_subsupervisor == "Todos"
+                else filtro_subsupervisor
+            ),
+            "comunidade": (
+                ""
+                if filtro_comunidade == "Todas"
+                else filtro_comunidade
+            ),
+        }
+
         if gerar_pagamentos:
             st.session_state[
                 "relatorio_pagamentos_gerado"
             ] = relatorios.gerar_relatorio_pagamentos(
-                dados_pagamentos=dados_pagamentos,
-                dados_liderancas_controle=dados_liderancas_controle,
-                supervisor=(
-                    ""
-                    if filtro_supervisor == "Todos"
-                    else filtro_supervisor
-                ),
-                subsupervisor=(
-                    ""
-                    if filtro_subsupervisor == "Todos"
-                    else filtro_subsupervisor
-                ),
-                comunidade=(
-                    ""
-                    if filtro_comunidade == "Todas"
-                    else filtro_comunidade
-                )
+                **parametros_pagamentos
             )
 
         resultado = st.session_state.get(
             "relatorio_pagamentos_gerado"
         )
 
-        # Recalcula o resultado salvo usando os dados e a lógica atuais.
-        # Evita exibir valores antigos após atualização do relatorios.py.
+        # Recalcula o que estiver salvo para usar sempre a lógica
+        # atual do relatorios.py e os filtros visíveis na tela.
         if resultado is not None:
             resultado = relatorios.gerar_relatorio_pagamentos(
-                dados_pagamentos=dados_pagamentos,
-                dados_liderancas_controle=dados_liderancas_controle,
-                supervisor=(
-                    ""
-                    if filtro_supervisor == "Todos"
-                    else filtro_supervisor
-                ),
-                subsupervisor=(
-                    ""
-                    if filtro_subsupervisor == "Todos"
-                    else filtro_subsupervisor
-                ),
-                comunidade=(
-                    ""
-                    if filtro_comunidade == "Todas"
-                    else filtro_comunidade
-                )
+                **parametros_pagamentos
             )
             st.session_state[
                 "relatorio_pagamentos_gerado"
@@ -1239,101 +1093,74 @@ def exibir_tela_relatorios(base):
                     margin:14px 0 12px 0;
                     font-size:0.95rem;
                 ">
-                    <b>💰 Pagamentos das Lideranças</b>
+                    <b>💰 Pagamentos Resumidos</b>
+                    &nbsp;&nbsp;
+                    Conferência com a Tabela Dinâmica
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
-            col_liderancas, col_pessoas, col_previsto, col_pago, col_resta = st.columns(5)
-
-            with col_liderancas:
-                st.metric(
-                    "👥 LIDERANÇAS",
-                    resultado.get(
-                        "total_liderancas",
-                        resultado.get("total_registros", 0)
-                    )
-                )
-
-            with col_pessoas:
-                st.metric(
-                    "🧑‍🤝‍🧑 PESSOAS",
-                    resultado.get("total_pessoas", 0),
-                    delta=f'ATUAL: {resultado.get("total_atual", 0)}',
-                    delta_color="off"
-                )
-
-            with col_previsto:
-                st.metric(
-                    "💰 TOTAL PREVISTO",
-                    moeda(
-                        resultado.get(
-                            "total_previsto",
-                            0
-                        )
-                    )
-                )
-
-            with col_pago:
-                st.metric(
-                    "✅ PAGO",
-                    moeda(
-                        resultado.get(
-                            "total_pago",
-                            0
-                        )
-                    )
-                )
-
-            with col_resta:
-                st.metric(
-                    "⏳ RESTA PAGAR",
-                    moeda(
-                        resultado.get(
-                            "total_resta_pagar",
-                            0
-                        )
-                    )
-                )
-
-            registros = resultado.get(
-                "registros",
-                []
-            )
+            registros = resultado.get("registros", [])
 
             if not registros:
                 st.info(
-                    "Nenhum pagamento encontrado "
+                    "Nenhuma liderança encontrada "
                     "para os filtros selecionados."
                 )
             else:
-                st.markdown("#### Detalhamento")
-
                 linhas = []
-                colunas_data = resultado.get("colunas_data", [])
 
                 for registro in registros:
-                    linha = {
-                        "Supervisor": registro.get("supervisor", ""),
-                        "Subsupervisor": registro.get("subsupervisor", ""),
-                        "Comunidade": registro.get("comunidade", ""),
-                        "Qtde": registro.get("qtde", 0),
-                        "Atual": registro.get("atual", 0),
-                    }
+                    linhas.append({
+                        "Liderança": registro.get(
+                            "lideranca",
+                            ""
+                        ),
+                        "Qtde": int(
+                            registro.get("qtde", 0) or 0
+                        ),
+                        "Atual": int(
+                            registro.get("atual", 0) or 0
+                        ),
+                        "Diferença": int(
+                            registro.get("diferenca", 0) or 0
+                        ),
+                        "Total Pago": float(
+                            registro.get("pago", 0) or 0
+                        ),
+                        "A Pagar": float(
+                            registro.get("a_pagar", 0) or 0
+                        ),
+                        "Total": float(
+                            registro.get("total", 0) or 0
+                        ),
+                    })
 
-                    for data in colunas_data:
-                        linha[data] = registro.get(
-                            "valores_datas", {}
-                        ).get(data, 0)
+                # Linha final para conferência direta na própria tela.
+                linhas.append({
+                    "Liderança": "TOTAL",
+                    "Qtde": int(
+                        resultado.get("total_qtde", 0) or 0
+                    ),
+                    "Atual": int(
+                        resultado.get("total_atual", 0) or 0
+                    ),
+                    "Diferença": int(
+                        resultado.get("total_diferenca", 0) or 0
+                    ),
+                    "Total Pago": float(
+                        resultado.get("total_pago", 0) or 0
+                    ),
+                    "A Pagar": float(
+                        resultado.get("total_a_pagar", 0) or 0
+                    ),
+                    "Total": float(
+                        resultado.get("total_geral", 0) or 0
+                    ),
+                })
 
-                    linha["Pago"] = registro.get("pago", 0)
-                    linha["Resta pagar"] = registro.get("resta_pagar", 0)
-                    linhas.append(linha)
-
-                df_pagamentos = pd.DataFrame(
-                    linhas
-                )
+                df_pagamentos = pd.DataFrame(linhas)
 
                 st.dataframe(
                     df_pagamentos,
@@ -1341,23 +1168,13 @@ def exibir_tela_relatorios(base):
                     hide_index=True,
                     height=min(
                         38 * len(df_pagamentos) + 38,
-                        600
+                        650
                     ),
                     column_config={
-                        "Supervisor":
+                        "Liderança":
                             st.column_config.TextColumn(
-                                "Supervisor",
-                                width="medium"
-                            ),
-                        "Subsupervisor":
-                            st.column_config.TextColumn(
-                                "Subsupervisor",
-                                width="medium"
-                            ),
-                        "Comunidade":
-                            st.column_config.TextColumn(
-                                "Comunidade",
-                                width="medium"
+                                "Liderança",
+                                width="large"
                             ),
                         "Qtde":
                             st.column_config.NumberColumn(
@@ -1365,131 +1182,43 @@ def exibir_tela_relatorios(base):
                                 format="%d",
                                 width="small"
                             ),
+                        "Atual":
+                            st.column_config.NumberColumn(
+                                "Atual",
+                                format="%d",
+                                width="small"
+                            ),
+                        "Diferença":
+                            st.column_config.NumberColumn(
+                                "Diferença",
+                                format="%d",
+                                width="small"
+                            ),
+                        "Total Pago":
+                            st.column_config.NumberColumn(
+                                "Total Pago",
+                                format="R$ %.2f",
+                                width="medium"
+                            ),
+                        "A Pagar":
+                            st.column_config.NumberColumn(
+                                "A Pagar",
+                                format="R$ %.2f",
+                                width="medium"
+                            ),
                         "Total":
                             st.column_config.NumberColumn(
                                 "Total",
-                                format="R$ %.2f"
-                            ),
-                        "Pago":
-                            st.column_config.NumberColumn(
-                                "Pago",
-                                format="R$ %.2f"
-                            ),
-                        "Resta pagar":
-                            st.column_config.NumberColumn(
-                                "Resta pagar",
-                                format="R$ %.2f"
+                                format="R$ %.2f",
+                                width="medium"
                             ),
                     }
                 )
 
-                vencimentos = resultado.get(
-                    "vencimentos",
-                    []
+                st.caption(
+                    "Diferença = QTDE − ATUAL. "
+                    "Ex.: QTDE 30 e ATUAL 37 = -7."
                 )
-
-                if vencimentos:
-                    st.markdown(
-                        "#### 📅 Valores por vencimento"
-                    )
-
-                    for vencimento in vencimentos:
-                        st.markdown(
-                            f"""
-                            <div style="
-                                background:#f7f9fb;
-                                border-left:4px solid #0056b3;
-                                padding:8px 12px;
-                                margin-top:12px;
-                                margin-bottom:6px;
-                                border-radius:6px;
-                            ">
-                                <b>{vencimento.get("data", "")}</b>
-                                &nbsp;&nbsp;&nbsp;
-                                <b>{vencimento.get("liderancas", 0)}</b>
-                                liderança(s)
-                                &nbsp;&nbsp;&nbsp;
-                                <b>{vencimento.get("pessoas", 0)}</b>
-                                pessoa(s)
-                                &nbsp;&nbsp;&nbsp;
-                                <b>{moeda(vencimento.get("total", 0))}</b>
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
-
-                        linhas_vencimento = []
-
-                        for item in vencimento.get(
-                            "itens",
-                            []
-                        ):
-                            lideranca = item.get(
-                                "supervisor",
-                                ""
-                            )
-
-                            if item.get(
-                                "subsupervisor"
-                            ):
-                                lideranca += (
-                                    " / "
-                                    + item.get(
-                                        "subsupervisor",
-                                        ""
-                                    )
-                                )
-
-                            linhas_vencimento.append({
-                                "Liderança":
-                                    lideranca,
-                                "Comunidade":
-                                    item.get(
-                                        "comunidade",
-                                        ""
-                                    ),
-                                "Qtde":
-                                    item.get(
-                                        "qtde",
-                                        0
-                                    ),
-                                "Valor":
-                                    item.get(
-                                        "valor",
-                                        0
-                                    ),
-                            })
-
-                        st.dataframe(
-                            pd.DataFrame(
-                                linhas_vencimento
-                            ),
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "Liderança":
-                                    st.column_config.TextColumn(
-                                        "Liderança",
-                                        width="large"
-                                    ),
-                                "Comunidade":
-                                    st.column_config.TextColumn(
-                                        "Comunidade",
-                                        width="large"
-                                    ),
-                                "Qtde":
-                                    st.column_config.NumberColumn(
-                                        "Qtde",
-                                        format="%d",
-                                        width="small"
-                                    ),
-                                "Valor":
-                                    st.column_config.NumberColumn(
-                                        "Valor",
-                                        format="R$ %.2f"
-                                    ),
-                            }
-                        )
 
                 try:
                     pdf_pagamentos = (
@@ -1499,9 +1228,7 @@ def exibir_tela_relatorios(base):
                         )
                     )
 
-                    coluna_imprimir, coluna_pdf = (
-                        st.columns(2)
-                    )
+                    coluna_imprimir, coluna_pdf = st.columns(2)
 
                     with coluna_imprimir:
                         pdf_base64 = base64.b64encode(
@@ -1511,7 +1238,7 @@ def exibir_tela_relatorios(base):
                         components.html(
                             f"""
                             <button
-                                onclick="imprimirPDFPagamentos()"
+                                onclick="imprimirPDFPagamentosResumidos()"
                                 style="
                                     width:100%;
                                     height:38px;
@@ -1528,13 +1255,11 @@ def exibir_tela_relatorios(base):
                             </button>
 
                             <script>
-                            function imprimirPDFPagamentos() {{
+                            function imprimirPDFPagamentosResumidos() {{
                                 const base64 = "{pdf_base64}";
                                 const binario = atob(base64);
                                 const bytes =
-                                    new Uint8Array(
-                                        binario.length
-                                    );
+                                    new Uint8Array(binario.length);
 
                                 for (
                                     let i = 0;
@@ -1547,43 +1272,33 @@ def exibir_tela_relatorios(base):
 
                                 const blob = new Blob(
                                     [bytes],
-                                    {{
-                                        type:
-                                        "application/pdf"
-                                    }}
+                                    {{type: "application/pdf"}}
                                 );
 
                                 const url =
-                                    URL.createObjectURL(
-                                        blob
-                                    );
+                                    URL.createObjectURL(blob);
 
-                                const janela =
-                                    window.open(
-                                        url,
-                                        "_blank",
-                                        "width=1000,height=800"
-                                    );
+                                const janela = window.open(
+                                    url,
+                                    "_blank",
+                                    "width=1000,height=800"
+                                );
 
                                 if (!janela) {{
                                     alert(
-                                        "O navegador bloqueou "
-                                        + "o pop-up. Permita "
-                                        + "pop-ups para este site."
+                                        "O navegador bloqueou o pop-up. "
+                                        + "Permita pop-ups para este site."
                                     );
                                     return;
                                 }}
 
-                                setTimeout(
-                                    function() {{
-                                        try {{
-                                            janela.focus();
-                                            janela.print();
-                                        }} catch (e) {{
-                                        }}
-                                    }},
-                                    1200
-                                );
+                                setTimeout(function() {{
+                                    try {{
+                                        janela.focus();
+                                        janela.print();
+                                    }} catch (e) {{
+                                    }}
+                                }}, 1200);
                             }}
                             </script>
                             """,
@@ -1596,19 +1311,15 @@ def exibir_tela_relatorios(base):
                             label="📄 Baixar PDF",
                             data=pdf_pagamentos,
                             file_name=(
-                                "relatorio_pagamentos_"
-                                "liderancas.pdf"
+                                "relatorio_pagamentos_resumidos.pdf"
                             ),
                             mime="application/pdf",
                             use_container_width=True,
-                            key=(
-                                "baixar_pdf_"
-                                "relatorio_pagamentos"
-                            )
+                            key="baixar_pdf_relatorio_pagamentos"
                         )
 
                 except Exception as erro_pdf:
                     st.error(
-                        "Não foi possível gerar "
-                        f"o PDF: {erro_pdf}"
+                        f"Não foi possível gerar o PDF: {erro_pdf}"
                     )
+
