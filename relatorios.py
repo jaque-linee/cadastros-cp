@@ -4428,3 +4428,304 @@ def gerar_pdf_relatorio_pagamentos_resumidos(resultado_relatorio):
     pdf = buffer.getvalue()
     buffer.close()
     return pdf
+
+
+
+# ============================================================
+# PAGAMENTOS RESUMIDOS - CORREÇÃO DE CRUZAMENTO
+# ============================================================
+
+def _norm_resumido(valor):
+    v = normalizar_filtro(valor)
+    if v in {"SEM SUBSUPERVISOR", "SEM SUB", "NENHUM", "-"}:
+        return ""
+    return v
+
+
+def _chave_resumido_final(supervisor, subsupervisor, comunidade):
+    return (
+        _norm_resumido(supervisor),
+        _norm_resumido(subsupervisor),
+        _norm_resumido(comunidade),
+    )
+
+
+def obter_filtros_pagamentos_resumidos(dados_pagamentos, dados_tabela_dinamica=None):
+    supervisores, subsupervisores, comunidades = set(), set(), set()
+
+    for registro in dados_tabela_dinamica or []:
+        sup = limpar_texto(_chave_pagamentos(registro, "SUPERVISOR"))
+        sub = limpar_texto(_chave_pagamentos(registro, "SUBSUPERVISOR"))
+        com = limpar_texto(_chave_pagamentos(registro, "COMUNIDADE"))
+        if sup:
+            supervisores.add(sup)
+        if sub and _norm_resumido(sub):
+            subsupervisores.add(sub)
+        if com:
+            comunidades.add(com)
+
+    for registro in dados_pagamentos or []:
+        sup = limpar_texto(_chave_pagamentos(registro, "SUPERVISOR"))
+        sub = limpar_texto(_chave_pagamentos(registro, "SUBSUPERVISOR"))
+        com = limpar_texto(_chave_pagamentos(registro, "COMUNIDADE"))
+        if sup:
+            supervisores.add(sup)
+        if sub and _norm_resumido(sub):
+            subsupervisores.add(sub)
+        if com:
+            comunidades.add(com)
+
+    return {
+        "supervisores": sorted(supervisores, key=str.upper),
+        "subsupervisores": sorted(subsupervisores, key=str.upper),
+        "comunidades": sorted(comunidades, key=str.upper),
+    }
+
+
+def gerar_relatorio_pagamentos_resumidos(
+    dados_pagamentos,
+    dados_tabela_dinamica=None,
+    supervisor="",
+    subsupervisor="",
+    comunidade=""
+):
+    fs = _norm_resumido(supervisor)
+    fsub = _norm_resumido(subsupervisor)
+    fc = _norm_resumido(comunidade)
+
+    # Datas do relatório financeiro.
+    colunas_data = set()
+    for original in dados_pagamentos or []:
+        for cabecalho in (original or {}).keys():
+            if _eh_coluna_data_pagamentos(cabecalho):
+                colunas_data.add(limpar_texto(cabecalho))
+
+    colunas_data = sorted(
+        colunas_data,
+        key=lambda d: _data_pagamentos(d) or datetime.max
+    )
+    hoje = datetime.now(ZoneInfo("America/Maceio")).date()
+
+    # --------------------------------------------------------
+    # PAGAMENTOS: mantém TODAS as linhas da aba.
+    # --------------------------------------------------------
+    pagamentos = []
+    for pos, original in enumerate(dados_pagamentos or []):
+        sup = limpar_texto(_chave_pagamentos(original, "SUPERVISOR"))
+        sub = limpar_texto(_chave_pagamentos(original, "SUBSUPERVISOR"))
+        com = limpar_texto(_chave_pagamentos(original, "COMUNIDADE"))
+
+        if not sup and not sub and not com:
+            continue
+
+        qtde = _inteiro_pagamentos(_chave_pagamentos(original, "QTDE"))
+        total = _valor_monetario_pagamentos(_chave_pagamentos(original, "TOTAL"))
+        pago = 0.0
+        futuro = 0.0
+
+        for cabecalho in colunas_data:
+            valor = _valor_monetario_pagamentos(
+                _chave_pagamentos(original, cabecalho)
+            )
+            data_obj = _data_pagamentos(cabecalho)
+            if valor and data_obj:
+                if data_obj.date() <= hoje:
+                    pago += valor
+                else:
+                    futuro += valor
+
+        # Mantém a mesma regra do relatório antigo.
+        a_pagar = futuro + max(0.0, total - pago - futuro)
+
+        pagamentos.append({
+            "id": pos,
+            "supervisor": sup,
+            "subsupervisor": sub,
+            "comunidade": com,
+            "qtde": qtde,
+            "pago": pago,
+            "a_pagar": a_pagar,
+            "total": total,
+            "usado": False,
+        })
+
+    # --------------------------------------------------------
+    # TABELA DINÂMICA: ATUAL oficial.
+    # --------------------------------------------------------
+    dinamica = []
+    supervisor_anterior = ""
+
+    for pos, original in enumerate(dados_tabela_dinamica or []):
+        sup = limpar_texto(_chave_pagamentos(original, "SUPERVISOR"))
+        sub = limpar_texto(_chave_pagamentos(original, "SUBSUPERVISOR"))
+        com = limpar_texto(_chave_pagamentos(original, "COMUNIDADE"))
+
+        # Compatibilidade extra: se vier TOTAL em vez de ATUAL.
+        atual_raw = _chave_pagamentos(original, "ATUAL")
+        if limpar_texto(atual_raw) == "":
+            atual_raw = _chave_pagamentos(original, "TOTAL")
+
+        if sup:
+            supervisor_anterior = sup
+        elif supervisor_anterior:
+            sup = supervisor_anterior
+
+        if normalizar_filtro(sup) == "TOTAL GERAL":
+            continue
+        if not sup and not sub and not com:
+            continue
+
+        dinamica.append({
+            "id": pos,
+            "supervisor": sup,
+            "subsupervisor": sub,
+            "comunidade": com,
+            "atual": _inteiro_pagamentos(atual_raw),
+            "financeiro": None,
+        })
+
+    # --------------------------------------------------------
+    # 1º casamento: SUPERVISOR + SUB + COMUNIDADE.
+    # "SEM SUBSUPERVISOR" = vazio.
+    # --------------------------------------------------------
+    for d in dinamica:
+        chave_d = _chave_resumido_final(
+            d["supervisor"], d["subsupervisor"], d["comunidade"]
+        )
+        candidatos = [
+            p for p in pagamentos
+            if not p["usado"]
+            and _chave_resumido_final(
+                p["supervisor"], p["subsupervisor"], p["comunidade"]
+            ) == chave_d
+        ]
+        if len(candidatos) == 1:
+            d["financeiro"] = candidatos[0]
+            candidatos[0]["usado"] = True
+
+    # --------------------------------------------------------
+    # 2º casamento: SUPERVISOR + COMUNIDADE.
+    # Resolve linhas sem sub na aba de pagamentos.
+    # --------------------------------------------------------
+    for d in dinamica:
+        if d["financeiro"] is not None:
+            continue
+
+        candidatos = [
+            p for p in pagamentos
+            if not p["usado"]
+            and _norm_resumido(p["supervisor"]) == _norm_resumido(d["supervisor"])
+            and _norm_resumido(p["comunidade"]) == _norm_resumido(d["comunidade"])
+        ]
+        if len(candidatos) == 1:
+            d["financeiro"] = candidatos[0]
+            candidatos[0]["usado"] = True
+
+    # --------------------------------------------------------
+    # 3º casamento seguro: COMUNIDADE, somente quando resta
+    # exatamente 1 linha da dinâmica e 1 pagamento naquela comunidade.
+    # Ex.: ANDREIA DE SOUZA / ARNON DE MELO x ANDREIA / ARNON DE MELO.
+    # --------------------------------------------------------
+    comunidades = set(
+        _norm_resumido(d["comunidade"])
+        for d in dinamica
+        if d["financeiro"] is None and _norm_resumido(d["comunidade"])
+    )
+
+    for com_norm in comunidades:
+        ds = [
+            d for d in dinamica
+            if d["financeiro"] is None
+            and _norm_resumido(d["comunidade"]) == com_norm
+        ]
+        ps = [
+            p for p in pagamentos
+            if not p["usado"]
+            and _norm_resumido(p["comunidade"]) == com_norm
+        ]
+        if len(ds) == 1 and len(ps) == 1:
+            ds[0]["financeiro"] = ps[0]
+            ps[0]["usado"] = True
+
+    registros = []
+
+    # Todas as lideranças da TABELA DINÂMICA.
+    for d in dinamica:
+        p = d["financeiro"] or {
+            "qtde": 0, "pago": 0.0, "a_pagar": 0.0, "total": 0.0
+        }
+
+        registros.append({
+            "supervisor": d["supervisor"],
+            "subsupervisor": (
+                d["subsupervisor"]
+                if _norm_resumido(d["subsupervisor"])
+                else "SEM SUBSUPERVISOR"
+            ),
+            "comunidade": d["comunidade"],
+            "qtde": int(p["qtde"]),
+            "atual": int(d["atual"]),
+            "diferenca": int(p["qtde"]) - int(d["atual"]),
+            "pago": float(p["pago"]),
+            "a_pagar": float(p["a_pagar"]),
+            "total": float(p["total"]),
+        })
+
+    # E também pagamentos que não existem na dinâmica, para nenhum
+    # valor financeiro desaparecer do relatório.
+    for p in pagamentos:
+        if p["usado"]:
+            continue
+        registros.append({
+            "supervisor": p["supervisor"],
+            "subsupervisor": (
+                p["subsupervisor"]
+                if _norm_resumido(p["subsupervisor"])
+                else "SEM SUBSUPERVISOR"
+            ),
+            "comunidade": p["comunidade"],
+            "qtde": int(p["qtde"]),
+            "atual": 0,
+            "diferenca": int(p["qtde"]),
+            "pago": float(p["pago"]),
+            "a_pagar": float(p["a_pagar"]),
+            "total": float(p["total"]),
+        })
+
+    # Filtros só depois da união, sem alterar os totais das fontes.
+    filtrados = []
+    for r in registros:
+        if fs and _norm_resumido(r["supervisor"]) != fs:
+            continue
+        if fsub and _norm_resumido(r["subsupervisor"]) != fsub:
+            continue
+        if fc and _norm_resumido(r["comunidade"]) != fc:
+            continue
+        filtrados.append(r)
+
+    filtrados.sort(
+        key=lambda r: (
+            _norm_resumido(r["supervisor"]),
+            _norm_resumido(r["subsupervisor"]),
+            _norm_resumido(r["comunidade"]),
+        )
+    )
+
+    return {
+        "tipo": "pagamentos_resumidos",
+        "titulo": "Relatório de Pagamentos Resumidos",
+        "total_liderancas": len(filtrados),
+        "total_qtde": sum(r["qtde"] for r in filtrados),
+        "total_atual": sum(r["atual"] for r in filtrados),
+        "total_diferenca": sum(r["diferenca"] for r in filtrados),
+        "total_pago": sum(r["pago"] for r in filtrados),
+        "total_a_pagar": sum(r["a_pagar"] for r in filtrados),
+        "total_geral": sum(r["total"] for r in filtrados),
+        "filtros": {
+            "supervisor": limpar_texto(supervisor),
+            "subsupervisor": limpar_texto(subsupervisor),
+            "comunidade": limpar_texto(comunidade),
+        },
+        "registros": filtrados,
+    }
+
