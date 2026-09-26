@@ -4267,16 +4267,16 @@ def gerar_pdf_relatorio_pagamentos_resumidos(resultado_relatorio):
     pequeno = ParagraphStyle(
         "PagResPequenoFinal",
         parent=base["Normal"],
-        fontSize=7.3,
-        leading=8.5,
+        fontSize=8.2,
+        leading=10.0,
         alignment=TA_CENTER,
         textColor=CINZA,
     )
     celula = ParagraphStyle(
         "PagResCelulaFinal",
         parent=base["Normal"],
-        fontSize=6.4,
-        leading=7.5,
+        fontSize=8.2,
+        leading=10.0,
         textColor=TEXTO,
     )
     centro = ParagraphStyle(
@@ -4289,23 +4289,23 @@ def gerar_pdf_relatorio_pagamentos_resumidos(resultado_relatorio):
         parent=centro,
         fontName="Helvetica-Bold",
         textColor=colors.white,
-        fontSize=6.2,
-        leading=7.1,
+        fontSize=7.6,
+        leading=9.0,
     )
     card_rotulo = ParagraphStyle(
         "PagResCardRotFinal",
         parent=base["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=6.8,
-        leading=8,
+        fontSize=7.6,
+        leading=9.0,
         alignment=TA_CENTER,
     )
     card_valor = ParagraphStyle(
         "PagResCardValFinal",
         parent=base["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=10.2,
-        leading=11.5,
+        fontSize=11.2,
+        leading=12.5,
         alignment=TA_CENTER,
         textColor=TEXTO,
     )
@@ -4417,8 +4417,8 @@ def gerar_pdf_relatorio_pagamentos_resumidos(resultado_relatorio):
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("GRID", (0, 0), (-1, -1), 0.28, BORDA),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4.0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4.0),
         ("BACKGROUND", (0, -1), (-1, -1), FUNDO),
         ("SPAN", (0, -1), (2, -1)),
     ]))
@@ -4728,4 +4728,3 @@ def gerar_relatorio_pagamentos_resumidos(
         },
         "registros": filtrados,
     }
-
