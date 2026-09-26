@@ -2898,12 +2898,24 @@ def _formatar_moeda_pagamentos(valor):
     )
 
 
-def obter_filtros_pagamentos(dados_pagamentos):
+def obter_filtros_pagamentos(
+    dados_pagamentos,
+    dados_liderancas_controle=None
+):
+    """
+    Monta os filtros pela união de PAGAMENTOS LIDERANÇAS
+    e LIDERANÇAS CONTROLE, para não esconder quem exista
+    somente em uma das duas fontes.
+    """
     supervisores = set()
     subsupervisores = set()
     comunidades = set()
 
-    for registro in dados_pagamentos or []:
+    fontes = list(dados_pagamentos or []) + list(
+        dados_liderancas_controle or []
+    )
+
+    for registro in fontes:
         supervisor = limpar_texto(
             _chave_pagamentos(registro, "SUPERVISOR")
         )
@@ -2916,10 +2928,8 @@ def obter_filtros_pagamentos(dados_pagamentos):
 
         if supervisor:
             supervisores.add(supervisor)
-
         if subsupervisor:
             subsupervisores.add(subsupervisor)
-
         if comunidade:
             comunidades.add(comunidade)
 
@@ -2930,425 +2940,645 @@ def obter_filtros_pagamentos(dados_pagamentos):
     }
 
 
+def _chave_lideranca_pagamentos(
+    supervisor,
+    subsupervisor,
+    comunidade
+):
+    """
+    Mantém a mesma identificação usada pelo controle:
+    quando existe Subsupervisor, ele identifica a liderança;
+    caso contrário, usa Supervisor. Comunidade completa a chave.
+    """
+    sup = limpar_texto(supervisor)
+    sub = limpar_texto(subsupervisor)
+    com = limpar_texto(comunidade)
+
+    if sub:
+        return (
+            "SUB",
+            normalizar_filtro(sub),
+            normalizar_filtro(com),
+        )
+
+    return (
+        "SUP",
+        normalizar_filtro(sup),
+        normalizar_filtro(com),
+    )
+
+
+def _nome_lideranca_pagamentos(supervisor, subsupervisor):
+    sub = limpar_texto(subsupervisor)
+    sup = limpar_texto(supervisor)
+    return sub or sup or "SEM LIDERANÇA"
+
+
 def gerar_relatorio_pagamentos(
     dados_pagamentos,
     dados_liderancas_controle=None,
     supervisor="",
     subsupervisor="",
-    comunidade=""
+    comunidade="",
+    **kwargs
 ):
-    """Monta o relatório de pagamentos, incluindo ATUAL da aba LIDERANÇAS CONTROLE."""
+    """
+    Relatório resumido para conferência.
+
+    Colunas:
+    LIDERANÇA | QTDE | ATUAL | DIFERENÇA |
+    TOTAL PAGO | A PAGAR | TOTAL
+
+    DIFERENÇA segue o controle:
+    QTDE - ATUAL.
+    Ex.: QTDE 30 e ATUAL 37 = -7.
+
+    Uma liderança que exista no controle e não exista em pagamentos
+    também aparece, com QTDE e valores financeiros zerados.
+    """
     fs = normalizar_filtro(supervisor)
     fsub = normalizar_filtro(subsupervisor)
     fc = normalizar_filtro(comunidade)
 
-    # Índices do ATUAL. A regra é a mesma usada na planilha:
-    # com Sub -> SUBSUPERVISOR + COMUNIDADE; sem Sub -> SUPERVISOR + COMUNIDADE.
-    atual_por_sub = {}
-    atual_por_sup = {}
+    mapa = {}
 
-    for item in dados_liderancas_controle or []:
-        sup_c = limpar_texto(_chave_pagamentos(item, "SUPERVISOR"))
-        sub_c = limpar_texto(_chave_pagamentos(item, "SUBSUPERVISOR"))
-        com_c = limpar_texto(_chave_pagamentos(item, "COMUNIDADE"))
-        atual_c = _inteiro_pagamentos(_chave_pagamentos(item, "ATUAL"))
-
-        if not sup_c and not sub_c and not com_c:
-            continue
-
-        if sub_c:
-            chave = (normalizar_filtro(sub_c), normalizar_filtro(com_c))
-            atual_por_sub[chave] = atual_por_sub.get(chave, 0) + atual_c
-        else:
-            chave = (normalizar_filtro(sup_c), normalizar_filtro(com_c))
-            atual_por_sup[chave] = atual_por_sup.get(chave, 0) + atual_c
-
-    registros = []
+    # Descobre as colunas de datas da aba de pagamentos.
     colunas_data = set()
 
-    # Mantém todas as colunas de data existentes na aba, mesmo que uma delas
-    # esteja vazia para todas as lideranças filtradas.
-    for original in dados_pagamentos or []:
-        for cabecalho in (original or {}).keys():
+    for registro in dados_pagamentos or []:
+        for cabecalho in (registro or {}).keys():
             if _eh_coluna_data_pagamentos(cabecalho):
                 colunas_data.add(limpar_texto(cabecalho))
 
-    colunas_data_ordenadas = sorted(
+    colunas_data = sorted(
         colunas_data,
-        key=lambda d: _data_pagamentos(d) or datetime.max
+        key=lambda valor: _data_pagamentos(valor) or datetime.max
     )
 
     hoje = datetime.now(ZoneInfo("America/Maceio")).date()
 
-    for original in dados_pagamentos or []:
-        sup = limpar_texto(_chave_pagamentos(original, "SUPERVISOR"))
-        sub = limpar_texto(_chave_pagamentos(original, "SUBSUPERVISOR"))
-        com = limpar_texto(_chave_pagamentos(original, "COMUNIDADE"))
-
-        qtde = _inteiro_pagamentos(_chave_pagamentos(original, "QTDE"))
-
-        # Ignora linha automática de TOTAL da Tabela do Google Sheets.
-        if not sup and not sub and not com and qtde == 0:
-            continue
-
-        if fs and normalizar_filtro(sup) != fs:
-            continue
-        if fsub and normalizar_filtro(sub) != fsub:
-            continue
-        if fc and normalizar_filtro(com) != fc:
-            continue
-
-        if sub:
-            atual = atual_por_sub.get(
-                (normalizar_filtro(sub), normalizar_filtro(com)), 0
-            )
-        else:
-            atual = atual_por_sup.get(
-                (normalizar_filtro(sup), normalizar_filtro(com)), 0
-            )
-
-        total = _valor_monetario_pagamentos(
-            _chave_pagamentos(original, "TOTAL")
+    # --------------------------------------------------------
+    # PAGAMENTOS LIDERANÇAS
+    # --------------------------------------------------------
+    for registro in dados_pagamentos or []:
+        sup = limpar_texto(
+            _chave_pagamentos(registro, "SUPERVISOR")
+        )
+        sub = limpar_texto(
+            _chave_pagamentos(registro, "SUBSUPERVISOR")
+        )
+        com = limpar_texto(
+            _chave_pagamentos(registro, "COMUNIDADE")
         )
 
-        valores_datas = {}
-        pago = 0.0
-        resta = 0.0
-        vencimentos = []
+        qtde = _inteiro_pagamentos(
+            _chave_pagamentos(registro, "QTDE")
+        )
 
-        for cabecalho in colunas_data_ordenadas:
+        # Evita linha de totalização da própria planilha.
+        if not sup and not sub and not com:
+            continue
+
+        chave = _chave_lideranca_pagamentos(
+            sup,
+            sub,
+            com
+        )
+
+        total = _valor_monetario_pagamentos(
+            _chave_pagamentos(registro, "TOTAL")
+        )
+
+        total_pago = 0.0
+        a_pagar_datas = 0.0
+
+        for cabecalho in colunas_data:
             valor = _valor_monetario_pagamentos(
-                _chave_pagamentos(original, cabecalho)
+                _chave_pagamentos(registro, cabecalho)
             )
-            valores_datas[cabecalho] = valor
-
             data_obj = _data_pagamentos(cabecalho)
-            if valor and data_obj:
-                if data_obj.date() <= hoje:
-                    pago += valor
-                else:
-                    resta += valor
 
-                vencimentos.append({
-                    "data": cabecalho,
-                    "data_obj": data_obj,
-                    "valor": valor,
-                })
+            if not valor or not data_obj:
+                continue
 
-        # Preserva o TOTAL informado na planilha. Se houver diferença entre
-        # TOTAL e parcelas datadas, RESTA recebe o saldo ainda não distribuído.
-        saldo_nao_datado = max(0.0, total - pago - resta)
-        resta += saldo_nao_datado
+            if data_obj.date() <= hoje:
+                total_pago += valor
+            else:
+                a_pagar_datas += valor
 
-        registros.append({
-            "supervisor": sup,
-            "subsupervisor": sub,
-            "comunidade": com,
-            "qtde": qtde,
-            "atual": atual,
-            "total": total,
-            "pago": pago,
-            "resta_pagar": resta,
-            "valores_datas": valores_datas,
-            "vencimentos": vencimentos,
-        })
+        # Se TOTAL tiver saldo que não esteja distribuído nas datas,
+        # ele também entra em A PAGAR.
+        saldo_sem_data = max(
+            0.0,
+            total - total_pago - a_pagar_datas
+        )
+
+        a_pagar = a_pagar_datas + saldo_sem_data
+
+        if chave not in mapa:
+            mapa[chave] = {
+                "supervisor": sup,
+                "subsupervisor": sub,
+                "comunidade": com,
+                "lideranca": _nome_lideranca_pagamentos(
+                    sup,
+                    sub
+                ),
+                "qtde": 0,
+                "atual": 0,
+                "diferenca": 0,
+                "pago": 0.0,
+                "a_pagar": 0.0,
+                "total": 0.0,
+            }
+
+        mapa[chave]["qtde"] += qtde
+        mapa[chave]["pago"] += total_pago
+        mapa[chave]["a_pagar"] += a_pagar
+        mapa[chave]["total"] += total
+
+    # --------------------------------------------------------
+    # LIDERANÇAS CONTROLE -> ATUAL
+    # --------------------------------------------------------
+    for registro in dados_liderancas_controle or []:
+        sup = limpar_texto(
+            _chave_pagamentos(registro, "SUPERVISOR")
+        )
+        sub = limpar_texto(
+            _chave_pagamentos(registro, "SUBSUPERVISOR")
+        )
+        com = limpar_texto(
+            _chave_pagamentos(registro, "COMUNIDADE")
+        )
+        atual = _inteiro_pagamentos(
+            _chave_pagamentos(registro, "ATUAL")
+        )
+
+        if not sup and not sub and not com:
+            continue
+
+        chave = _chave_lideranca_pagamentos(
+            sup,
+            sub,
+            com
+        )
+
+        if chave not in mapa:
+            mapa[chave] = {
+                "supervisor": sup,
+                "subsupervisor": sub,
+                "comunidade": com,
+                "lideranca": _nome_lideranca_pagamentos(
+                    sup,
+                    sub
+                ),
+                "qtde": 0,
+                "atual": 0,
+                "diferenca": 0,
+                "pago": 0.0,
+                "a_pagar": 0.0,
+                "total": 0.0,
+            }
+
+        mapa[chave]["atual"] += atual
+
+        if not mapa[chave]["supervisor"]:
+            mapa[chave]["supervisor"] = sup
+        if not mapa[chave]["subsupervisor"]:
+            mapa[chave]["subsupervisor"] = sub
+        if not mapa[chave]["comunidade"]:
+            mapa[chave]["comunidade"] = com
+
+        mapa[chave]["lideranca"] = (
+            _nome_lideranca_pagamentos(
+                mapa[chave]["supervisor"],
+                mapa[chave]["subsupervisor"]
+            )
+        )
+
+    registros = []
+
+    for registro in mapa.values():
+        if (
+            fs
+            and normalizar_filtro(
+                registro.get("supervisor", "")
+            ) != fs
+        ):
+            continue
+
+        if (
+            fsub
+            and normalizar_filtro(
+                registro.get("subsupervisor", "")
+            ) != fsub
+        ):
+            continue
+
+        if (
+            fc
+            and normalizar_filtro(
+                registro.get("comunidade", "")
+            ) != fc
+        ):
+            continue
+
+        # IMPORTANTE: mesma lógica do controle.
+        registro["diferenca"] = (
+            int(registro.get("qtde", 0))
+            - int(registro.get("atual", 0))
+        )
+
+        # Compatibilidade com nomes usados no relatório antigo.
+        registro["resta_pagar"] = registro["a_pagar"]
+        registro["total_pago"] = registro["pago"]
+
+        registros.append(registro)
 
     registros.sort(
-        key=lambda r: (
-            normalizar_filtro(r.get("supervisor", "")),
-            normalizar_filtro(r.get("subsupervisor", "")),
-            normalizar_filtro(r.get("comunidade", "")),
+        key=lambda item: (
+            normalizar_filtro(
+                item.get("lideranca", "")
+            ),
+            normalizar_filtro(
+                item.get("comunidade", "")
+            ),
         )
     )
 
-    total_previsto = sum(r["total"] for r in registros)
-    total_pago = sum(r["pago"] for r in registros)
-    total_resta = sum(r["resta_pagar"] for r in registros)
-    total_pessoas = sum(r["qtde"] for r in registros)
-    total_atual = sum(r["atual"] for r in registros)
-
-    resumo_datas = []
-    for cabecalho in colunas_data_ordenadas:
-        total_data = sum(
-            r.get("valores_datas", {}).get(cabecalho, 0.0)
-            for r in registros
-        )
-        resumo_datas.append({
-            "data": cabecalho,
-            "total": total_data,
-        })
-
     return {
-        "tipo": "pagamentos_liderancas",
-        "titulo": "Relatório de Pagamentos das Lideranças",
-        "total_registros": len(registros),
+        "tipo": "pagamentos_resumidos",
+        "titulo": "Relatório de Pagamentos Resumidos",
         "total_liderancas": len(registros),
-        "total_previsto": total_previsto,
-        "total_pago": total_pago,
-        "total_resta_pagar": total_resta,
-        "total_pessoas": total_pessoas,
-        "total_atual": total_atual,
-        "colunas_data": colunas_data_ordenadas,
-        "resumo_datas": resumo_datas,
+        "total_qtde": sum(
+            r.get("qtde", 0)
+            for r in registros
+        ),
+        "total_atual": sum(
+            r.get("atual", 0)
+            for r in registros
+        ),
+        "total_diferenca": sum(
+            r.get("diferenca", 0)
+            for r in registros
+        ),
+        "total_pago": sum(
+            r.get("pago", 0.0)
+            for r in registros
+        ),
+        "total_a_pagar": sum(
+            r.get("a_pagar", 0.0)
+            for r in registros
+        ),
+        "total_geral": sum(
+            r.get("total", 0.0)
+            for r in registros
+        ),
+        # Chaves de compatibilidade com a tela antiga.
+        "total_resta_pagar": sum(
+            r.get("a_pagar", 0.0)
+            for r in registros
+        ),
+        "registros": registros,
         "filtros": {
             "supervisor": limpar_texto(supervisor),
             "subsupervisor": limpar_texto(subsupervisor),
             "comunidade": limpar_texto(comunidade),
         },
-        "registros": registros,
-        # Mantido por compatibilidade com partes antigas da tela.
-        "vencimentos": [],
     }
 
 
 def gerar_pdf_relatorio_pagamentos(resultado_relatorio):
-    """PDF A4 paisagem: datas na tabela, ATUAL ao lado de QTDE e resumo por data."""
+    """
+    PDF A4 paisagem para conferência dos pagamentos.
+    """
     buffer = BytesIO()
     pagina = landscape(A4)
-
-    AZUL = colors.HexColor("#0B3478")
-    AZUL2 = colors.HexColor("#1D5FD0")
-    VERDE = colors.HexColor("#237A34")
-    LARANJA = colors.HexColor("#D96600")
-    VERMELHO = colors.HexColor("#C62828")
-    CINZA = colors.HexColor("#D7DCE3")
-    CINZA_CLARO = colors.HexColor("#F5F7FA")
-    TEXTO = colors.HexColor("#101828")
 
     documento = SimpleDocTemplate(
         buffer,
         pagesize=pagina,
-        rightMargin=0.45 * cm,
-        leftMargin=0.45 * cm,
-        topMargin=0.48 * cm,
-        bottomMargin=0.68 * cm,
-        title="Relatório de Pagamentos das Lideranças"
+        rightMargin=0.55 * cm,
+        leftMargin=0.55 * cm,
+        topMargin=0.65 * cm,
+        bottomMargin=0.75 * cm,
+        title="Relatório de Pagamentos Resumidos"
     )
 
-    base = getSampleStyleSheet()
+    estilos_base = getSampleStyleSheet()
+
     titulo = ParagraphStyle(
-        "PagTituloNovo", parent=base["Heading1"], fontName="Helvetica-Bold",
-        fontSize=16, leading=18, alignment=TA_CENTER, textColor=AZUL, spaceAfter=3
-    )
-    pequeno = ParagraphStyle(
-        "PagPequenoNovo", parent=base["Normal"], fontName="Helvetica",
-        fontSize=7.5, leading=9, textColor=TEXTO
-    )
-    celula = ParagraphStyle(
-        "PagCelulaNovo", parent=pequeno, fontSize=7.5, leading=8.8
-    )
-    celula_b = ParagraphStyle(
-        "PagCelulaBNovo", parent=celula, fontName="Helvetica-Bold", textColor=colors.white
-    )
-    centro = ParagraphStyle("PagCentroNovo", parent=celula, alignment=TA_CENTER)
-    centro_b = ParagraphStyle("PagCentroBNovo", parent=celula_b, alignment=TA_CENTER)
-    secao = ParagraphStyle(
-        "PagSecaoNovo", parent=base["Heading2"], fontName="Helvetica-Bold",
-        fontSize=10.5, leading=12, alignment=TA_CENTER, textColor=colors.white
-    )
-    card_rotulo = ParagraphStyle(
-        "PagCardRotNovo", parent=base["Normal"], fontName="Helvetica-Bold",
-        fontSize=7.3, leading=8.5, alignment=TA_CENTER
-    )
-    card_valor = ParagraphStyle(
-        "PagCardValNovo", parent=base["Normal"], fontName="Helvetica-Bold",
-        fontSize=11.2, leading=12.5, alignment=TA_CENTER, textColor=TEXTO
-    )
-    card_sub = ParagraphStyle(
-        "PagCardSubNovo", parent=base["Normal"], fontName="Helvetica-Bold",
-        fontSize=7.4, leading=8.4, alignment=TA_CENTER, textColor=TEXTO
+        "PagamentosResumidosTitulo",
+        parent=estilos_base["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=14,
+        leading=16,
+        alignment=TA_CENTER,
+        spaceAfter=2
     )
 
-    elementos = [Paragraph("RELATÓRIO DE PAGAMENTOS DAS LIDERANÇAS", titulo)]
+    subtitulo = ParagraphStyle(
+        "PagamentosResumidosSubtitulo",
+        parent=estilos_base["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#555555")
+    )
+
+    texto = ParagraphStyle(
+        "PagamentosResumidosTexto",
+        parent=estilos_base["Normal"],
+        fontName="Helvetica",
+        fontSize=7.4,
+        leading=8.6,
+        alignment=TA_LEFT
+    )
+
+    centro = ParagraphStyle(
+        "PagamentosResumidosCentro",
+        parent=texto,
+        alignment=TA_CENTER
+    )
+
+    cabecalho = ParagraphStyle(
+        "PagamentosResumidosCabecalho",
+        parent=centro,
+        fontName="Helvetica-Bold",
+        textColor=colors.white
+    )
+
+    elementos = [
+        Paragraph(
+            "RELATÓRIO DE PAGAMENTOS RESUMIDOS",
+            titulo
+        ),
+        Paragraph(
+            "Conferência com a Tabela Dinâmica",
+            subtitulo
+        ),
+    ]
 
     filtros = resultado_relatorio.get("filtros", {})
-    partes = []
+    partes_filtro = []
+
     for rotulo, chave in (
         ("Supervisor", "supervisor"),
         ("Subsupervisor", "subsupervisor"),
         ("Comunidade", "comunidade"),
     ):
-        valor = limpar_texto(filtros.get(chave, ""))
-        if valor:
-            partes.append(f"<b>{rotulo}:</b> {valor}")
-
-    linha_info = "Gerado em " + datetime.now(
-        ZoneInfo("America/Maceio")
-    ).strftime("%d/%m/%Y %H:%M")
-    if partes:
-        linha_info += " &nbsp;&nbsp; | &nbsp;&nbsp; " + " &nbsp; | &nbsp; ".join(partes)
-    elementos += [Paragraph(linha_info, pequeno), Spacer(1, 0.10 * cm)]
-
-    # PESSOAS mostra QTDE prevista e, abaixo, ATUAL da LIDERANÇAS CONTROLE.
-    cards = [
-        ("LIDERANÇAS", str(resultado_relatorio.get("total_liderancas", 0)), "", AZUL2),
-        (
-            "PESSOAS",
-            str(resultado_relatorio.get("total_pessoas", 0)),
-            f'ATUAL: {resultado_relatorio.get("total_atual", 0)}',
-            VERDE,
-        ),
-        (
-            "TOTAL PREVISTO",
-            _formatar_moeda_pagamentos(resultado_relatorio.get("total_previsto", 0)),
-            "",
-            LARANJA,
-        ),
-        (
-            "PAGO",
-            _formatar_moeda_pagamentos(resultado_relatorio.get("total_pago", 0)),
-            "",
-            VERDE,
-        ),
-        (
-            "RESTA PAGAR",
-            _formatar_moeda_pagamentos(resultado_relatorio.get("total_resta_pagar", 0)),
-            "",
-            VERMELHO,
-        ),
-    ]
-
-    card_data = [
-        [Paragraph(f'<font color="{cor.hexval()}"><b>{rot}</b></font>', card_rotulo) for rot, val, sub, cor in cards],
-        [Paragraph(val, card_valor) for rot, val, sub, cor in cards],
-        [Paragraph(sub or "&nbsp;", card_sub) for rot, val, sub, cor in cards],
-    ]
-    largura_util = pagina[0] - 0.90 * cm
-    cards_t = Table(
-        card_data,
-        colWidths=[largura_util / 5.0] * 5,
-        rowHeights=[0.42 * cm, 0.58 * cm, 0.34 * cm],
-    )
-    cards_t.setStyle(TableStyle([
-        ("BOX", (0, 0), (-1, -1), 0.65, CINZA),
-        ("INNERGRID", (0, 0), (-1, -1), 0.35, CINZA),
-        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 2),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-        ("TOPPADDING", (0, 0), (-1, -1), 1),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-    ]))
-    elementos += [cards_t, Spacer(1, 0.14 * cm)]
-
-    faixa = Table([[Paragraph("PAGAMENTOS POR LIDERANÇA", secao)]], colWidths=[largura_util])
-    faixa.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), AZUL),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    elementos += [faixa]
-
-    registros = resultado_relatorio.get("registros", [])
-    colunas_data = resultado_relatorio.get("colunas_data", [])
-
-    if registros:
-        cabecalho = [
-            Paragraph("SUPERVISOR", centro_b),
-            Paragraph("SUBSUPERVISOR", centro_b),
-            Paragraph("COMUNIDADE", centro_b),
-            Paragraph("QTDE", centro_b),
-            Paragraph("ATUAL", centro_b),
-        ]
-        cabecalho += [Paragraph(d, centro_b) for d in colunas_data]
-        cabecalho += [Paragraph("PAGO", centro_b), Paragraph("RESTA", centro_b)]
-
-        dados = [cabecalho]
-        for r in registros:
-            linha = [
-                Paragraph(r.get("supervisor") or "—", celula),
-                Paragraph(r.get("subsupervisor") or "—", celula),
-                Paragraph(r.get("comunidade") or "—", celula),
-                Paragraph(str(r.get("qtde", 0)), centro),
-                Paragraph(f'<b>{r.get("atual", 0)}</b>', centro),
-            ]
-            for data in colunas_data:
-                valor = r.get("valores_datas", {}).get(data, 0.0)
-                linha.append(
-                    Paragraph(
-                        _formatar_moeda_pagamentos(valor) if valor else "—",
-                        centro,
-                    )
-                )
-            linha += [
-                Paragraph(_formatar_moeda_pagamentos(r.get("pago", 0)), centro),
-                Paragraph(_formatar_moeda_pagamentos(r.get("resta_pagar", 0)), centro),
-            ]
-            dados.append(linha)
-
-        # Larguras pensadas para 7 datas; se novas datas forem criadas,
-        # as colunas de data se ajustam automaticamente ao espaço disponível.
-        fixas = [2.95 * cm, 2.65 * cm, 2.80 * cm, 1.05 * cm, 1.45 * cm]
-        finais = [1.90 * cm, 1.90 * cm]
-        restante = largura_util - sum(fixas) - sum(finais)
-        largura_data = restante / max(1, len(colunas_data))
-        larguras = fixas + [largura_data] * len(colunas_data) + finais
-
-        tabela = Table(dados, colWidths=larguras, repeatRows=1)
-        tabela.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), AZUL),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.28, CINZA),
-            ("BOX", (0, 0), (-1, -1), 0.55, AZUL),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 1.8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 1.8),
-            ("TOPPADDING", (0, 0), (-1, -1), 2.4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.4),
-            ("BACKGROUND", (4, 1), (4, -1), CINZA_CLARO),
-        ]))
-        elementos += [tabela, Spacer(1, 0.13 * cm)]
-
-        nota = Paragraph(
-            '<b>ATUAL</b> = quantidade atual correspondente na aba LIDERANÇAS CONTROLE.',
-            pequeno,
+        valor = limpar_texto(
+            filtros.get(chave, "")
         )
-        elementos += [nota, Spacer(1, 0.10 * cm)]
-
-        # Resumo compacto por data, sem repetir a lista de lideranças.
-        resumo_datas = resultado_relatorio.get("resumo_datas", [])
-        if resumo_datas:
-            faixa_resumo = Table(
-                [[Paragraph("RESUMO POR DATA", secao)]],
-                colWidths=[largura_util],
+        if valor:
+            partes_filtro.append(
+                f"<b>{rotulo}:</b> {valor}"
             )
-            faixa_resumo.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), AZUL),
-                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-            ]))
-            elementos.append(faixa_resumo)
 
-            rd = [
-                [Paragraph(x["data"], centro) for x in resumo_datas],
-                [Paragraph(f'<b>{_formatar_moeda_pagamentos(x["total"])}</b>', centro) for x in resumo_datas],
-            ]
-            resumo_t = Table(
-                rd,
-                colWidths=[largura_util / len(resumo_datas)] * len(resumo_datas),
+    if partes_filtro:
+        elementos.append(
+            Paragraph(
+                " &nbsp;|&nbsp; ".join(partes_filtro),
+                subtitulo
             )
-            resumo_t.setStyle(TableStyle([
-                ("BOX", (0, 0), (-1, -1), 0.55, CINZA),
-                ("INNERGRID", (0, 0), (-1, -1), 0.30, CINZA),
-                ("BACKGROUND", (0, 0), (-1, 0), CINZA_CLARO),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ]))
-            elementos.append(resumo_t)
-    else:
-        elementos.append(Paragraph("Nenhum pagamento encontrado.", pequeno))
+        )
+
+    elementos.append(
+        Spacer(1, 0.16 * cm)
+    )
+
+    dados = [[
+        Paragraph("LIDERANÇA", cabecalho),
+        Paragraph("QTDE", cabecalho),
+        Paragraph("ATUAL", cabecalho),
+        Paragraph("DIFERENÇA", cabecalho),
+        Paragraph("TOTAL PAGO", cabecalho),
+        Paragraph("A PAGAR", cabecalho),
+        Paragraph("TOTAL", cabecalho),
+    ]]
+
+    registros = resultado_relatorio.get(
+        "registros",
+        []
+    )
+
+    for registro in registros:
+        diferenca = int(
+            registro.get("diferenca", 0)
+        )
+
+        dados.append([
+            Paragraph(
+                limpar_texto(
+                    registro.get("lideranca", "")
+                ) or "—",
+                texto
+            ),
+            Paragraph(
+                str(registro.get("qtde", 0)),
+                centro
+            ),
+            Paragraph(
+                str(registro.get("atual", 0)),
+                centro
+            ),
+            Paragraph(
+                str(diferenca),
+                centro
+            ),
+            Paragraph(
+                _formatar_moeda_pagamentos(
+                    registro.get("pago", 0)
+                ),
+                centro
+            ),
+            Paragraph(
+                _formatar_moeda_pagamentos(
+                    registro.get("a_pagar", 0)
+                ),
+                centro
+            ),
+            Paragraph(
+                _formatar_moeda_pagamentos(
+                    registro.get("total", 0)
+                ),
+                centro
+            ),
+        ])
+
+    dados.append([
+        Paragraph("<b>TOTAIS</b>", texto),
+        Paragraph(
+            f"<b>{resultado_relatorio.get('total_qtde', 0)}</b>",
+            centro
+        ),
+        Paragraph(
+            f"<b>{resultado_relatorio.get('total_atual', 0)}</b>",
+            centro
+        ),
+        Paragraph(
+            f"<b>{resultado_relatorio.get('total_diferenca', 0)}</b>",
+            centro
+        ),
+        Paragraph(
+            f"<b>{_formatar_moeda_pagamentos(resultado_relatorio.get('total_pago', 0))}</b>",
+            centro
+        ),
+        Paragraph(
+            f"<b>{_formatar_moeda_pagamentos(resultado_relatorio.get('total_a_pagar', 0))}</b>",
+            centro
+        ),
+        Paragraph(
+            f"<b>{_formatar_moeda_pagamentos(resultado_relatorio.get('total_geral', 0))}</b>",
+            centro
+        ),
+    ])
+
+    largura_util = pagina[0] - 1.10 * cm
+    larguras_base = [
+        8.2 * cm,
+        2.0 * cm,
+        2.0 * cm,
+        2.5 * cm,
+        3.7 * cm,
+        3.7 * cm,
+        3.7 * cm,
+    ]
+
+    fator = largura_util / sum(larguras_base)
+    larguras = [
+        largura * fator
+        for largura in larguras_base
+    ]
+
+    tabela = Table(
+        dados,
+        colWidths=larguras,
+        repeatRows=1,
+        hAlign="CENTER"
+    )
+
+    ultima_linha = len(dados) - 1
+
+    tabela.setStyle(TableStyle([
+        (
+            "BACKGROUND",
+            (0, 0),
+            (-1, 0),
+            colors.HexColor("#344054")
+        ),
+        (
+            "TEXTCOLOR",
+            (0, 0),
+            (-1, 0),
+            colors.white
+        ),
+        (
+            "GRID",
+            (0, 0),
+            (-1, -1),
+            0.30,
+            colors.HexColor("#C8CDD3")
+        ),
+        (
+            "BOX",
+            (0, 0),
+            (-1, -1),
+            0.55,
+            colors.HexColor("#667085")
+        ),
+        (
+            "VALIGN",
+            (0, 0),
+            (-1, -1),
+            "MIDDLE"
+        ),
+        (
+            "ALIGN",
+            (1, 1),
+            (-1, -1),
+            "CENTER"
+        ),
+        (
+            "LEFTPADDING",
+            (0, 0),
+            (-1, -1),
+            4
+        ),
+        (
+            "RIGHTPADDING",
+            (0, 0),
+            (-1, -1),
+            4
+        ),
+        (
+            "TOPPADDING",
+            (0, 0),
+            (-1, -1),
+            3
+        ),
+        (
+            "BOTTOMPADDING",
+            (0, 0),
+            (-1, -1),
+            3
+        ),
+        (
+            "BACKGROUND",
+            (0, ultima_linha),
+            (-1, ultima_linha),
+            colors.HexColor("#E7E9EC")
+        ),
+        (
+            "LINEABOVE",
+            (0, ultima_linha),
+            (-1, ultima_linha),
+            0.8,
+            colors.HexColor("#667085")
+        ),
+    ]))
+
+    elementos.append(tabela)
+
+    if not registros:
+        elementos.append(
+            Spacer(1, 0.12 * cm)
+        )
+        elementos.append(
+            Paragraph(
+                "Nenhuma liderança encontrada para os filtros selecionados.",
+                subtitulo
+            )
+        )
 
     def rodape(canvas, doc):
         canvas.saveState()
-        canvas.setFont("Helvetica", 7)
-        canvas.setFillColor(colors.HexColor("#667085"))
-        canvas.drawString(0.55 * cm, 0.30 * cm, "Relatório de Pagamentos das Lideranças")
-        canvas.drawRightString(pagina[0] - 0.55 * cm, 0.30 * cm, f"Página {doc.page}")
+        canvas.setFont(
+            "Helvetica",
+            7
+        )
+        canvas.setFillColor(
+            colors.HexColor("#667085")
+        )
+        canvas.drawString(
+            0.55 * cm,
+            0.30 * cm,
+            "Relatório de Pagamentos Resumidos"
+        )
+        canvas.drawRightString(
+            pagina[0] - 0.55 * cm,
+            0.30 * cm,
+            f"Página {doc.page}"
+        )
         canvas.restoreState()
 
-    documento.build(elementos, onFirstPage=rodape, onLaterPages=rodape)
+    documento.build(
+        elementos,
+        onFirstPage=rodape,
+        onLaterPages=rodape
+    )
+
     pdf = buffer.getvalue()
     buffer.close()
     return pdf
