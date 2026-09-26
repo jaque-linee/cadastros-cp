@@ -1484,22 +1484,22 @@ def exibir_tela_relatorios(base):
     # ============================================================
     elif tipo_relatorio == "💰 Pagamentos Resumidos":
         rp = sheets.carregar_pagamentos_liderancas(WEBHOOK_URL)
-        rc = sheets.carregar_liderancas_controle(WEBHOOK_URL)
+        rd = sheets.carregar_tabela_dinamica(WEBHOOK_URL)
 
         if not rp.get("sucesso"):
             st.error(rp.get("mensagem", "Não foi possível carregar os pagamentos."))
             return
 
-        if not rc.get("sucesso"):
-            st.error(rc.get("mensagem", "Não foi possível carregar LIDERANÇAS CONTROLE."))
+        if not rd.get("sucesso"):
+            st.error(rd.get("mensagem", "Não foi possível carregar a TABELA DINÂMICA."))
             return
 
         dados_pagamentos = rp.get("dados", [])
-        dados_controle = rc.get("dados", [])
+        dados_dinamica = rd.get("dados", [])
 
         filtros = relatorios.obter_filtros_pagamentos_resumidos(
             dados_pagamentos,
-            dados_controle
+            dados_dinamica
         )
 
         c1, c2, c3 = st.columns(3)
@@ -1534,30 +1534,48 @@ def exibir_tela_relatorios(base):
             st.session_state["pagamentos_resumidos_gerado"] = (
                 relatorios.gerar_relatorio_pagamentos_resumidos(
                     dados_pagamentos=dados_pagamentos,
-                    dados_liderancas_controle=dados_controle,
+                    dados_tabela_dinamica=dados_dinamica,
                     supervisor="" if sup == "Todos" else sup,
                     subsupervisor="" if sub == "Todos" else sub,
                     comunidade="" if com == "Todas" else com
                 )
             )
 
-        resultado_resumido = st.session_state.get(
-            "pagamentos_resumidos_gerado"
-        )
+        resultado_resumido = st.session_state.get("pagamentos_resumidos_gerado")
 
         if resultado_resumido is not None:
             registros = resultado_resumido.get("registros", [])
 
             if not registros:
-                st.info(
-                    "Nenhuma liderança encontrada para os filtros selecionados."
-                )
+                st.info("Nenhuma liderança encontrada para os filtros selecionados.")
             else:
-                linhas = []
+                # CARDS
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Lideranças", resultado_resumido.get("total_liderancas", 0))
+                c2.metric("QTDE", resultado_resumido.get("total_qtde", 0))
+                c3.metric("ATUAL", resultado_resumido.get("total_atual", 0))
+                c4.metric("DIFERENÇA", resultado_resumido.get("total_diferenca", 0))
 
+                c5, c6, c7 = st.columns(3)
+                c5.metric(
+                    "TOTAL PAGO",
+                    f'R$ {resultado_resumido.get("total_pago", 0):,.2f}'.replace(",", "X").replace(".", ",").replace("X", ".")
+                )
+                c6.metric(
+                    "A PAGAR",
+                    f'R$ {resultado_resumido.get("total_a_pagar", 0):,.2f}'.replace(",", "X").replace(".", ",").replace("X", ".")
+                )
+                c7.metric(
+                    "TOTAL",
+                    f'R$ {resultado_resumido.get("total_geral", 0):,.2f}'.replace(",", "X").replace(".", ",").replace("X", ".")
+                )
+
+                linhas = []
                 for r in registros:
                     linhas.append({
-                        "LIDERANÇA": r.get("lideranca", ""),
+                        "SUPERVISOR": r.get("supervisor", ""),
+                        "SUBSUPERVISOR": r.get("subsupervisor", ""),
+                        "COMUNIDADE": r.get("comunidade", ""),
                         "QTDE": r.get("qtde", 0),
                         "ATUAL": r.get("atual", 0),
                         "DIFERENÇA": r.get("diferenca", 0),
@@ -1572,45 +1590,28 @@ def exibir_tela_relatorios(base):
                     hide_index=True,
                     height=min(38 * len(linhas) + 38, 650),
                     column_config={
-                        "QTDE": st.column_config.NumberColumn(
-                            "QTDE", format="%d"
-                        ),
-                        "ATUAL": st.column_config.NumberColumn(
-                            "ATUAL", format="%d"
-                        ),
-                        "DIFERENÇA": st.column_config.NumberColumn(
-                            "DIFERENÇA", format="%d"
-                        ),
-                        "TOTAL PAGO": st.column_config.NumberColumn(
-                            "TOTAL PAGO", format="R$ %.2f"
-                        ),
-                        "A PAGAR": st.column_config.NumberColumn(
-                            "A PAGAR", format="R$ %.2f"
-                        ),
-                        "TOTAL": st.column_config.NumberColumn(
-                            "TOTAL", format="R$ %.2f"
-                        ),
+                        "QTDE": st.column_config.NumberColumn("QTDE", format="%d"),
+                        "ATUAL": st.column_config.NumberColumn("ATUAL", format="%d"),
+                        "DIFERENÇA": st.column_config.NumberColumn("DIFERENÇA", format="%d"),
+                        "TOTAL PAGO": st.column_config.NumberColumn("TOTAL PAGO", format="R$ %.2f"),
+                        "A PAGAR": st.column_config.NumberColumn("A PAGAR", format="R$ %.2f"),
+                        "TOTAL": st.column_config.NumberColumn("TOTAL", format="R$ %.2f"),
                     }
                 )
 
                 st.caption("DIFERENÇA = QTDE − ATUAL")
 
                 try:
-                    pdf_resumido = (
-                        relatorios.gerar_pdf_relatorio_pagamentos_resumidos(
-                            resultado_resumido
-                        )
+                    pdf_resumido = relatorios.gerar_pdf_relatorio_pagamentos_resumidos(
+                        resultado_resumido
                     )
 
                     c_imprimir, c_pdf = st.columns(2)
 
                     with c_imprimir:
-                        pdf_b64 = base64.b64encode(
-                            pdf_resumido
-                        ).decode("utf-8")
-
+                        pdf_b64 = base64.b64encode(pdf_resumido).decode("utf-8")
                         html_imprimir = """
-                        <button onclick="imprimirResumido()" style="width:100%;height:38px;background:#0056b3;color:white;border:2px solid #0056b3;border-radius:12px;font-weight:bold;cursor:pointer;">Imprimir</button>
+                        <button onclick="imprimirResumido()" style="width:100%;height:38px;background:#0056b3;color:white;border:2px solid #0056b3;border-radius:12px;font-weight:bold;cursor:pointer;">🖨️ Imprimir</button>
                         <script>
                         function imprimirResumido() {
                             const b = atob("PDFBASE64");
@@ -1624,11 +1625,7 @@ def exibir_tela_relatorios(base):
                         </script>
                         """.replace("PDFBASE64", pdf_b64)
 
-                        components.html(
-                            html_imprimir,
-                            height=45,
-                            scrolling=False
-                        )
+                        components.html(html_imprimir, height=45, scrolling=False)
 
                     with c_pdf:
                         st.download_button(
@@ -1641,7 +1638,5 @@ def exibir_tela_relatorios(base):
                         )
 
                 except Exception as erro_pdf:
-                    st.error(
-                        f"Não foi possível gerar o PDF: {erro_pdf}"
-                    )
+                    st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
 
