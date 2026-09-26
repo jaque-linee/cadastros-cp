@@ -710,3 +710,43 @@ def excluir_rascunho_lote(webhook_url, lote_id, timeout=20):
         return str(retorno.get("status", "")).upper() == "SUCESSO"
     except Exception:
         return False
+
+
+# ============================================================
+# TABELA DINÂMICA - FONTE OFICIAL DO ATUAL
+# ============================================================
+
+def carregar_tabela_dinamica(webhook_url, timeout=15):
+    """Carrega diretamente a aba TABELA DINÂMICA para o relatório resumido."""
+    try:
+        resposta = requests.get(
+            webhook_url,
+            params={"acao": "tabela_dinamica"},
+            timeout=timeout,
+        )
+        resposta.raise_for_status()
+        dados = resposta.json()
+
+        if isinstance(dados, dict) and dados.get("error"):
+            return {
+                "sucesso": False,
+                "dados": [],
+                "mensagem": str(dados.get("error", "")).strip()
+                or "Não foi possível carregar a TABELA DINÂMICA.",
+            }
+
+        if not isinstance(dados, list):
+            return {
+                "sucesso": False,
+                "dados": [],
+                "mensagem": "Resposta inválida ao carregar a TABELA DINÂMICA.",
+            }
+
+        return {"sucesso": True, "dados": dados, "mensagem": ""}
+
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "dados": [],
+            "mensagem": f"Erro ao carregar TABELA DINÂMICA: {erro}",
+        }
