@@ -4485,6 +4485,7 @@ def obter_filtros_pagamentos_resumidos(dados_pagamentos, dados_tabela_dinamica=N
 def gerar_relatorio_pagamentos_resumidos(
     dados_pagamentos,
     dados_tabela_dinamica=None,
+    dados_liderancas_controle=None,
     supervisor="",
     subsupervisor="",
     comunidade=""
@@ -4691,6 +4692,48 @@ def gerar_relatorio_pagamentos_resumidos(
             "a_pagar": float(p["a_pagar"]),
             "total": float(p["total"]),
         })
+
+    # --------------------------------------------------------
+    # LIDERANÇAS CONTROLE:
+    # acrescenta somente quem não existe nem na dinâmica
+    # nem nos pagamentos. Não altera os números já fechados.
+    # --------------------------------------------------------
+    chaves_ja_existentes = {
+        _chave_resumido_final(
+            r.get("supervisor", ""),
+            r.get("subsupervisor", ""),
+            r.get("comunidade", "")
+        )
+        for r in registros
+    }
+
+    for original in dados_liderancas_controle or []:
+        sup = limpar_texto(_chave_pagamentos(original, "SUPERVISOR"))
+        sub = limpar_texto(_chave_pagamentos(original, "SUBSUPERVISOR"))
+        com = limpar_texto(_chave_pagamentos(original, "COMUNIDADE"))
+
+        if not sup and not sub and not com:
+            continue
+
+        chave = _chave_resumido_final(sup, sub, com)
+
+        if chave in chaves_ja_existentes:
+            continue
+
+        registros.append({
+            "supervisor": sup,
+            "subsupervisor": (
+                sub if _norm_resumido(sub) else "SEM SUBSUPERVISOR"
+            ),
+            "comunidade": com,
+            "qtde": 0,
+            "atual": 0,
+            "diferenca": 0,
+            "pago": 0.0,
+            "a_pagar": 0.0,
+            "total": 0.0,
+        })
+        chaves_ja_existentes.add(chave)
 
     # Filtros só depois da união, sem alterar os totais das fontes.
     filtrados = []
