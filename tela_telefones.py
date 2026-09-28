@@ -86,8 +86,8 @@ def exibir_tela_telefones(base, webhook_url):
         valor = st.text_input(
             "Telefone",
             key=f"telefone_pendente_{supervisor}_{sub}_{i}_{titulo}_{cpf}",
-            placeholder="(82) 99999-9999",
-            max_chars=16,
+            placeholder="82999999999",
+            max_chars=13,
         )
 
         if _texto(valor):
@@ -99,7 +99,10 @@ def exibir_tela_telefones(base, webhook_url):
                     "telefone": formatar_telefone(valor),
                 })
             else:
-                st.warning(f"Telefone inválido para {nome}. Digite DDD + número.")
+                st.warning(
+                    f"Telefone inválido para {nome}. "
+                    "Digite somente DDD + número (10 ou 11 dígitos)."
+                )
 
         st.markdown("<div style='border-bottom:1px solid #d9e1e8; margin:2px 0 10px 0;'></div>", unsafe_allow_html=True)
 
