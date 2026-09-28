@@ -6,6 +6,7 @@ from PIL import Image
 from tela_relatorios import exibir_tela_relatorios
 from tela_formulario_manual import exibir_tela_formulario_manual
 from tela_envio_documentos import exibir_tela_envio_documentos
+from tela_telefones import exibir_tela_telefones
 from validacoes import (
     somente_numeros,
     normalizar_texto,
@@ -332,6 +333,7 @@ with st.sidebar:
         [
             "📸 Envio de Documentos",
             "✍️ Formulário Manual",
+            "📱 Atualizar Telefones",
             "📊 Relatórios",
             "🗃️ Banco de Dados"
         ]
@@ -342,6 +344,7 @@ with st.sidebar:
     comunidade = ""
 
     if menu not in [
+        "📱 Atualizar Telefones",
         "📊 Relatórios",
         "🗃️ Banco de Dados"
     ]:
@@ -486,6 +489,14 @@ elif menu == "✍️ Formulário Manual":
         WEBHOOK_URL,
         supervisor,
         sub
+    )
+
+
+elif menu == "📱 Atualizar Telefones":
+
+    exibir_tela_telefones(
+        base,
+        WEBHOOK_URL
     )
 
 
