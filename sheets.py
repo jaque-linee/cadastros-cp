@@ -617,6 +617,97 @@ def salvar_cadastro(
             "registro": None
         }
 
+
+
+# ============================================================
+# ATUALIZAÇÃO DE TELEFONE
+# ============================================================
+
+def atualizar_telefone(
+    webhook_url,
+    telefone,
+    titulo="",
+    cpf="",
+    timeout=20
+):
+    """
+    Atualiza somente o TELEFONE de um cadastro existente na TABELA.
+    A identificação é feita por Título ou CPF.
+    """
+
+    telefone = normalizar_texto(telefone)
+    titulo = normalizar_titulo(titulo)
+    cpf = normalizar_cpf(cpf)
+
+    if not telefone:
+        return {
+            "sucesso": False,
+            "mensagem": "Telefone não informado."
+        }
+
+    if not titulo and not cpf:
+        return {
+            "sucesso": False,
+            "mensagem": "Título ou CPF não informado."
+        }
+
+    try:
+        resposta = requests.get(
+            webhook_url,
+            params={
+                "acao": "atualizar_telefone",
+                "telefone": telefone,
+                "titulo": titulo,
+                "cpf": cpf,
+            },
+            timeout=timeout
+        )
+
+        resposta.raise_for_status()
+        retorno = resposta.json()
+
+        if isinstance(retorno, dict) and retorno.get("error"):
+            return {
+                "sucesso": False,
+                "mensagem": str(retorno.get("error", "")).strip()
+            }
+
+        return {
+            "sucesso": bool(retorno.get("sucesso")),
+            "mensagem": str(
+                retorno.get("mensagem", "")
+                or (
+                    "Telefone atualizado."
+                    if retorno.get("sucesso")
+                    else "Não foi possível atualizar o telefone."
+                )
+            ).strip()
+        }
+
+    except requests.exceptions.Timeout:
+        return {
+            "sucesso": False,
+            "mensagem": "A atualização do telefone demorou demais."
+        }
+
+    except requests.exceptions.RequestException as erro:
+        return {
+            "sucesso": False,
+            "mensagem": f"Erro de comunicação com a planilha: {erro}"
+        }
+
+    except ValueError:
+        return {
+            "sucesso": False,
+            "mensagem": "O Apps Script retornou uma resposta inválida."
+        }
+
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "mensagem": f"Erro ao atualizar telefone: {erro}"
+        }
+
 # ============================================================
 # RASCUNHO PERSISTENTE DO LOTE
 # ============================================================
