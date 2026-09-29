@@ -4771,3 +4771,555 @@ def gerar_relatorio_pagamentos_resumidos(
         },
         "registros": filtrados,
     }
+
+
+# ============================================================
+# RELATÓRIO DE DUPLICADOS
+# ============================================================
+
+def preparar_relatorio_duplicados(dados_cruzados):
+    """
+    Prepara os dados já cruzados entre DUPLICADOS e TABELA.
+
+    Espera registros com:
+    - lideranca
+    - supervisor
+    - subsupervisor
+    - nome
+    - titulo
+    - zona
+    - secao
+    - domicilio
+    """
+
+    registros = []
+
+    for item in dados_cruzados or []:
+        registros.append({
+            "lideranca": limpar_texto(item.get("lideranca", "")),
+            "supervisor": limpar_texto(item.get("supervisor", "")),
+            "subsupervisor": limpar_texto(item.get("subsupervisor", "")),
+            "nome": limpar_texto(item.get("nome", "")),
+            "titulo": limpar_texto(item.get("titulo", "")),
+            "zona": limpar_texto(item.get("zona", "")),
+            "secao": limpar_texto(item.get("secao", "")),
+            "domicilio": limpar_texto(item.get("domicilio", "")),
+        })
+
+    registros.sort(
+        key=lambda r: (
+            normalizar_filtro(r["supervisor"]),
+            normalizar_filtro(r["subsupervisor"]),
+            normalizar_filtro(r["lideranca"]),
+            normalizar_filtro(r["nome"]),
+        )
+    )
+
+    # --------------------------------------------------------
+    # RESUMO 1 - SUPERVISOR / SUBSUPERVISOR
+    # --------------------------------------------------------
+    mapa_sup_sub = {}
+
+    for r in registros:
+        sup = r["supervisor"] or "SEM SUPERVISOR"
+        sub = r["subsupervisor"] or "SEM SUBSUPERVISOR"
+
+        chave = (
+            normalizar_filtro(sup),
+            normalizar_filtro(sub),
+        )
+
+        if chave not in mapa_sup_sub:
+            mapa_sup_sub[chave] = {
+                "supervisor": sup,
+                "subsupervisor": sub,
+                "quantidade": 0,
+            }
+
+        mapa_sup_sub[chave]["quantidade"] += 1
+
+    resumo_sup_sub = sorted(
+        mapa_sup_sub.values(),
+        key=lambda x: (
+            normalizar_filtro(x["supervisor"]),
+            normalizar_filtro(x["subsupervisor"]),
+        ),
+    )
+
+    # --------------------------------------------------------
+    # RESUMO 2 - LIDERANÇA / SUPERVISOR / SUBSUPERVISOR
+    # --------------------------------------------------------
+    mapa_lideranca = {}
+
+    for r in registros:
+        lideranca = r["lideranca"] or "SEM LIDERANÇA"
+        sup = r["supervisor"] or "SEM SUPERVISOR"
+        sub = r["subsupervisor"] or "SEM SUBSUPERVISOR"
+
+        chave = (
+            normalizar_filtro(lideranca),
+            normalizar_filtro(sup),
+            normalizar_filtro(sub),
+        )
+
+        if chave not in mapa_lideranca:
+            mapa_lideranca[chave] = {
+                "lideranca": lideranca,
+                "supervisor": sup,
+                "subsupervisor": sub,
+                "quantidade": 0,
+            }
+
+        mapa_lideranca[chave]["quantidade"] += 1
+
+    resumo_lideranca = sorted(
+        mapa_lideranca.values(),
+        key=lambda x: (
+            normalizar_filtro(x["lideranca"]),
+            normalizar_filtro(x["supervisor"]),
+            normalizar_filtro(x["subsupervisor"]),
+        ),
+    )
+
+    return {
+        "tipo": "duplicados",
+        "titulo": "Relatório de Cruzamento",
+        "total": len(registros),
+        "total_encontrados": len(registros),
+        "total_grupos": len(resumo_sup_sub),
+        "resumo_sup_sub": resumo_sup_sub,
+        "resumo_lideranca": resumo_lideranca,
+        "registros": registros,
+    }
+
+
+def _estilos_pdf_duplicados():
+    estilos_base = getSampleStyleSheet()
+
+    return {
+        "titulo": ParagraphStyle(
+            "TituloDuplicados",
+            parent=estilos_base["Heading1"],
+            fontName="Helvetica-Bold",
+            fontSize=17,
+            leading=20,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor("#17365D"),
+            spaceAfter=3,
+        ),
+        "subtitulo": ParagraphStyle(
+            "SubtituloDuplicados",
+            parent=estilos_base["Normal"],
+            fontName="Helvetica",
+            fontSize=9,
+            leading=11,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor("#666666"),
+        ),
+        "secao": ParagraphStyle(
+            "SecaoDuplicados",
+            parent=estilos_base["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=11,
+            leading=14,
+            alignment=TA_LEFT,
+            textColor=colors.HexColor("#17365D"),
+            spaceAfter=5,
+        ),
+        "texto": ParagraphStyle(
+            "TextoDuplicados",
+            parent=estilos_base["Normal"],
+            fontName="Helvetica",
+            fontSize=7.2,
+            leading=8.5,
+            alignment=TA_LEFT,
+        ),
+        "texto_centro": ParagraphStyle(
+            "TextoDuplicadosCentro",
+            parent=estilos_base["Normal"],
+            fontName="Helvetica",
+            fontSize=7.2,
+            leading=8.5,
+            alignment=TA_CENTER,
+        ),
+        "card_numero": ParagraphStyle(
+            "CardNumeroDuplicados",
+            parent=estilos_base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=17,
+            leading=19,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor("#17365D"),
+        ),
+        "card_rotulo": ParagraphStyle(
+            "CardRotuloDuplicados",
+            parent=estilos_base["Normal"],
+            fontName="Helvetica",
+            fontSize=7.5,
+            leading=9,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor("#555555"),
+        ),
+    }
+
+
+def _cabecalho_rodape_duplicados(canvas, doc):
+    canvas.saveState()
+
+    largura, _ = landscape(A4)
+
+    canvas.setFont("Helvetica", 7)
+    canvas.setFillColor(colors.HexColor("#777777"))
+
+    canvas.drawString(
+        1.0 * cm,
+        0.55 * cm,
+        "Cruzamento realizado pelo TÍTULO",
+    )
+
+    canvas.drawRightString(
+        largura - 1.0 * cm,
+        0.55 * cm,
+        f"Página {doc.page}",
+    )
+
+    canvas.restoreState()
+
+
+def _tabela_resumo_sup_sub_duplicados(resumo, estilos):
+    dados = [[
+        Paragraph("<b>SUPERVISOR</b>", estilos["texto"]),
+        Paragraph("<b>SUBSUPERVISOR</b>", estilos["texto"]),
+        Paragraph("<b>QUANTIDADE</b>", estilos["texto_centro"]),
+    ]]
+
+    for item in resumo:
+        dados.append([
+            Paragraph(
+                html.escape(item["supervisor"] or "—"),
+                estilos["texto"],
+            ),
+            Paragraph(
+                html.escape(item["subsupervisor"] or "—"),
+                estilos["texto"],
+            ),
+            Paragraph(
+                str(item["quantidade"]),
+                estilos["texto_centro"],
+            ),
+        ])
+
+    tabela = Table(
+        dados,
+        colWidths=[10.0 * cm, 10.0 * cm, 5.5 * cm],
+        repeatRows=1,
+        hAlign="CENTER",
+    )
+
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17365D")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D1DC")),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#AAB6C3")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+
+    return tabela
+
+
+def _tabela_resumo_lideranca_duplicados(resumo, estilos):
+    dados = [[
+        Paragraph("<b>LIDERANÇA</b>", estilos["texto"]),
+        Paragraph("<b>SUPERVISOR</b>", estilos["texto"]),
+        Paragraph("<b>SUBSUPERVISOR</b>", estilos["texto"]),
+        Paragraph("<b>QTD.</b>", estilos["texto_centro"]),
+    ]]
+
+    for item in resumo:
+        dados.append([
+            Paragraph(
+                html.escape(item["lideranca"] or "—"),
+                estilos["texto"],
+            ),
+            Paragraph(
+                html.escape(item["supervisor"] or "—"),
+                estilos["texto"],
+            ),
+            Paragraph(
+                html.escape(item["subsupervisor"] or "—"),
+                estilos["texto"],
+            ),
+            Paragraph(
+                str(item["quantidade"]),
+                estilos["texto_centro"],
+            ),
+        ])
+
+    tabela = Table(
+        dados,
+        colWidths=[9.0 * cm, 6.5 * cm, 6.5 * cm, 3.5 * cm],
+        repeatRows=1,
+        hAlign="CENTER",
+    )
+
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17365D")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D1DC")),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#AAB6C3")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+    ]))
+
+    return tabela
+
+
+def _tabela_detalhada_duplicados(registros, estilos):
+    dados = [[
+        Paragraph("<b>LIDERANÇA</b>", estilos["texto"]),
+        Paragraph("<b>SUPERVISOR</b>", estilos["texto"]),
+        Paragraph("<b>SUB</b>", estilos["texto"]),
+        Paragraph("<b>NOME</b>", estilos["texto"]),
+        Paragraph("<b>TÍTULO</b>", estilos["texto_centro"]),
+        Paragraph("<b>ZONA</b>", estilos["texto_centro"]),
+        Paragraph("<b>SEÇÃO</b>", estilos["texto_centro"]),
+        Paragraph("<b>DOMICÍLIO</b>", estilos["texto"]),
+    ]]
+
+    for r in registros:
+        dados.append([
+            Paragraph(html.escape(r["lideranca"] or "—"), estilos["texto"]),
+            Paragraph(html.escape(r["supervisor"] or "—"), estilos["texto"]),
+            Paragraph(html.escape(r["subsupervisor"] or "—"), estilos["texto"]),
+            Paragraph(html.escape(r["nome"] or "—"), estilos["texto"]),
+            Paragraph(html.escape(r["titulo"] or "—"), estilos["texto_centro"]),
+            Paragraph(html.escape(r["zona"] or "—"), estilos["texto_centro"]),
+            Paragraph(html.escape(r["secao"] or "—"), estilos["texto_centro"]),
+            Paragraph(html.escape(r["domicilio"] or "—"), estilos["texto"]),
+        ])
+
+    tabela = Table(
+        dados,
+        colWidths=[
+            4.3 * cm,   # liderança
+            3.2 * cm,   # supervisor
+            2.8 * cm,   # sub
+            4.5 * cm,   # nome
+            3.0 * cm,   # título
+            1.2 * cm,   # zona
+            1.3 * cm,   # seção
+            5.2 * cm,   # domicílio
+        ],
+        repeatRows=1,
+        hAlign="CENTER",
+    )
+
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17365D")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#C8D1DC")),
+        ("BOX", (0, 0), (-1, -1), 0.55, colors.HexColor("#AAB6C3")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+
+    return tabela
+
+
+def gerar_pdf_relatorio_duplicados(dados_cruzados):
+    """
+    Gera o PDF cumulativo de DUPLICADOS.
+
+    Pode receber:
+    - diretamente a lista de registros cruzados; ou
+    - o retorno completo do Apps Script, contendo a chave "encontrados".
+
+    Retorna os bytes do PDF para uso em st.download_button().
+    """
+
+    if isinstance(dados_cruzados, dict):
+        registros_entrada = dados_cruzados.get("encontrados", [])
+        total_duplicados = int(
+            dados_cruzados.get(
+                "total_duplicados",
+                len(registros_entrada),
+            ) or 0
+        )
+        total_encontrados = int(
+            dados_cruzados.get(
+                "total_encontrados",
+                len(registros_entrada),
+            ) or 0
+        )
+    else:
+        registros_entrada = dados_cruzados or []
+        total_duplicados = len(registros_entrada)
+        total_encontrados = len(registros_entrada)
+
+    resultado = preparar_relatorio_duplicados(
+        registros_entrada
+    )
+
+    estilos = _estilos_pdf_duplicados()
+    buffer = BytesIO()
+
+    documento = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=1.0 * cm,
+        leftMargin=1.0 * cm,
+        topMargin=1.0 * cm,
+        bottomMargin=1.0 * cm,
+        title="Relatório de Cruzamento - Duplicados",
+    )
+
+    elementos = []
+
+    # --------------------------------------------------------
+    # CAPA / RESUMO INICIAL
+    # --------------------------------------------------------
+    elementos.append(
+        Paragraph(
+            "RELATÓRIO DE CRUZAMENTO",
+            estilos["titulo"],
+        )
+    )
+
+    elementos.append(
+        Paragraph(
+            "Planilha Duplicados x Base de Cadastros",
+            estilos["subtitulo"],
+        )
+    )
+
+    elementos.append(Spacer(1, 0.45 * cm))
+
+    cards = Table(
+        [[
+            [
+                Paragraph(
+                    str(total_duplicados),
+                    estilos["card_numero"],
+                ),
+                Paragraph(
+                    "REGISTROS ANALISADOS",
+                    estilos["card_rotulo"],
+                ),
+            ],
+            [
+                Paragraph(
+                    str(total_encontrados),
+                    estilos["card_numero"],
+                ),
+                Paragraph(
+                    "TÍTULOS ENCONTRADOS",
+                    estilos["card_rotulo"],
+                ),
+            ],
+            [
+                Paragraph(
+                    str(resultado["total_grupos"]),
+                    estilos["card_numero"],
+                ),
+                Paragraph(
+                    "SUPERVISOR / SUB",
+                    estilos["card_rotulo"],
+                ),
+            ],
+        ]],
+        colWidths=[8.2 * cm, 8.2 * cm, 8.2 * cm],
+        hAlign="CENTER",
+    )
+
+    cards.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F3F6F9")),
+        ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#B9C5D1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D5DDE5")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+
+    elementos.append(cards)
+    elementos.append(Spacer(1, 0.55 * cm))
+
+    elementos.append(
+        Paragraph(
+            "Resumo por Supervisor e Subsupervisor",
+            estilos["secao"],
+        )
+    )
+
+    elementos.append(
+        _tabela_resumo_sup_sub_duplicados(
+            resultado["resumo_sup_sub"],
+            estilos,
+        )
+    )
+
+    # --------------------------------------------------------
+    # RESUMO POR LIDERANÇA
+    # --------------------------------------------------------
+    elementos.append(PageBreak())
+
+    elementos.append(
+        Paragraph(
+            "Resumo - Liderança da Planilha Duplicados x Supervisor/Sub da Base",
+            estilos["secao"],
+        )
+    )
+
+    elementos.append(
+        _tabela_resumo_lideranca_duplicados(
+            resultado["resumo_lideranca"],
+            estilos,
+        )
+    )
+
+    # --------------------------------------------------------
+    # DETALHAMENTO
+    # --------------------------------------------------------
+    elementos.append(PageBreak())
+
+    elementos.append(
+        Paragraph(
+            "Detalhamento dos Registros",
+            estilos["secao"],
+        )
+    )
+
+    if resultado["registros"]:
+        elementos.append(
+            _tabela_detalhada_duplicados(
+                resultado["registros"],
+                estilos,
+            )
+        )
+    else:
+        elementos.append(
+            Paragraph(
+                "Nenhum registro encontrado.",
+                estilos["texto"],
+            )
+        )
+
+    documento.build(
+        elementos,
+        onFirstPage=_cabecalho_rodape_duplicados,
+        onLaterPages=_cabecalho_rodape_duplicados,
+    )
+
+    pdf = buffer.getvalue()
+    buffer.close()
+
+    return pdf
