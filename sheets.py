@@ -841,3 +841,110 @@ def carregar_tabela_dinamica(webhook_url, timeout=15):
             "dados": [],
             "mensagem": f"Erro ao carregar TABELA DINÂMICA: {erro}",
         }
+
+
+# ============================================================
+# RELATÓRIO CUMULATIVO DE DUPLICADOS
+# ============================================================
+
+def carregar_relatorio_duplicados(webhook_url, timeout=30):
+    """Carrega do Apps Script o cruzamento completo DUPLICADOS x TABELA."""
+    try:
+        resposta = requests.get(
+            webhook_url,
+            params={"acao": "relatorio_duplicados"},
+            timeout=timeout,
+        )
+        resposta.raise_for_status()
+        dados = resposta.json()
+
+        if not isinstance(dados, dict):
+            return {
+                "sucesso": False,
+                "total_duplicados": 0,
+                "total_encontrados": 0,
+                "total_nao_encontrados": 0,
+                "encontrados": [],
+                "nao_encontrados": [],
+                "mensagem": "Resposta inválida ao carregar o relatório de duplicados.",
+            }
+
+        if dados.get("error"):
+            return {
+                "sucesso": False,
+                "total_duplicados": 0,
+                "total_encontrados": 0,
+                "total_nao_encontrados": 0,
+                "encontrados": [],
+                "nao_encontrados": [],
+                "mensagem": str(dados.get("error", "")).strip()
+                or "Não foi possível carregar o relatório de duplicados.",
+            }
+
+        encontrados = dados.get("encontrados", []) or []
+        nao_encontrados = dados.get("nao_encontrados", []) or []
+
+        if not isinstance(encontrados, list):
+            encontrados = []
+        if not isinstance(nao_encontrados, list):
+            nao_encontrados = []
+
+        return {
+            "sucesso": bool(dados.get("sucesso", True)),
+            "total_duplicados": int(
+                dados.get("total_duplicados", len(encontrados) + len(nao_encontrados)) or 0
+            ),
+            "total_encontrados": int(
+                dados.get("total_encontrados", len(encontrados)) or 0
+            ),
+            "total_nao_encontrados": int(
+                dados.get("total_nao_encontrados", len(nao_encontrados)) or 0
+            ),
+            "encontrados": encontrados,
+            "nao_encontrados": nao_encontrados,
+            "mensagem": str(dados.get("mensagem", "")).strip(),
+        }
+
+    except requests.exceptions.Timeout:
+        return {
+            "sucesso": False,
+            "total_duplicados": 0,
+            "total_encontrados": 0,
+            "total_nao_encontrados": 0,
+            "encontrados": [],
+            "nao_encontrados": [],
+            "mensagem": "A consulta do relatório de duplicados demorou demais.",
+        }
+
+    except requests.exceptions.RequestException as erro:
+        return {
+            "sucesso": False,
+            "total_duplicados": 0,
+            "total_encontrados": 0,
+            "total_nao_encontrados": 0,
+            "encontrados": [],
+            "nao_encontrados": [],
+            "mensagem": f"Erro de comunicação com a planilha: {erro}",
+        }
+
+    except ValueError:
+        return {
+            "sucesso": False,
+            "total_duplicados": 0,
+            "total_encontrados": 0,
+            "total_nao_encontrados": 0,
+            "encontrados": [],
+            "nao_encontrados": [],
+            "mensagem": "O Apps Script retornou uma resposta inválida para o relatório de duplicados.",
+        }
+
+    except Exception as erro:
+        return {
+            "sucesso": False,
+            "total_duplicados": 0,
+            "total_encontrados": 0,
+            "total_nao_encontrados": 0,
+            "encontrados": [],
+            "nao_encontrados": [],
+            "mensagem": f"Erro ao carregar relatório de duplicados: {erro}",
+        }
