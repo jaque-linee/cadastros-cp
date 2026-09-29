@@ -4930,16 +4930,16 @@ def _estilos_pdf_duplicados():
             "TextoDuplicados",
             parent=estilos_base["Normal"],
             fontName="Helvetica",
-            fontSize=8.3,
-            leading=10.2,
+            fontSize=7.5,
+            leading=9,
             alignment=TA_LEFT,
         ),
         "texto_centro": ParagraphStyle(
             "TextoDuplicadosCentro",
             parent=estilos_base["Normal"],
             fontName="Helvetica",
-            fontSize=8.3,
-            leading=10.2,
+            fontSize=7.5,
+            leading=9,
             alignment=TA_CENTER,
         ),
         "card_numero": ParagraphStyle(
@@ -5129,8 +5129,8 @@ def _tabela_detalhada_duplicados(registros, estilos):
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 3),
         ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-        ("TOPPADDING", (0, 0), (-1, -1), 4.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
 
     return tabela
@@ -5293,7 +5293,7 @@ def gerar_pdf_relatorio_duplicados(dados_cruzados):
 
     elementos.append(
         Paragraph(
-            "Detalhamento dos Registros",
+            "Detalhamento dos Cruzamentos",
             estilos["secao"],
         )
     )
