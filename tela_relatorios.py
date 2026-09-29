@@ -17,7 +17,7 @@ def exibir_tela_relatorios(base):
 
     tipo_relatorio = st.selectbox(
         "Tipo de relatório",
-        ["👤 Por Nome", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "💰 Pagamentos das Lideranças", "💰 Pagamentos Resumidos"],
+        ["👤 Por Nome", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "📋 Duplicados", "💰 Pagamentos das Lideranças", "💰 Pagamentos Resumidos"],
         key="tipo_relatorio"
     )
 
@@ -945,6 +945,204 @@ def exibir_tela_relatorios(base):
 
                     except Exception as erro_pdf:
                         st.error(f"Não foi possível gerar o PDF: {erro_pdf}")
+
+
+    # ============================================================
+    # RELATÓRIO DE DUPLICADOS
+    # ============================================================
+    elif tipo_relatorio == "📋 Duplicados":
+
+        st.caption(
+            "Relatório cumulativo da aba DUPLICADOS, cruzado com os dados atuais da TABELA."
+        )
+
+        gerar_duplicados = st.button(
+            "🔎 Gerar relatório",
+            type="primary",
+            use_container_width=True,
+            key="gerar_relatorio_duplicados"
+        )
+
+        if gerar_duplicados:
+            resposta_duplicados = sheets.carregar_relatorio_duplicados(
+                WEBHOOK_URL
+            )
+
+            if not resposta_duplicados.get("sucesso"):
+                st.error(
+                    resposta_duplicados.get(
+                        "mensagem",
+                        "Não foi possível carregar o relatório de duplicados."
+                    )
+                )
+            else:
+                st.session_state["relatorio_duplicados_gerado"] = (
+                    resposta_duplicados
+                )
+
+        resultado_duplicados = st.session_state.get(
+            "relatorio_duplicados_gerado"
+        )
+
+        if resultado_duplicados is not None:
+            encontrados = resultado_duplicados.get("encontrados", [])
+            nao_encontrados = resultado_duplicados.get(
+                "nao_encontrados",
+                []
+            )
+
+            total_duplicados = resultado_duplicados.get(
+                "total_duplicados",
+                len(encontrados) + len(nao_encontrados)
+            )
+            total_encontrados = resultado_duplicados.get(
+                "total_encontrados",
+                len(encontrados)
+            )
+            total_nao_encontrados = resultado_duplicados.get(
+                "total_nao_encontrados",
+                len(nao_encontrados)
+            )
+
+            dados_preparados = relatorios.preparar_relatorio_duplicados(
+                encontrados
+            )
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("REGISTROS ANALISADOS", total_duplicados)
+            c2.metric("TÍTULOS ENCONTRADOS", total_encontrados)
+            c3.metric("NÃO ENCONTRADOS", total_nao_encontrados)
+
+            if not encontrados:
+                st.info(
+                    "Nenhum título da aba DUPLICADOS foi encontrado na TABELA."
+                )
+            else:
+                st.markdown("#### Resumo por Supervisor e Subsupervisor")
+
+                linhas_resumo = []
+                for item in dados_preparados.get("resumo_sup_sub", []):
+                    linhas_resumo.append({
+                        "SUPERVISOR": item.get("supervisor", ""),
+                        "SUBSUPERVISOR": item.get("subsupervisor", ""),
+                        "QUANTIDADE": item.get("quantidade", 0),
+                    })
+
+                st.dataframe(
+                    pd.DataFrame(linhas_resumo),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                st.markdown(
+                    "#### Liderança da Planilha Duplicados x Supervisor/Sub da Base"
+                )
+
+                linhas_lideranca = []
+                for item in dados_preparados.get("resumo_lideranca", []):
+                    linhas_lideranca.append({
+                        "LIDERANÇA": item.get("lideranca", ""),
+                        "SUPERVISOR": item.get("supervisor", ""),
+                        "SUBSUPERVISOR": item.get("subsupervisor", ""),
+                        "QTD.": item.get("quantidade", 0),
+                    })
+
+                st.dataframe(
+                    pd.DataFrame(linhas_lideranca),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                st.markdown("#### Detalhamento")
+
+                linhas_detalhes = []
+                for item in dados_preparados.get("registros", []):
+                    linhas_detalhes.append({
+                        "LIDERANÇA": item.get("lideranca", ""),
+                        "SUPERVISOR": item.get("supervisor", ""),
+                        "SUB": item.get("subsupervisor", ""),
+                        "NOME": item.get("nome", ""),
+                        "TÍTULO": item.get("titulo", ""),
+                        "ZONA": item.get("zona", ""),
+                        "SEÇÃO": item.get("secao", ""),
+                        "DOMICÍLIO": item.get("domicilio", ""),
+                    })
+
+                st.dataframe(
+                    pd.DataFrame(linhas_detalhes),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(
+                        38 * len(linhas_detalhes) + 38,
+                        650
+                    )
+                )
+
+                try:
+                    pdf_duplicados = (
+                        relatorios.gerar_pdf_relatorio_duplicados(
+                            resultado_duplicados
+                        )
+                    )
+
+                    c_imprimir, c_pdf = st.columns(2)
+
+                    with c_imprimir:
+                        pdf_b64 = base64.b64encode(
+                            pdf_duplicados
+                        ).decode("utf-8")
+
+                        html_imprimir = """
+                        <button onclick="imprimirDuplicados()" style="width:100%;height:38px;background:#0056b3;color:white;border:2px solid #0056b3;border-radius:12px;font-weight:bold;cursor:pointer;">🖨️ Imprimir</button>
+                        <script>
+                        function imprimirDuplicados() {
+                            const b = atob("PDFBASE64");
+                            const a = new Uint8Array(b.length);
+                            for (let i=0; i<b.length; i++) a[i]=b.charCodeAt(i);
+                            const u=URL.createObjectURL(new Blob([a],{type:"application/pdf"}));
+                            const w=window.open(u,"_blank","width=1000,height=800");
+                            if(!w){alert("Permita pop-ups para este site.");return;}
+                            setTimeout(()=>{w.focus();w.print();},1200);
+                        }
+                        </script>
+                        """.replace("PDFBASE64", pdf_b64)
+
+                        components.html(
+                            html_imprimir,
+                            height=45,
+                            scrolling=False
+                        )
+
+                    with c_pdf:
+                        st.download_button(
+                            label="📄 Baixar PDF",
+                            data=pdf_duplicados,
+                            file_name="relatorio_cruzamento_duplicados.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key="baixar_pdf_relatorio_duplicados"
+                        )
+
+                except Exception as erro_pdf:
+                    st.error(
+                        f"Não foi possível gerar o PDF: {erro_pdf}"
+                    )
+
+            if nao_encontrados:
+                with st.expander(
+                    f"⚠️ Títulos não encontrados ({len(nao_encontrados)})"
+                ):
+                    st.dataframe(
+                        pd.DataFrame([
+                            {
+                                "TÍTULO": item.get("titulo", ""),
+                                "LIDERANÇA": item.get("lideranca", ""),
+                            }
+                            for item in nao_encontrados
+                        ]),
+                        use_container_width=True,
+                        hide_index=True
+                    )
 
 
     # ============================================================
