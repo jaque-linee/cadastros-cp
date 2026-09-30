@@ -2412,7 +2412,8 @@ def filtrar_relatorio_cruzamentos(
             "comunidade": limpar_texto(r.get("comunidade", "")),
             "telefone": limpar_texto(r.get("telefone", "")),
             "titulo": _normalizar_titulo_cruzamento(r.get("titulo", "")),
-            "situacao": sit
+            "situacao": sit,
+            "id_familia": _obter_id_familia(r)
         })
 
     registros.sort(key=lambda x: (
@@ -2430,7 +2431,8 @@ def gerar_relatorio_cruzamentos(
     subsupervisor="",
     situacao="",
     base_cruzada="",
-    resultado_cruzamento=""
+    resultado_cruzamento="",
+    organizar_por_familia=False
 ):
     registros = filtrar_relatorio_cruzamentos(
         dados_base,
@@ -2573,9 +2575,13 @@ def gerar_relatorio_cruzamentos(
             "resultado_cruzamento": limpar_texto(resultado_cruzamento)
         },
         "registros": registros_filtrados,
+        "organizar_por_familia": bool(organizar_por_familia),
         "grupos": agrupar_relatorio_nome(
             registros_filtrados
-        )
+        ),
+        "grupos_familia": agrupar_relatorio_familia(
+            registros_filtrados
+        ) if organizar_por_familia else []
     }
 
 def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
@@ -2813,6 +2819,10 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
         ]))
         elementos.append(barra)
 
+        organizar_por_familia = bool(
+            resultado_relatorio.get("organizar_por_familia", False)
+        )
+
         dados = [[
             Paragraph("<b>Nº</b>", centro),
             Paragraph("<b>NOME</b>", centro),
@@ -2822,21 +2832,85 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
         ]]
 
         linhas_cruzadas = []
-        for numero, r in enumerate(registros, 1):
-            cruzou = bool(r.get("cruzou_alguma"))
-            estilo_nome = texto_bold if cruzou else texto
-            estilo_cruz = centro_bold if cruzou else centro
-            cruzamento = limpar_texto(r.get("cruzamentos_texto", "")) if cruzou else "—"
+        linhas_familia = []
+        numero = 0
 
-            dados.append([
-                Paragraph(str(numero), centro),
-                Paragraph(limpar_texto(r.get("nome", "")) or "—", estilo_nome),
-                Paragraph(limpar_texto(r.get("comunidade", "")) or "—", texto),
-                Paragraph(limpar_texto(r.get("telefone", "")) or "—", centro),
-                Paragraph(cruzamento or "—", estilo_cruz)
-            ])
-            if cruzou:
-                linhas_cruzadas.append(len(dados)-1)
+        if organizar_por_familia:
+            familias = {}
+            individuais = []
+
+            for r in registros:
+                fid = limpar_texto(r.get("id_familia", ""))
+                if fid:
+                    familias.setdefault(fid, []).append(r)
+                else:
+                    individuais.append(r)
+
+            for fid in sorted(familias, key=normalizar_filtro):
+                integrantes = sorted(
+                    familias[fid],
+                    key=lambda item: normalizar_filtro(item.get("nome", ""))
+                )
+                dados.append([
+                    Paragraph(f"<b>FAMÍLIA {fid} — {len(integrantes)} PESSOA(S)</b>", texto_bold),
+                    "", "", "", ""
+                ])
+                linhas_familia.append(len(dados)-1)
+
+                for r in integrantes:
+                    numero += 1
+                    cruzou = bool(r.get("cruzou_alguma"))
+                    estilo_nome = texto_bold if cruzou else texto
+                    estilo_cruz = centro_bold if cruzou else centro
+                    cruzamento = limpar_texto(r.get("cruzamentos_texto", "")) if cruzou else "—"
+                    dados.append([
+                        Paragraph(str(numero), centro),
+                        Paragraph(limpar_texto(r.get("nome", "")) or "—", estilo_nome),
+                        Paragraph(limpar_texto(r.get("comunidade", "")) or "—", texto),
+                        Paragraph(limpar_texto(r.get("telefone", "")) or "—", centro),
+                        Paragraph(cruzamento or "—", estilo_cruz)
+                    ])
+                    if cruzou:
+                        linhas_cruzadas.append(len(dados)-1)
+
+            if individuais:
+                dados.append([
+                    Paragraph("<b>CADASTROS INDIVIDUAIS</b>", texto_bold),
+                    "", "", "", ""
+                ])
+                linhas_familia.append(len(dados)-1)
+
+                for r in sorted(individuais, key=lambda item: normalizar_filtro(item.get("nome", ""))):
+                    numero += 1
+                    cruzou = bool(r.get("cruzou_alguma"))
+                    estilo_nome = texto_bold if cruzou else texto
+                    estilo_cruz = centro_bold if cruzou else centro
+                    cruzamento = limpar_texto(r.get("cruzamentos_texto", "")) if cruzou else "—"
+                    dados.append([
+                        Paragraph(str(numero), centro),
+                        Paragraph(limpar_texto(r.get("nome", "")) or "—", estilo_nome),
+                        Paragraph(limpar_texto(r.get("comunidade", "")) or "—", texto),
+                        Paragraph(limpar_texto(r.get("telefone", "")) or "—", centro),
+                        Paragraph(cruzamento or "—", estilo_cruz)
+                    ])
+                    if cruzou:
+                        linhas_cruzadas.append(len(dados)-1)
+        else:
+            for numero, r in enumerate(registros, 1):
+                cruzou = bool(r.get("cruzou_alguma"))
+                estilo_nome = texto_bold if cruzou else texto
+                estilo_cruz = centro_bold if cruzou else centro
+                cruzamento = limpar_texto(r.get("cruzamentos_texto", "")) if cruzou else "—"
+
+                dados.append([
+                    Paragraph(str(numero), centro),
+                    Paragraph(limpar_texto(r.get("nome", "")) or "—", estilo_nome),
+                    Paragraph(limpar_texto(r.get("comunidade", "")) or "—", texto),
+                    Paragraph(limpar_texto(r.get("telefone", "")) or "—", centro),
+                    Paragraph(cruzamento or "—", estilo_cruz)
+                ])
+                if cruzou:
+                    linhas_cruzadas.append(len(dados)-1)
 
         tabela = Table(
             dados,
@@ -2858,6 +2932,15 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
             ("ALIGN", (0,0), (0,-1), "CENTER"),
             ("ALIGN", (3,1), (4,-1), "CENTER"),
         ]
+
+        # Cabeçalhos de família ocupam a largura inteira da tabela.
+        for linha in linhas_familia:
+            estilo_tabela.extend([
+                ("SPAN", (0,linha), (-1,linha)),
+                ("BACKGROUND", (0,linha), (-1,linha), colors.HexColor("#D5D5D5")),
+                ("TOPPADDING", (0,linha), (-1,linha), 4.5),
+                ("BOTTOMPADDING", (0,linha), (-1,linha), 4.5),
+            ])
 
         # Em P&B, cruzados são identificados por cinza claro + negrito.
         for linha in linhas_cruzadas:
