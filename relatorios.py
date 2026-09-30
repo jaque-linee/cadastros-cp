@@ -40,6 +40,23 @@ def normalizar_filtro(valor):
     ).upper()
 
 
+def _normalizar_lista_filtros(valor):
+    """Aceita filtro único ou múltiplo e devolve um conjunto normalizado."""
+    if valor is None:
+        return set()
+
+    if isinstance(valor, (list, tuple, set)):
+        valores = valor
+    else:
+        valores = [valor]
+
+    return {
+        normalizar_filtro(item)
+        for item in valores
+        if limpar_texto(item)
+    }
+
+
 # ============================================================
 # LISTAS PARA OS FILTROS
 # ============================================================
@@ -55,6 +72,7 @@ def obter_filtros_nome(dados_base):
     supervisores = set()
     subsupervisores = set()
     situacoes = set()
+    statuses = set()
 
     for registro in dados_base or []:
 
@@ -79,6 +97,13 @@ def obter_filtros_nome(dados_base):
             )
         )
 
+        status = limpar_texto(
+            registro.get(
+                "status",
+                ""
+            )
+        )
+
         if supervisor:
             supervisores.add(
                 supervisor
@@ -92,6 +117,11 @@ def obter_filtros_nome(dados_base):
         if situacao:
             situacoes.add(
                 situacao
+            )
+
+        if status:
+            statuses.add(
+                status
             )
 
     return {
@@ -108,6 +138,11 @@ def obter_filtros_nome(dados_base):
         "situacoes": sorted(
             situacoes,
             key=str.upper
+        ),
+
+        "statuses": sorted(
+            statuses,
+            key=str.upper
         )
     }
 
@@ -120,14 +155,16 @@ def filtrar_relatorio_nome(
     dados_base,
     supervisor="",
     subsupervisor="",
-    situacao=""
+    situacao="",
+    status=""
 ):
     """
     Filtra a base por:
 
     - Supervisor
     - Subsupervisor
-    - Situação
+    - Situação (aceita múltiplas)
+    - Status (aceita múltiplos)
 
     Filtro vazio significa TODOS.
     """
@@ -140,8 +177,12 @@ def filtrar_relatorio_nome(
         subsupervisor
     )
 
-    situacao_filtro = normalizar_filtro(
+    situacoes_filtro = _normalizar_lista_filtros(
         situacao
+    )
+
+    statuses_filtro = _normalizar_lista_filtros(
+        status
     )
 
     registros = []
@@ -169,6 +210,13 @@ def filtrar_relatorio_nome(
             )
         )
 
+        status_registro = limpar_texto(
+            registro.get(
+                "status",
+                ""
+            )
+        )
+
         if (
             supervisor_filtro
             and normalizar_filtro(
@@ -186,10 +234,18 @@ def filtrar_relatorio_nome(
             continue
 
         if (
-            situacao_filtro
+            situacoes_filtro
             and normalizar_filtro(
                 situacao_registro
-            ) != situacao_filtro
+            ) not in situacoes_filtro
+        ):
+            continue
+
+        if (
+            statuses_filtro
+            and normalizar_filtro(
+                status_registro
+            ) not in statuses_filtro
         ):
             continue
 
@@ -226,7 +282,10 @@ def filtrar_relatorio_nome(
                     ),
 
                 "situacao":
-                    situacao_registro
+                    situacao_registro,
+
+                "status":
+                    status_registro
             }
         )
 
@@ -497,7 +556,8 @@ def gerar_relatorio_nome(
     dados_base,
     supervisor="",
     subsupervisor="",
-    situacao=""
+    situacao="",
+    status=""
 ):
     """
     Executa todo o processamento necessário
@@ -510,7 +570,8 @@ def gerar_relatorio_nome(
         dados_base=dados_base,
         supervisor=supervisor,
         subsupervisor=subsupervisor,
-        situacao=situacao
+        situacao=situacao,
+        status=status
     )
 
     grupos = agrupar_relatorio_nome(
@@ -539,10 +600,18 @@ def gerar_relatorio_nome(
                 ),
 
             "situacao":
-                limpar_texto(
-                    situacao
-                )
+                " | ".join(situacao)
+                if isinstance(situacao, (list, tuple, set))
+                else limpar_texto(situacao),
+
+            "status":
+                " | ".join(status)
+                if isinstance(status, (list, tuple, set))
+                else limpar_texto(status)
         },
+
+        "mostrar_status":
+            bool(_normalizar_lista_filtros(status)),
 
         "registros":
             registros,
@@ -674,7 +743,8 @@ def _cabecalho_rodape_pdf(
 
 def _montar_tabela_grupo(
     grupo,
-    estilos
+    estilos,
+    mostrar_status=False
 ):
     """
     Cria uma tabela para Supervisor/Subsupervisor.
@@ -792,14 +862,40 @@ def _montar_tabela_grupo(
             ]
         )
 
-    tabela = Table(
-        dados_tabela,
-        colWidths=[
+        if mostrar_status:
+            dados_tabela[-1].append(
+                Paragraph(
+                    limpar_texto(registro.get("status", "")) or "—",
+                    estilos["texto"]
+                )
+            )
+
+    if mostrar_status:
+        dados_tabela[0].append("")
+        dados_tabela[1].append(
+            Paragraph(
+                "<b>STATUS</b>",
+                estilos["texto"]
+            )
+        )
+        larguras_colunas = [
+            0.9 * cm,
+            6.6 * cm,
+            4.3 * cm,
+            3.2 * cm,
+            3.7 * cm
+        ]
+    else:
+        larguras_colunas = [
             1.0 * cm,
             8.2 * cm,
             5.0 * cm,
             3.5 * cm
-        ],
+        ]
+
+    tabela = Table(
+        dados_tabela,
+        colWidths=larguras_colunas,
         repeatRows=2,
         hAlign="CENTER"
     )
@@ -963,6 +1059,20 @@ def gerar_pdf_relatorio_nome(
         )
     )
 
+    status = limpar_texto(
+        filtros.get(
+            "status",
+            ""
+        )
+    )
+
+    mostrar_status = bool(
+        resultado_relatorio.get(
+            "mostrar_status",
+            False
+        )
+    )
+
     total = resultado_relatorio.get(
         "total",
         0
@@ -976,6 +1086,12 @@ def gerar_pdf_relatorio_nome(
         resumo += (
             f" &nbsp;&nbsp;|&nbsp;&nbsp; "
             f"Situação: {situacao}"
+        )
+
+    if status:
+        resumo += (
+            f" &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Status: {status}"
         )
 
     elementos.append(
@@ -1014,7 +1130,8 @@ def gerar_pdf_relatorio_nome(
 
             tabela = _montar_tabela_grupo(
                 grupo,
-                estilos
+                estilos,
+                mostrar_status=mostrar_status
             )
 
             elementos.append(
