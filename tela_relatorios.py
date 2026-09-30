@@ -822,6 +822,13 @@ def exibir_tela_relatorios(base):
                     key="relatorio_cruzamentos_resultado"
                 )
 
+            organizacao_cruzamentos = st.radio(
+                "Organização",
+                ["Normal", "Por Família"],
+                horizontal=True,
+                key="relatorio_cruzamentos_organizacao"
+            )
+
             gerar_cruzamentos = st.button("🔎 Gerar relatório", type="primary", use_container_width=True, key="gerar_relatorio_cruzamentos")
 
             if gerar_cruzamentos:
@@ -832,7 +839,8 @@ def exibir_tela_relatorios(base):
                     subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
                     situacao="" if filtro_situacao == "Todas" else filtro_situacao,
                     base_cruzada="" if filtro_base_cruzada == "Todas" else filtro_base_cruzada,
-                    resultado_cruzamento="" if filtro_resultado_cruzamento == "Todos" else filtro_resultado_cruzamento
+                    resultado_cruzamento="" if filtro_resultado_cruzamento == "Todos" else filtro_resultado_cruzamento,
+                    organizacao=organizacao_cruzamentos
                 )
 
             resultado_cruzamentos = st.session_state.get("relatorio_cruzamentos_gerado")
@@ -854,51 +862,104 @@ def exibir_tela_relatorios(base):
                 if total == 0:
                     st.info("Nenhum cadastro encontrado para os filtros selecionados.")
                 else:
-                    for grupo in resultado_cruzamentos.get("grupos", []):
-                        nome_supervisor = str(grupo.get("supervisor", "SEM SUPERVISOR")).strip()
-                        nome_subsupervisor = str(grupo.get("subsupervisor", "SEM SUBSUPERVISOR")).strip()
-                        registros_grupo = grupo.get("registros", [])
+                    if resultado_cruzamentos.get("organizacao") == "Por Família":
+                        for grupo in resultado_cruzamentos.get("grupos_familia", []):
+                            nome_supervisor = str(grupo.get("supervisor", "SEM SUPERVISOR")).strip()
+                            nome_subsupervisor = str(grupo.get("subsupervisor", "SEM SUBSUPERVISOR")).strip()
 
-                        st.markdown(
-                            f"""
-                            <div style="background:#f7f9fb;border-left:4px solid #0056b3;padding:8px 12px;margin-top:12px;margin-bottom:6px;border-radius:6px;">
-                                <b>Supervisor:</b> {nome_supervisor} &nbsp;&nbsp;&nbsp; <b>Subsupervisor:</b> {nome_subsupervisor} &nbsp;&nbsp;&nbsp; <b>Total:</b> {len(registros_grupo)}
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
+                            st.markdown(
+                                f"""
+                                <div style="background:#f7f9fb;border-left:4px solid #0056b3;padding:8px 12px;margin-top:12px;margin-bottom:6px;border-radius:6px;">
+                                    <b>Supervisor:</b> {nome_supervisor} &nbsp;&nbsp;&nbsp;
+                                    <b>Subsupervisor:</b> {nome_subsupervisor}
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
 
-                        linhas_tabela = []
-                        for numero, registro in enumerate(registros_grupo, start=1):
-                            cruzou = bool(registro.get("cruzou_alguma"))
-                            marcador = "●" if cruzou else ""
-                            cruzamentos_texto = registro.get("cruzamentos_texto", "") or "—"
+                            blocos = []
+                            for familia in grupo.get("familias", []):
+                                fid = str(familia.get("id_familia", "")).strip()
+                                blocos.append((f"👨‍👩‍👧‍👦 Família {fid}", familia.get("integrantes", [])))
 
-                            linhas_tabela.append({
-                                "●": marcador,
-                                "Nº": str(numero),
-                                "Nome": registro.get("nome", ""),
-                                "Comunidade": registro.get("comunidade", ""),
-                                "Telefone": registro.get("telefone", ""),
-                                "Cruzamentos": cruzamentos_texto
-                            })
+                            individuais = grupo.get("individuais", [])
+                            if individuais:
+                                blocos.append(("👤 Cadastros Individuais", individuais))
 
-                        st.dataframe(
-                            pd.DataFrame(linhas_tabela),
-                            use_container_width=True,
-                            hide_index=True,
-                            height=min(38 * len(linhas_tabela) + 38, 600),
-                            column_config={
-                                "●": st.column_config.TextColumn("", width="small"),
-                                "Nº": st.column_config.TextColumn("Nº", width="small"),
-                                "Nome": st.column_config.TextColumn("Nome", width="large"),
-                                "Comunidade": st.column_config.TextColumn("Comunidade", width="medium"),
-                                "Telefone": st.column_config.TextColumn("Telefone", width="medium"),
-                                "Cruzamentos": st.column_config.TextColumn("Cruzamentos", width="large")
-                            }
-                        )
+                            for titulo_bloco, registros_bloco in blocos:
+                                st.markdown(f"**{titulo_bloco} — {len(registros_bloco)} pessoa(s)**")
+                                linhas_tabela = []
 
-                    st.markdown("#### Resumo dos Cruzamentos")
+                                for numero, registro in enumerate(registros_bloco, start=1):
+                                    cruzou = bool(registro.get("cruzou_alguma"))
+                                    linhas_tabela.append({
+                                        "●": "●" if cruzou else "",
+                                        "Nº": str(numero),
+                                        "Nome": registro.get("nome", ""),
+                                        "Comunidade": registro.get("comunidade", ""),
+                                        "Telefone": registro.get("telefone", ""),
+                                        "Cruzamentos": registro.get("cruzamentos_texto", "") or "—"
+                                    })
+
+                                st.dataframe(
+                                    pd.DataFrame(linhas_tabela),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    height=min(38 * len(linhas_tabela) + 38, 600),
+                                    column_config={
+                                        "●": st.column_config.TextColumn("", width="small"),
+                                        "Nº": st.column_config.TextColumn("Nº", width="small"),
+                                        "Nome": st.column_config.TextColumn("Nome", width="large"),
+                                        "Comunidade": st.column_config.TextColumn("Comunidade", width="medium"),
+                                        "Telefone": st.column_config.TextColumn("Telefone", width="medium"),
+                                        "Cruzamentos": st.column_config.TextColumn("Cruzamentos", width="large")
+                                    }
+                                )
+                    else:
+                        for grupo in resultado_cruzamentos.get("grupos", []):
+                            nome_supervisor = str(grupo.get("supervisor", "SEM SUPERVISOR")).strip()
+                            nome_subsupervisor = str(grupo.get("subsupervisor", "SEM SUBSUPERVISOR")).strip()
+                            registros_grupo = grupo.get("registros", [])
+    
+                            st.markdown(
+                                f"""
+                                <div style="background:#f7f9fb;border-left:4px solid #0056b3;padding:8px 12px;margin-top:12px;margin-bottom:6px;border-radius:6px;">
+                                    <b>Supervisor:</b> {nome_supervisor} &nbsp;&nbsp;&nbsp; <b>Subsupervisor:</b> {nome_subsupervisor} &nbsp;&nbsp;&nbsp; <b>Total:</b> {len(registros_grupo)}
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+    
+                            linhas_tabela = []
+                            for numero, registro in enumerate(registros_grupo, start=1):
+                                cruzou = bool(registro.get("cruzou_alguma"))
+                                marcador = "●" if cruzou else ""
+                                cruzamentos_texto = registro.get("cruzamentos_texto", "") or "—"
+    
+                                linhas_tabela.append({
+                                    "●": marcador,
+                                    "Nº": str(numero),
+                                    "Nome": registro.get("nome", ""),
+                                    "Comunidade": registro.get("comunidade", ""),
+                                    "Telefone": registro.get("telefone", ""),
+                                    "Cruzamentos": cruzamentos_texto
+                                })
+    
+                            st.dataframe(
+                                pd.DataFrame(linhas_tabela),
+                                use_container_width=True,
+                                hide_index=True,
+                                height=min(38 * len(linhas_tabela) + 38, 600),
+                                column_config={
+                                    "●": st.column_config.TextColumn("", width="small"),
+                                    "Nº": st.column_config.TextColumn("Nº", width="small"),
+                                    "Nome": st.column_config.TextColumn("Nome", width="large"),
+                                    "Comunidade": st.column_config.TextColumn("Comunidade", width="medium"),
+                                    "Telefone": st.column_config.TextColumn("Telefone", width="medium"),
+                                    "Cruzamentos": st.column_config.TextColumn("Cruzamentos", width="large")
+                                }
+                            )
+                        st.markdown("#### Resumo dos Cruzamentos")
 
                     resumo_linhas = []
                     for item in resultado_cruzamentos.get("resumo_bases", []):
