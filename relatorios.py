@@ -2412,7 +2412,8 @@ def filtrar_relatorio_cruzamentos(
             "comunidade": limpar_texto(r.get("comunidade", "")),
             "telefone": limpar_texto(r.get("telefone", "")),
             "titulo": _normalizar_titulo_cruzamento(r.get("titulo", "")),
-            "situacao": sit
+            "situacao": sit,
+            "id_familia": _obter_id_familia(r)
         })
 
     registros.sort(key=lambda x: (
@@ -2430,7 +2431,8 @@ def gerar_relatorio_cruzamentos(
     subsupervisor="",
     situacao="",
     base_cruzada="",
-    resultado_cruzamento=""
+    resultado_cruzamento="",
+    organizacao="Normal"
 ):
     registros = filtrar_relatorio_cruzamentos(
         dados_base,
@@ -2570,11 +2572,18 @@ def gerar_relatorio_cruzamentos(
             "subsupervisor": limpar_texto(subsupervisor),
             "situacao": limpar_texto(situacao),
             "base_cruzada": limpar_texto(base_cruzada).upper(),
-            "resultado_cruzamento": limpar_texto(resultado_cruzamento)
+            "resultado_cruzamento": limpar_texto(resultado_cruzamento),
+            "organizacao": limpar_texto(organizacao) or "Normal"
         },
+        "organizacao": limpar_texto(organizacao) or "Normal",
         "registros": registros_filtrados,
         "grupos": agrupar_relatorio_nome(
             registros_filtrados
+        ),
+        "grupos_familia": (
+            agrupar_relatorio_familia(registros_filtrados)
+            if normalizar_filtro(organizacao) == "POR FAMÍLIA"
+            else []
         )
     }
 
@@ -2795,118 +2804,268 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
         elementos.append(Spacer(1, 0.22*cm))
 
     if registros:
-        if somente_cruzou:
-            titulo_detalhe = "DETALHAMENTO DOS CRUZADOS"
-        elif somente_nao:
-            titulo_detalhe = "DETALHAMENTO DOS NÃO CRUZADOS"
-        else:
-            titulo_detalhe = "DETALHAMENTO DOS REGISTROS"
-
-        barra = Table(
-            [[Paragraph(titulo_detalhe, secao)]],
-            colWidths=[largura_util]
-        )
-        barra.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#202020")),
-            ("TOPPADDING", (0,0), (-1,-1), 4),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
-        ]))
-        elementos.append(barra)
-
-        dados = [[
-            Paragraph("<b>Nº</b>", centro),
-            Paragraph("<b>NOME</b>", centro),
-            Paragraph("<b>COMUNIDADE</b>", centro),
-            Paragraph("<b>TELEFONE</b>", centro),
-            Paragraph("<b>CRUZAMENTO</b>", centro)
-        ]]
-
-        linhas_cruzadas = []
-        for numero, r in enumerate(registros, 1):
-            cruzou = bool(r.get("cruzou_alguma"))
-            estilo_nome = texto_bold if cruzou else texto
-            estilo_cruz = centro_bold if cruzou else centro
-            cruzamento = limpar_texto(r.get("cruzamentos_texto", "")) if cruzou else "—"
-
-            dados.append([
-                Paragraph(str(numero), centro),
-                Paragraph(limpar_texto(r.get("nome", "")) or "—", estilo_nome),
-                Paragraph(limpar_texto(r.get("comunidade", "")) or "—", texto),
-                Paragraph(limpar_texto(r.get("telefone", "")) or "—", centro),
-                Paragraph(cruzamento or "—", estilo_cruz)
-            ])
-            if cruzou:
-                linhas_cruzadas.append(len(dados)-1)
-
-        tabela = Table(
-            dados,
-            colWidths=[0.8*cm, 7.1*cm, 3.7*cm, 3.4*cm, 3.8*cm],
-            repeatRows=1,
-            hAlign="CENTER"
+        organizacao = normalizar_filtro(
+            resultado_relatorio.get("organizacao", filtros.get("organizacao", "Normal"))
         )
 
-        estilo_tabela = [
-            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#2B2B2B")),
-            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-            ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#B8B8B8")),
-            ("BOX", (0,0), (-1,-1), 0.7, colors.HexColor("#666666")),
-            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-            ("LEFTPADDING", (0,0), (-1,-1), 3),
-            ("RIGHTPADDING", (0,0), (-1,-1), 3),
-            ("TOPPADDING", (0,0), (-1,-1), 3.4),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 3.4),
-            ("ALIGN", (0,0), (0,-1), "CENTER"),
-            ("ALIGN", (3,1), (4,-1), "CENTER"),
-        ]
+        if organizacao == "POR FAMÍLIA":
+            if somente_cruzou:
+                titulo_detalhe = "DETALHAMENTO DOS CRUZADOS POR FAMÍLIA"
+            elif somente_nao:
+                titulo_detalhe = "DETALHAMENTO DOS NÃO CRUZADOS POR FAMÍLIA"
+            else:
+                titulo_detalhe = "DETALHAMENTO DOS REGISTROS POR FAMÍLIA"
 
-        # Em P&B, cruzados são identificados por cinza claro + negrito.
-        for linha in linhas_cruzadas:
-            estilo_tabela.append(
-                ("BACKGROUND", (0,linha), (-1,linha), colors.HexColor("#E7E7E7"))
-            )
+            barra = Table([[Paragraph(titulo_detalhe, secao)]], colWidths=[largura_util])
+            barra.setStyle(TableStyle([
+                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#202020")),
+                ("TOPPADDING", (0,0), (-1,-1), 4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ]))
+            elementos.append(barra)
 
-        tabela.setStyle(TableStyle(estilo_tabela))
-        elementos.append(tabela)
-        elementos.append(Spacer(1, 0.22*cm))
+            def _adicionar_bloco_familia_cruzamentos(titulo_bloco, itens):
+                cabecalho = Table(
+                    [[Paragraph(titulo_bloco, texto_bold)]],
+                    colWidths=[largura_util]
+                )
+                cabecalho.setStyle(TableStyle([
+                    ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#E1E1E1")),
+                    ("BOX", (0,0), (-1,-1), 0.6, colors.HexColor("#777777")),
+                    ("TOPPADDING", (0,0), (-1,-1), 4),
+                    ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+                    ("LEFTPADDING", (0,0), (-1,-1), 6),
+                ]))
+                elementos.append(cabecalho)
 
-        # Rodapé-resumo também se adapta ao filtro.
-        if somente_cruzou:
-            rodape_itens = [("TOTAL EXIBIDO", total), ("COM CRUZAMENTO", total)]
-        elif somente_nao:
-            rodape_itens = [("TOTAL EXIBIDO", total), ("SEM CRUZAMENTO", total)]
-        else:
-            rodape_itens = [
-                ("TOTAL EXIBIDO", total),
-                ("COM CRUZAMENTO", total_com),
-                ("SEM CRUZAMENTO", total_sem)
+                dados_familia = [[
+                    Paragraph("<b>Nº</b>", centro),
+                    Paragraph("<b>NOME</b>", centro),
+                    Paragraph("<b>COMUNIDADE</b>", centro),
+                    Paragraph("<b>TELEFONE</b>", centro),
+                    Paragraph("<b>CRUZAMENTO</b>", centro)
+                ]]
+                linhas_cruzadas_familia = []
+
+                for numero, r in enumerate(itens, 1):
+                    cruzou = bool(r.get("cruzou_alguma"))
+                    estilo_nome = texto_bold if cruzou else texto
+                    estilo_cruz = centro_bold if cruzou else centro
+                    cruzamento = limpar_texto(r.get("cruzamentos_texto", "")) if cruzou else "—"
+                    dados_familia.append([
+                        Paragraph(str(numero), centro),
+                        Paragraph(limpar_texto(r.get("nome", "")) or "—", estilo_nome),
+                        Paragraph(limpar_texto(r.get("comunidade", "")) or "—", texto),
+                        Paragraph(limpar_texto(r.get("telefone", "")) or "—", centro),
+                        Paragraph(cruzamento or "—", estilo_cruz)
+                    ])
+                    if cruzou:
+                        linhas_cruzadas_familia.append(len(dados_familia) - 1)
+
+                tabela_familia = Table(
+                    dados_familia,
+                    colWidths=[0.8*cm, 7.1*cm, 3.7*cm, 3.4*cm, 3.8*cm],
+                    repeatRows=1,
+                    hAlign="CENTER"
+                )
+                estilo_familia = [
+                    ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#2B2B2B")),
+                    ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+                    ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#B8B8B8")),
+                    ("BOX", (0,0), (-1,-1), 0.7, colors.HexColor("#666666")),
+                    ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                    ("LEFTPADDING", (0,0), (-1,-1), 3),
+                    ("RIGHTPADDING", (0,0), (-1,-1), 3),
+                    ("TOPPADDING", (0,0), (-1,-1), 3.4),
+                    ("BOTTOMPADDING", (0,0), (-1,-1), 3.4),
+                    ("ALIGN", (0,0), (0,-1), "CENTER"),
+                    ("ALIGN", (3,1), (4,-1), "CENTER"),
+                ]
+                for linha in linhas_cruzadas_familia:
+                    estilo_familia.append(
+                        ("BACKGROUND", (0,linha), (-1,linha), colors.HexColor("#E7E7E7"))
+                    )
+                tabela_familia.setStyle(TableStyle(estilo_familia))
+                elementos.append(tabela_familia)
+                elementos.append(Spacer(1, 0.16*cm))
+
+            for grupo in resultado_relatorio.get("grupos_familia", []):
+                sup = limpar_texto(grupo.get("supervisor", "")) or "SEM SUPERVISOR"
+                sub = limpar_texto(grupo.get("subsupervisor", "")) or "SEM SUBSUPERVISOR"
+
+                identificacao = Table(
+                    [[Paragraph(
+                        f"<b>SUPERVISOR:</b> {sup} &nbsp;&nbsp;&nbsp; "
+                        f"<b>SUBSUPERVISOR:</b> {sub}",
+                        texto_bold
+                    )]],
+                    colWidths=[largura_util]
+                )
+                identificacao.setStyle(TableStyle([
+                    ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F3F3F3")),
+                    ("BOX", (0,0), (-1,-1), 0.6, colors.HexColor("#777777")),
+                    ("TOPPADDING", (0,0), (-1,-1), 4),
+                    ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+                    ("LEFTPADDING", (0,0), (-1,-1), 6),
+                ]))
+                elementos.append(identificacao)
+
+                for familia in grupo.get("familias", []):
+                    fid = limpar_texto(familia.get("id_familia", "")) or "SEM ID"
+                    integrantes = familia.get("integrantes", [])
+                    _adicionar_bloco_familia_cruzamentos(
+                        f"FAMÍLIA {fid} - {len(integrantes)} PESSOA(S)",
+                        integrantes
+                    )
+
+                individuais = grupo.get("individuais", [])
+                if individuais:
+                    _adicionar_bloco_familia_cruzamentos(
+                        f"CADASTROS INDIVIDUAIS - {len(individuais)} PESSOA(S)",
+                        individuais
+                    )
+
+            if somente_cruzou:
+                rodape_itens = [("TOTAL EXIBIDO", total), ("COM CRUZAMENTO", total)]
+            elif somente_nao:
+                rodape_itens = [("TOTAL EXIBIDO", total), ("SEM CRUZAMENTO", total)]
+            else:
+                rodape_itens = [
+                    ("TOTAL EXIBIDO", total),
+                    ("COM CRUZAMENTO", total_com),
+                    ("SEM CRUZAMENTO", total_sem)
+                ]
+
+            rodape_celulas = [
+                [Paragraph(rotulo, card_rotulo), Paragraph(str(valor), centro_bold)]
+                for rotulo, valor in rodape_itens
             ]
+            rodape = Table(
+                [rodape_celulas],
+                colWidths=[largura_util/len(rodape_celulas)]*len(rodape_celulas)
+            )
+            rodape.setStyle(TableStyle([
+                ("BOX", (0,0), (-1,-1), 0.7, colors.HexColor("#666666")),
+                ("INNERGRID", (0,0), (-1,-1), 0.4, colors.HexColor("#AAAAAA")),
+                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F5F5F5")),
+                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("TOPPADDING", (0,0), (-1,-1), 4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ]))
+            elementos.append(rodape)
 
-        rodape_celulas = []
-        for rotulo, valor in rodape_itens:
-            rodape_celulas.append([
-                Paragraph(rotulo, card_rotulo),
-                Paragraph(str(valor), ParagraphStyle(
-                    f"RodapeNumero{rotulo}{valor}",
-                    parent=centro_bold,
-                    fontSize=15,
-                    leading=17
-                ))
-            ])
-
-        rodape = Table(
-            [rodape_celulas],
-            colWidths=[largura_util/len(rodape_celulas)]*len(rodape_celulas)
-        )
-        rodape.setStyle(TableStyle([
-            ("BOX", (0,0), (-1,-1), 0.7, colors.HexColor("#666666")),
-            ("INNERGRID", (0,0), (-1,-1), 0.4, colors.HexColor("#AAAAAA")),
-            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F5F5F5")),
-            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-            ("TOPPADDING", (0,0), (-1,-1), 4),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
-        ]))
-        elementos.append(rodape)
-
+        else:
+            if somente_cruzou:
+                titulo_detalhe = "DETALHAMENTO DOS CRUZADOS"
+            elif somente_nao:
+                titulo_detalhe = "DETALHAMENTO DOS NÃO CRUZADOS"
+            else:
+                titulo_detalhe = "DETALHAMENTO DOS REGISTROS"
+    
+            barra = Table(
+                [[Paragraph(titulo_detalhe, secao)]],
+                colWidths=[largura_util]
+            )
+            barra.setStyle(TableStyle([
+                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#202020")),
+                ("TOPPADDING", (0,0), (-1,-1), 4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ]))
+            elementos.append(barra)
+    
+            dados = [[
+                Paragraph("<b>Nº</b>", centro),
+                Paragraph("<b>NOME</b>", centro),
+                Paragraph("<b>COMUNIDADE</b>", centro),
+                Paragraph("<b>TELEFONE</b>", centro),
+                Paragraph("<b>CRUZAMENTO</b>", centro)
+            ]]
+    
+            linhas_cruzadas = []
+            for numero, r in enumerate(registros, 1):
+                cruzou = bool(r.get("cruzou_alguma"))
+                estilo_nome = texto_bold if cruzou else texto
+                estilo_cruz = centro_bold if cruzou else centro
+                cruzamento = limpar_texto(r.get("cruzamentos_texto", "")) if cruzou else "—"
+    
+                dados.append([
+                    Paragraph(str(numero), centro),
+                    Paragraph(limpar_texto(r.get("nome", "")) or "—", estilo_nome),
+                    Paragraph(limpar_texto(r.get("comunidade", "")) or "—", texto),
+                    Paragraph(limpar_texto(r.get("telefone", "")) or "—", centro),
+                    Paragraph(cruzamento or "—", estilo_cruz)
+                ])
+                if cruzou:
+                    linhas_cruzadas.append(len(dados)-1)
+    
+            tabela = Table(
+                dados,
+                colWidths=[0.8*cm, 7.1*cm, 3.7*cm, 3.4*cm, 3.8*cm],
+                repeatRows=1,
+                hAlign="CENTER"
+            )
+    
+            estilo_tabela = [
+                ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#2B2B2B")),
+                ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+                ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#B8B8B8")),
+                ("BOX", (0,0), (-1,-1), 0.7, colors.HexColor("#666666")),
+                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("LEFTPADDING", (0,0), (-1,-1), 3),
+                ("RIGHTPADDING", (0,0), (-1,-1), 3),
+                ("TOPPADDING", (0,0), (-1,-1), 3.4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 3.4),
+                ("ALIGN", (0,0), (0,-1), "CENTER"),
+                ("ALIGN", (3,1), (4,-1), "CENTER"),
+            ]
+    
+            # Em P&B, cruzados são identificados por cinza claro + negrito.
+            for linha in linhas_cruzadas:
+                estilo_tabela.append(
+                    ("BACKGROUND", (0,linha), (-1,linha), colors.HexColor("#E7E7E7"))
+                )
+    
+            tabela.setStyle(TableStyle(estilo_tabela))
+            elementos.append(tabela)
+            elementos.append(Spacer(1, 0.22*cm))
+    
+            # Rodapé-resumo também se adapta ao filtro.
+            if somente_cruzou:
+                rodape_itens = [("TOTAL EXIBIDO", total), ("COM CRUZAMENTO", total)]
+            elif somente_nao:
+                rodape_itens = [("TOTAL EXIBIDO", total), ("SEM CRUZAMENTO", total)]
+            else:
+                rodape_itens = [
+                    ("TOTAL EXIBIDO", total),
+                    ("COM CRUZAMENTO", total_com),
+                    ("SEM CRUZAMENTO", total_sem)
+                ]
+    
+            rodape_celulas = []
+            for rotulo, valor in rodape_itens:
+                rodape_celulas.append([
+                    Paragraph(rotulo, card_rotulo),
+                    Paragraph(str(valor), ParagraphStyle(
+                        f"RodapeNumero{rotulo}{valor}",
+                        parent=centro_bold,
+                        fontSize=15,
+                        leading=17
+                    ))
+                ])
+    
+            rodape = Table(
+                [rodape_celulas],
+                colWidths=[largura_util/len(rodape_celulas)]*len(rodape_celulas)
+            )
+            rodape.setStyle(TableStyle([
+                ("BOX", (0,0), (-1,-1), 0.7, colors.HexColor("#666666")),
+                ("INNERGRID", (0,0), (-1,-1), 0.4, colors.HexColor("#AAAAAA")),
+                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F5F5F5")),
+                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("TOPPADDING", (0,0), (-1,-1), 4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ]))
+            elementos.append(rodape)
     else:
         elementos.append(Spacer(1, 0.25*cm))
         elementos.append(Paragraph("Nenhum registro encontrado para os filtros selecionados.", meta))
