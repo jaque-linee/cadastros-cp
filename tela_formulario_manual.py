@@ -104,10 +104,8 @@ def _mostrar_cadastro_encontrado(e):
    <div class="base-box-title">🪪 Dados do Cadastro</div>
    <div class="base-data-grid">
     <div><b>Título:</b> {v['titulo']}</div><div><b>Comunidade:</b> {v['comunidade']}</div>
-    <div><b>CPF:</b> {v['cpf']}</div><div><b>Endereço:</b> {v['endereco']}</div>
-    <div><b>RG:</b> {v['rg']}</div><div><b>Nº:</b> {v['numero']}</div>
-    <div><b>Data de nascimento:</b> {v['nascimento']}</div><div><b>Bairro:</b> {v['bairro']}</div>
-    <div><b>Nome da mãe:</b> {v['mae']}</div><div><b>Cidade:</b> {v['cidade']}</div>
+    <div><b>CPF:</b> {v['cpf']}</div><div><b>RG:</b> {v['rg']}</div>
+    <div><b>Data de nascimento:</b> {v['nascimento']}</div><div><b>Nome da mãe:</b> {v['mae']}</div>
     <div><b>Telefone:</b> {v['telefone']}</div><div><b>ID Família:</b> {v['familia']}</div>
    </div>
   </div>
@@ -228,7 +226,15 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
                 with col7:
                     secao = st.text_input("Seção")
 
-                nome_mae = st.text_input("Nome da mãe")
+                col8, col9 = st.columns(2)
+                with col8:
+                    nome_mae = st.text_input("Nome da mãe")
+                with col9:
+                    id_familia = st.text_input(
+                        "ID Família",
+                        placeholder="Ex.: F0001"
+                    )
+
                 salvar = st.form_submit_button("💾 Salvar", type="primary")
 
                 if salvar:
@@ -245,6 +251,7 @@ def exibir_tela_formulario_manual(base, webhook_url, supervisor, sub):
                             "zona": zona,
                             "secao": secao,
                             "telefone": telefone,
+                            "id_familia": id_familia,
                             "supervisor": supervisor,
                             "subsupervisor": sub
                         }
