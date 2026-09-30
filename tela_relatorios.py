@@ -27,7 +27,7 @@ def exibir_tela_relatorios(base):
     if tipo_relatorio == "👤 Por Nome":
         filtros_disponiveis = relatorios.obter_filtros_nome(base)
 
-        col_filtro_sup, col_filtro_sub, col_filtro_sit = st.columns(3)
+        col_filtro_sup, col_filtro_sub, col_filtro_sit, col_filtro_status = st.columns(4)
 
         with col_filtro_sup:
             filtro_supervisor = st.selectbox(
@@ -44,10 +44,19 @@ def exibir_tela_relatorios(base):
             )
 
         with col_filtro_sit:
-            filtro_situacao = st.selectbox(
+            filtro_situacao = st.multiselect(
                 "Situação",
-                ["Todas"] + filtros_disponiveis.get("situacoes", []),
-                key="relatorio_nome_situacao"
+                filtros_disponiveis.get("situacoes", []),
+                placeholder="Todas",
+                key="relatorio_nome_situacao_multi"
+            )
+
+        with col_filtro_status:
+            filtro_status = st.multiselect(
+                "Status",
+                filtros_disponiveis.get("statuses", []),
+                placeholder="Todos",
+                key="relatorio_nome_status_multi"
             )
 
         organizacao_nome = st.radio(
@@ -64,7 +73,8 @@ def exibir_tela_relatorios(base):
                 dados_base=base,
                 supervisor="" if filtro_supervisor == "Todos" else filtro_supervisor,
                 subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
-                situacao="" if filtro_situacao == "Todas" else filtro_situacao
+                situacao=filtro_situacao,
+                status=filtro_status
             )
 
             if organizacao_nome == "Juntar telefones iguais":
@@ -170,7 +180,8 @@ def exibir_tela_relatorios(base):
                 dados_base=base,
                 supervisor="" if filtro_supervisor == "Todos" else filtro_supervisor,
                 subsupervisor="" if filtro_subsupervisor == "Todos" else filtro_subsupervisor,
-                situacao="" if filtro_situacao == "Todas" else filtro_situacao
+                situacao=filtro_situacao,
+                status=filtro_status
             )
 
             if organizacao_nome == "Juntar telefones iguais":
@@ -290,12 +301,19 @@ def exibir_tela_relatorios(base):
 
                     linhas_tabela = []
                     for numero, registro in enumerate(registros_grupo, start=1):
-                        linhas_tabela.append({
+                        linha = {
                             "Nº": numero,
                             "Nome": str(registro.get("nome", "")).strip(),
                             "Comunidade": str(registro.get("comunidade", "")).strip(),
                             "Telefone": str(registro.get("telefone", "")).strip()
-                        })
+                        }
+
+                        if resultado_relatorio.get("mostrar_status", False):
+                            linha["Status"] = str(
+                                registro.get("status", "")
+                            ).strip()
+
+                        linhas_tabela.append(linha)
 
                     tabela_grupo = pd.DataFrame(linhas_tabela)
                     st.dataframe(tabela_grupo, use_container_width=True, hide_index=True, height=min(38 * len(tabela_grupo) + 38, 500))
