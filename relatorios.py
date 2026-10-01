@@ -2432,7 +2432,8 @@ def gerar_relatorio_cruzamentos(
     situacao="",
     base_cruzada="",
     resultado_cruzamento="",
-    organizacao="Normal"
+    organizacao="Normal",
+    quantidade_cruzamentos=0
 ):
     registros = filtrar_relatorio_cruzamentos(
         dados_base,
@@ -2492,9 +2493,15 @@ def gerar_relatorio_cruzamentos(
         r["bases_cruzadas"] = bases_encontradas
         r["cruzamentos_texto"] = " | ".join(bases_encontradas)
         r["cruzou_alguma"] = bool(bases_encontradas)
+        r["quantidade_cruzamentos"] = len(bases_encontradas)
 
     base_filtro = normalizar_filtro(base_cruzada)
     resultado_filtro = normalizar_filtro(resultado_cruzamento)
+
+    try:
+        quantidade_minima = int(quantidade_cruzamentos or 0)
+    except (TypeError, ValueError):
+        quantidade_minima = 0
 
     registros_filtrados = []
 
@@ -2525,6 +2532,12 @@ def gerar_relatorio_cruzamentos(
                 and r["cruzou_alguma"]
             ):
                 continue
+
+        if (
+            quantidade_minima > 0
+            and int(r.get("quantidade_cruzamentos", 0) or 0) < quantidade_minima
+        ):
+            continue
 
         registros_filtrados.append(r)
 
@@ -2573,6 +2586,7 @@ def gerar_relatorio_cruzamentos(
             "situacao": limpar_texto(situacao),
             "base_cruzada": limpar_texto(base_cruzada).upper(),
             "resultado_cruzamento": limpar_texto(resultado_cruzamento),
+            "quantidade_cruzamentos": quantidade_minima,
             "organizacao": limpar_texto(organizacao) or "Normal"
         },
         "organizacao": limpar_texto(organizacao) or "Normal",
@@ -2708,6 +2722,12 @@ def gerar_pdf_relatorio_cruzamentos(resultado_relatorio):
         valor = limpar_texto(filtros.get(chave, ""))
         if valor:
             partes_meta.append(f"<b>{rotulo}:</b> {valor}")
+
+    quantidade_filtro = int(filtros.get("quantidade_cruzamentos", 0) or 0)
+    if quantidade_filtro > 0:
+        partes_meta.append(
+            f"<b>Quantidade de cruzamentos:</b> {quantidade_filtro} ou mais"
+        )
 
     elementos.append(Paragraph(" &nbsp;&nbsp;|&nbsp;&nbsp; ".join(partes_meta), meta))
     elementos.append(Spacer(1, 0.22*cm))
