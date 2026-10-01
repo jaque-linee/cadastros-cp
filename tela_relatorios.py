@@ -806,7 +806,7 @@ def exibir_tela_relatorios(base):
                     key="relatorio_cruzamentos_situacao"
                 )
 
-            col_base, col_resultado = st.columns(2)
+            col_base, col_resultado, col_quantidade = st.columns(3)
 
             with col_base:
                 filtro_base_cruzada = st.selectbox(
@@ -821,6 +821,25 @@ def exibir_tela_relatorios(base):
                     ["Todos", "Cruzou", "Não cruzou"],
                     key="relatorio_cruzamentos_resultado"
                 )
+
+            total_bases_cruzamento = len(filtros_disponiveis.get("bases", []))
+            opcoes_quantidade_cruzamentos = ["Todas"] + [
+                f"{quantidade} ou mais"
+                for quantidade in range(1, total_bases_cruzamento + 1)
+            ]
+
+            with col_quantidade:
+                filtro_quantidade_cruzamentos = st.selectbox(
+                    "Quantidade de cruzamentos",
+                    opcoes_quantidade_cruzamentos,
+                    key="relatorio_cruzamentos_quantidade"
+                )
+
+            quantidade_minima_cruzamentos = (
+                0
+                if filtro_quantidade_cruzamentos == "Todas"
+                else int(filtro_quantidade_cruzamentos.split()[0])
+            )
 
             organizacao_cruzamentos = st.radio(
                 "Organização",
@@ -840,7 +859,8 @@ def exibir_tela_relatorios(base):
                     situacao="" if filtro_situacao == "Todas" else filtro_situacao,
                     base_cruzada="" if filtro_base_cruzada == "Todas" else filtro_base_cruzada,
                     resultado_cruzamento="" if filtro_resultado_cruzamento == "Todos" else filtro_resultado_cruzamento,
-                    organizacao=organizacao_cruzamentos
+                    organizacao=organizacao_cruzamentos,
+                    quantidade_cruzamentos=quantidade_minima_cruzamentos
                 )
 
             resultado_cruzamentos = st.session_state.get("relatorio_cruzamentos_gerado")
