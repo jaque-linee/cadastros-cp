@@ -689,18 +689,27 @@ def exibir_tela_relatorios(base):
             if total == 0:
                 st.info("Nenhum cadastro encontrado para os filtros selecionados.")
             else:
-                linhas = []
-                for numero, registro in enumerate(resultado_domicilio.get("registros", []), start=1):
-                    linhas.append({
-                        "Nº": numero,
-                        "Domicílio": registro.get("domicilio", ""),
-                        "Nome": registro.get("nome", ""),
-                        "Comunidade": registro.get("comunidade", ""),
-                        "Telefone": registro.get("telefone", "")
-                    })
+                formato_domicilio = st.radio(
+                    "Conteúdo do PDF",
+                    ["Somente resumo geral", "Relatório completo"],
+                    horizontal=True,
+                    key="formato_pdf_domicilio"
+                )
+                somente_resumo_domicilio = formato_domicilio == "Somente resumo geral"
 
-                tabela_domicilio = pd.DataFrame(linhas)
-                st.dataframe(tabela_domicilio, use_container_width=True, hide_index=True, height=min(38 * len(tabela_domicilio) + 38, 600))
+                if not somente_resumo_domicilio:
+                    linhas = []
+                    for numero, registro in enumerate(resultado_domicilio.get("registros", []), start=1):
+                        linhas.append({
+                            "Nº": numero,
+                            "Domicílio": registro.get("domicilio", ""),
+                            "Nome": registro.get("nome", ""),
+                            "Comunidade": registro.get("comunidade", ""),
+                            "Telefone": registro.get("telefone", "")
+                        })
+
+                    tabela_domicilio = pd.DataFrame(linhas)
+                    st.dataframe(tabela_domicilio, use_container_width=True, hide_index=True, height=min(38 * len(tabela_domicilio) + 38, 600))
 
                 st.markdown("#### Resumo por Domicílio")
 
@@ -719,7 +728,9 @@ def exibir_tela_relatorios(base):
                 st.dataframe(pd.DataFrame(resumo_linhas), use_container_width=True, hide_index=True)
 
                 try:
-                    pdf_relatorio_domicilio = relatorios.gerar_pdf_relatorio_domicilio(resultado_domicilio)
+                    pdf_relatorio_domicilio = relatorios.gerar_pdf_relatorio_domicilio(
+                        resultado_domicilio, somente_resumo=somente_resumo_domicilio
+                    )
 
                     coluna_imprimir, coluna_pdf = st.columns(2)
 
@@ -759,9 +770,9 @@ def exibir_tela_relatorios(base):
 
                     with coluna_pdf:
                         st.download_button(
-                            label="📄 Baixar PDF",
+                            label="📄 Baixar só o resumo geral" if somente_resumo_domicilio else "📄 Baixar PDF completo",
                             data=pdf_relatorio_domicilio,
-                            file_name="relatorio_por_domicilio.pdf",
+                            file_name="resumo_geral_por_domicilio.pdf" if somente_resumo_domicilio else "relatorio_por_domicilio.pdf",
                             mime="application/pdf",
                             use_container_width=True,
                             key="baixar_pdf_relatorio_domicilio"
