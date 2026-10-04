@@ -2254,7 +2254,72 @@ def gerar_relatorio_domicilio(dados_base, supervisor="", subsupervisor="", domic
     }
 
 
-def gerar_pdf_relatorio_domicilio(resultado_relatorio):
+def gerar_pdf_relatorio_domicilio(resultado_relatorio, somente_resumo=False):
+    """Preserva o PDF completo e permite gerar somente o resumo."""
+    if somente_resumo:
+        return gerar_pdf_resumo_domicilio(resultado_relatorio)
+    return gerar_pdf_relatorio_domicilio_completo(resultado_relatorio)
+
+
+def gerar_pdf_resumo_domicilio(resultado_relatorio):
+    """Gera somente o resumo geral por domicílio, em páginas próprias."""
+    from math import ceil
+
+    resumo = list(resultado_relatorio.get("resumo") or [])
+    if not resumo:
+        resumo = resumir_relatorio_domicilio(resultado_relatorio.get("registros", []))
+    total = sum(int(item.get("total", 0)) for item in resumo)
+    buffer = BytesIO()
+    documento = SimpleDocTemplate(
+        buffer, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm,
+        topMargin=1.2*cm, bottomMargin=1.3*cm,
+        title="Resumo Geral por Domicílio"
+    )
+    estilos = _estilos_pdf()
+    texto = ParagraphStyle("DomicilioResumo", parent=estilos["texto"], fontSize=10, leading=12)
+    centro = ParagraphStyle("QuantidadeResumo", parent=texto, alignment=TA_CENTER)
+    elementos = []
+    # Distribui os locais uniformemente; mantém letra legível se a base crescer.
+    paginas = max(1, ceil(len(resumo) / 28))
+    tamanho = max(1, ceil(len(resumo) / paginas))
+    partes = [resumo[i:i+tamanho] for i in range(0, len(resumo), tamanho)] or [[]]
+    for indice, parte in enumerate(partes):
+        if indice:
+            elementos.append(PageBreak())
+        elementos.append(Paragraph("RESUMO GERAL POR DOMICÍLIO", estilos["titulo"]))
+        filtros = resultado_relatorio.get("filtros", {})
+        rotulos = (("Supervisor", "supervisor"), ("Subsupervisor", "subsupervisor"),
+                   ("Domicílio", "domicilio"), ("Situação", "situacao"))
+        ativos = [f"{rotulo}: {html.escape(limpar_texto(filtros.get(chave, '')))}"
+                  for rotulo, chave in rotulos if limpar_texto(filtros.get(chave, ''))]
+        if ativos:
+            elementos.append(Paragraph(" | ".join(ativos), estilos["subtitulo"]))
+        elementos.append(Spacer(1, 0.35*cm))
+        dados = [[Paragraph("<b>DOMICÍLIO</b>", texto), Paragraph("<b>QUANTIDADE</b>", centro)]]
+        for item in parte:
+            dados.append([Paragraph(html.escape(str(item.get("domicilio") or "SEM DOMICÍLIO")), texto),
+                          Paragraph(str(item.get("total", 0)), centro)])
+        if indice == len(partes)-1:
+            dados.append([Paragraph("<b>TOTAL GERAL</b>", texto), Paragraph(f"<b>{total}</b>", centro)])
+        tabela = Table(dados, colWidths=[documento.width-3*cm, 3*cm], repeatRows=1, hAlign="LEFT")
+        regras = [
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#EEEEEE")),
+            ("GRID", (0,0), (-1,-1), 0.4, colors.HexColor("#BBBBBB")),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6),
+            ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)
+        ]
+        if indice == len(partes)-1:
+            regras.append(("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EEEEEE")))
+        tabela.setStyle(TableStyle(regras))
+        elementos.append(tabela)
+    documento.build(elementos, onFirstPage=_cabecalho_rodape_pdf, onLaterPages=_cabecalho_rodape_pdf)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
+
+
+def gerar_pdf_relatorio_domicilio_completo(resultado_relatorio):
     buffer = BytesIO()
     documento = SimpleDocTemplate(
         buffer, pagesize=A4,
