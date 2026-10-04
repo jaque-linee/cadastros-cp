@@ -2254,9 +2254,11 @@ def gerar_relatorio_domicilio(dados_base, supervisor="", subsupervisor="", domic
     }
 
 
-def gerar_pdf_relatorio_domicilio(resultado_relatorio, somente_resumo=False):
+def gerar_pdf_relatorio_domicilio(resultado_relatorio, somente_resumo=False, separar_por_supervisor=False):
     """Preserva o PDF completo e permite gerar somente o resumo."""
     if somente_resumo:
+        if separar_por_supervisor:
+            return gerar_pdf_resumo_domicilio_por_supervisor(resultado_relatorio)
         return gerar_pdf_resumo_domicilio(resultado_relatorio)
     return gerar_pdf_relatorio_domicilio_completo(resultado_relatorio)
 
@@ -2313,6 +2315,71 @@ def gerar_pdf_resumo_domicilio(resultado_relatorio):
             regras.append(("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EEEEEE")))
         tabela.setStyle(TableStyle(regras))
         elementos.append(tabela)
+    documento.build(elementos, onFirstPage=_cabecalho_rodape_pdf, onLaterPages=_cabecalho_rodape_pdf)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
+
+
+def gerar_pdf_resumo_domicilio_por_supervisor(resultado_relatorio):
+    """Resumo dos registros filtrados, com páginas exclusivas por supervisor."""
+    grupos = {}
+    for registro in resultado_relatorio.get("registros", []) or []:
+        nome = limpar_texto(registro.get("supervisor", "")) or "SEM SUPERVISOR"
+        chave = normalizar_filtro(nome)
+        grupo = grupos.setdefault(chave, {"nome": nome, "registros": []})
+        grupo["registros"].append(registro)
+
+    buffer = BytesIO()
+    documento = SimpleDocTemplate(
+        buffer, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm,
+        topMargin=1.2*cm, bottomMargin=1.3*cm,
+        title="Resumo por Domicílio - Separado por Supervisor"
+    )
+    estilos = _estilos_pdf()
+    texto = ParagraphStyle("DomicilioResumo", parent=estilos["texto"], fontSize=10, leading=12)
+    centro = ParagraphStyle("QuantidadeResumo", parent=texto, alignment=TA_CENTER)
+    supervisor_estilo = ParagraphStyle("SupervisorResumo", parent=texto, fontName="Helvetica-Bold", fontSize=12, leading=15)
+    elementos = []
+    filtros = resultado_relatorio.get("filtros", {})
+    ativos = []
+    for rotulo, chave in (("Subsupervisor", "subsupervisor"), ("Domicílio", "domicilio"), ("Situação", "situacao")):
+        valor = limpar_texto(filtros.get(chave, ""))
+        if valor:
+            ativos.append(f"{rotulo}: {html.escape(valor)}")
+    if not limpar_texto(filtros.get("subsupervisor", "")):
+        ativos.insert(0, "Subsupervisores: Todos")
+
+    for indice, chave in enumerate(sorted(grupos)):
+        grupo = grupos[chave]
+        if indice:
+            elementos.append(PageBreak())
+        resumo = resumir_relatorio_domicilio(grupo["registros"])
+        total = len(grupo["registros"])
+        # As quatro linhas de cabeçalho se repetem em todas as páginas do supervisor.
+        dados = [
+            [Paragraph("RESUMO GERAL POR DOMICÍLIO", estilos["titulo"]), ""],
+            [Paragraph("Supervisor: " + html.escape(grupo["nome"]), supervisor_estilo), ""],
+            [Paragraph(" | ".join(ativos), estilos["subtitulo"]), ""],
+            [Paragraph("<b>DOMICÍLIO</b>", texto), Paragraph("<b>QUANTIDADE</b>", centro)]
+        ]
+        for item in resumo:
+            dados.append([Paragraph(html.escape(item["domicilio"]), texto), Paragraph(str(item["total"]), centro)])
+        dados.append([Paragraph("<b>TOTAL DO SUPERVISOR</b>", texto), Paragraph(f"<b>{total}</b>", centro)])
+        tabela = Table(dados, colWidths=[documento.width-3*cm, 3*cm], repeatRows=4, hAlign="LEFT")
+        tabela.setStyle(TableStyle([
+            ("SPAN", (0,0), (-1,0)), ("SPAN", (0,1), (-1,1)), ("SPAN", (0,2), (-1,2)),
+            ("BACKGROUND", (0,3), (-1,3), colors.HexColor("#EEEEEE")),
+            ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EEEEEE")),
+            ("GRID", (0,3), (-1,-1), 0.4, colors.HexColor("#BBBBBB")),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6),
+            ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+            ("NOSPLIT", (0,-2), (-1,-1))
+        ]))
+        elementos.append(tabela)
+    if not grupos:
+        elementos.append(Paragraph("Nenhum registro encontrado para os filtros selecionados.", texto))
     documento.build(elementos, onFirstPage=_cabecalho_rodape_pdf, onLaterPages=_cabecalho_rodape_pdf)
     pdf = buffer.getvalue()
     buffer.close()
