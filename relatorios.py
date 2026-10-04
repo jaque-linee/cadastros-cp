@@ -2322,12 +2322,16 @@ def gerar_pdf_resumo_domicilio(resultado_relatorio):
 
 
 def gerar_pdf_resumo_domicilio_por_supervisor(resultado_relatorio):
-    """Resumo dos registros filtrados, com páginas exclusivas por supervisor."""
+    """Resumo dos registros filtrados, com páginas exclusivas por supervisor, subsupervisor e comunidade."""
     grupos = {}
     for registro in resultado_relatorio.get("registros", []) or []:
         nome = limpar_texto(registro.get("supervisor", "")) or "SEM SUPERVISOR"
-        chave = normalizar_filtro(nome)
-        grupo = grupos.setdefault(chave, {"nome": nome, "registros": []})
+        sub = limpar_texto(registro.get("subsupervisor", ""))
+        if normalizar_filtro(sub) in ("", "SEM SUBSUPERVISOR", "SEM SUB", "—", "-"):
+            sub = "SEM SUBSUPERVISOR"
+        comunidade = limpar_texto(registro.get("comunidade", "")) or "SEM COMUNIDADE"
+        chave = (normalizar_filtro(nome), normalizar_filtro(sub), normalizar_filtro(comunidade))
+        grupo = grupos.setdefault(chave, {"nome": nome, "sub": sub, "comunidade": comunidade, "registros": []})
         grupo["registros"].append(registro)
 
     buffer = BytesIO()
@@ -2343,12 +2347,10 @@ def gerar_pdf_resumo_domicilio_por_supervisor(resultado_relatorio):
     elementos = []
     filtros = resultado_relatorio.get("filtros", {})
     ativos = []
-    for rotulo, chave in (("Subsupervisor", "subsupervisor"), ("Domicílio", "domicilio"), ("Situação", "situacao")):
+    for rotulo, chave in (("Domicílio", "domicilio"), ("Situação", "situacao")):
         valor = limpar_texto(filtros.get(chave, ""))
         if valor:
             ativos.append(f"{rotulo}: {html.escape(valor)}")
-    if not limpar_texto(filtros.get("subsupervisor", "")):
-        ativos.insert(0, "Subsupervisores: Todos")
 
     for indice, chave in enumerate(sorted(grupos)):
         grupo = grupos[chave]
@@ -2359,13 +2361,13 @@ def gerar_pdf_resumo_domicilio_por_supervisor(resultado_relatorio):
         # As quatro linhas de cabeçalho se repetem em todas as páginas do supervisor.
         dados = [
             [Paragraph("RESUMO GERAL POR DOMICÍLIO", estilos["titulo"]), ""],
-            [Paragraph("Supervisor: " + html.escape(grupo["nome"]), supervisor_estilo), ""],
+            [Paragraph("Supervisor: " + html.escape(grupo["nome"]) + "<br/>Subsupervisor: " + html.escape(grupo["sub"]) + "<br/>Comunidade: " + html.escape(grupo["comunidade"]), supervisor_estilo), ""],
             [Paragraph(" | ".join(ativos), estilos["subtitulo"]), ""],
             [Paragraph("<b>DOMICÍLIO</b>", texto), Paragraph("<b>QUANTIDADE</b>", centro)]
         ]
         for item in resumo:
             dados.append([Paragraph(html.escape(item["domicilio"]), texto), Paragraph(str(item["total"]), centro)])
-        dados.append([Paragraph("<b>TOTAL DO SUPERVISOR</b>", texto), Paragraph(f"<b>{total}</b>", centro)])
+        dados.append([Paragraph("<b>TOTAL DO GRUPO</b>", texto), Paragraph(f"<b>{total}</b>", centro)])
         tabela = Table(dados, colWidths=[documento.width-3*cm, 3*cm], repeatRows=4, hAlign="LEFT")
         tabela.setStyle(TableStyle([
             ("SPAN", (0,0), (-1,0)), ("SPAN", (0,1), (-1,1)), ("SPAN", (0,2), (-1,2)),
