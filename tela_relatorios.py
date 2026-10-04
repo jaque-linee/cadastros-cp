@@ -691,11 +691,12 @@ def exibir_tela_relatorios(base):
             else:
                 formato_domicilio = st.radio(
                     "Conteúdo do PDF",
-                    ["Somente resumo geral", "Relatório completo"],
+                    ["Somente resumo geral", "Resumo separado por supervisor", "Relatório completo"],
                     horizontal=True,
                     key="formato_pdf_domicilio"
                 )
-                somente_resumo_domicilio = formato_domicilio == "Somente resumo geral"
+                somente_resumo_domicilio = formato_domicilio != "Relatório completo"
+                separar_supervisores_domicilio = formato_domicilio == "Resumo separado por supervisor"
 
                 if not somente_resumo_domicilio:
                     linhas = []
@@ -729,7 +730,8 @@ def exibir_tela_relatorios(base):
 
                 try:
                     pdf_relatorio_domicilio = relatorios.gerar_pdf_relatorio_domicilio(
-                        resultado_domicilio, somente_resumo=somente_resumo_domicilio
+                        resultado_domicilio, somente_resumo=somente_resumo_domicilio,
+                        separar_por_supervisor=separar_supervisores_domicilio
                     )
 
                     coluna_imprimir, coluna_pdf = st.columns(2)
@@ -770,9 +772,9 @@ def exibir_tela_relatorios(base):
 
                     with coluna_pdf:
                         st.download_button(
-                            label="📄 Baixar só o resumo geral" if somente_resumo_domicilio else "📄 Baixar PDF completo",
+                            label=("📄 Baixar resumo por supervisor" if separar_supervisores_domicilio else "📄 Baixar só o resumo geral" if somente_resumo_domicilio else "📄 Baixar PDF completo"),
                             data=pdf_relatorio_domicilio,
-                            file_name="resumo_geral_por_domicilio.pdf" if somente_resumo_domicilio else "relatorio_por_domicilio.pdf",
+                            file_name=("resumo_domicilio_por_supervisor.pdf" if separar_supervisores_domicilio else "resumo_geral_por_domicilio.pdf" if somente_resumo_domicilio else "relatorio_por_domicilio.pdf"),
                             mime="application/pdf",
                             use_container_width=True,
                             key="baixar_pdf_relatorio_domicilio"
