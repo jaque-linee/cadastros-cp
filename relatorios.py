@@ -2254,23 +2254,47 @@ def gerar_relatorio_domicilio(dados_base, supervisor="", subsupervisor="", domic
     }
 
 
-def gerar_pdf_relatorio_domicilio(resultado_relatorio, somente_resumo=False, separar_por_supervisor=False):
+def gerar_pdf_relatorio_domicilio(resultado_relatorio, somente_resumo=False, separar_grupos=False):
     """Preserva o PDF completo e permite gerar somente o resumo."""
     if somente_resumo:
-        if separar_por_supervisor:
-            return gerar_pdf_resumo_domicilio_por_supervisor(resultado_relatorio)
-        return gerar_pdf_resumo_domicilio(resultado_relatorio)
+        return gerar_pdf_resumo_domicilio(resultado_relatorio, separar_grupos=separar_grupos)
     return gerar_pdf_relatorio_domicilio_completo(resultado_relatorio)
 
 
-def gerar_pdf_resumo_domicilio(resultado_relatorio):
+def gerar_pdf_resumo_domicilio(resultado_relatorio, separar_grupos=False):
     """Gera somente o resumo geral por domicílio, em páginas próprias."""
     from math import ceil
 
-    resumo = list(resultado_relatorio.get("resumo") or [])
-    if not resumo:
-        resumo = resumir_relatorio_domicilio(resultado_relatorio.get("registros", []))
-    total = sum(int(item.get("total", 0)) for item in resumo)
+    def sub_visivel(valor):
+        valor = limpar_texto(valor)
+        return "" if normalizar_filtro(valor) == normalizar_filtro("SEM SUBSUPERVISOR") else valor
+
+    secoes = []
+    if separar_grupos:
+        grupos = {}
+        for registro in resultado_relatorio.get("registros", []):
+            supervisor = limpar_texto(registro.get("supervisor", "")) or "SEM SUPERVISOR"
+            comunidade = limpar_texto(registro.get("comunidade", "")) or "SEM COMUNIDADE"
+            sub = sub_visivel(registro.get("subsupervisor", ""))
+            chave = tuple(normalizar_filtro(v) for v in (supervisor, comunidade, sub))
+            if chave not in grupos:
+                grupos[chave] = {"supervisor": supervisor, "comunidade": comunidade,
+                                 "subsupervisor": sub, "registros": []}
+            grupos[chave]["registros"].append(registro)
+        for chave in sorted(grupos):
+            grupo = grupos[chave]
+            filtros = dict(resultado_relatorio.get("filtros") or {})
+            filtros.update({campo: grupo[campo] for campo in ("supervisor", "comunidade", "subsupervisor")})
+            secoes.append((resumir_relatorio_domicilio(grupo["registros"]), filtros))
+    else:
+        resumo = list(resultado_relatorio.get("resumo") or [])
+        if not resumo:
+            resumo = resumir_relatorio_domicilio(resultado_relatorio.get("registros", []))
+        filtros = dict(resultado_relatorio.get("filtros") or {})
+        filtros["subsupervisor"] = sub_visivel(filtros.get("subsupervisor", ""))
+        secoes.append((resumo, filtros))
+    if not secoes:
+        secoes.append(([], dict(resultado_relatorio.get("filtros") or {})))
     buffer = BytesIO()
     documento = SimpleDocTemplate(
         buffer, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm,
@@ -2281,107 +2305,41 @@ def gerar_pdf_resumo_domicilio(resultado_relatorio):
     texto = ParagraphStyle("DomicilioResumo", parent=estilos["texto"], fontSize=10, leading=12)
     centro = ParagraphStyle("QuantidadeResumo", parent=texto, alignment=TA_CENTER)
     elementos = []
-    # Distribui os locais uniformemente; mantém letra legível se a base crescer.
-    paginas = max(1, ceil(len(resumo) / 28))
-    tamanho = max(1, ceil(len(resumo) / paginas))
-    partes = [resumo[i:i+tamanho] for i in range(0, len(resumo), tamanho)] or [[]]
-    for indice, parte in enumerate(partes):
-        if indice:
-            elementos.append(PageBreak())
-        elementos.append(Paragraph("RESUMO GERAL POR DOMICÍLIO", estilos["titulo"]))
-        filtros = resultado_relatorio.get("filtros", {})
-        rotulos = (("Supervisor", "supervisor"), ("Subsupervisor", "subsupervisor"),
-                   ("Domicílio", "domicilio"), ("Situação", "situacao"))
-        ativos = [f"{rotulo}: {html.escape(limpar_texto(filtros.get(chave, '')))}"
-                  for rotulo, chave in rotulos if limpar_texto(filtros.get(chave, ''))]
-        if ativos:
-            elementos.append(Paragraph(" | ".join(ativos), estilos["subtitulo"]))
-        elementos.append(Spacer(1, 0.35*cm))
-        dados = [[Paragraph("<b>DOMICÍLIO</b>", texto), Paragraph("<b>QUANTIDADE</b>", centro)]]
-        for item in parte:
-            dados.append([Paragraph(html.escape(str(item.get("domicilio") or "SEM DOMICÍLIO")), texto),
-                          Paragraph(str(item.get("total", 0)), centro)])
-        if indice == len(partes)-1:
-            dados.append([Paragraph("<b>TOTAL GERAL</b>", texto), Paragraph(f"<b>{total}</b>", centro)])
-        tabela = Table(dados, colWidths=[documento.width-3*cm, 3*cm], repeatRows=1, hAlign="LEFT")
-        regras = [
-            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#EEEEEE")),
-            ("GRID", (0,0), (-1,-1), 0.4, colors.HexColor("#BBBBBB")),
-            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-            ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6),
-            ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)
-        ]
-        if indice == len(partes)-1:
-            regras.append(("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EEEEEE")))
-        tabela.setStyle(TableStyle(regras))
-        elementos.append(tabela)
-    documento.build(elementos, onFirstPage=_cabecalho_rodape_pdf, onLaterPages=_cabecalho_rodape_pdf)
-    pdf = buffer.getvalue()
-    buffer.close()
-    return pdf
-
-
-def gerar_pdf_resumo_domicilio_por_supervisor(resultado_relatorio):
-    """Resumo dos registros filtrados, com páginas exclusivas por supervisor, subsupervisor e comunidade."""
-    grupos = {}
-    for registro in resultado_relatorio.get("registros", []) or []:
-        nome = limpar_texto(registro.get("supervisor", "")) or "SEM SUPERVISOR"
-        sub = limpar_texto(registro.get("subsupervisor", ""))
-        if normalizar_filtro(sub) in ("", "SEM SUBSUPERVISOR", "SEM SUB", "—", "-"):
-            sub = "SEM SUBSUPERVISOR"
-        comunidade = limpar_texto(registro.get("comunidade", "")) or "SEM COMUNIDADE"
-        chave = (normalizar_filtro(nome), normalizar_filtro(sub), normalizar_filtro(comunidade))
-        grupo = grupos.setdefault(chave, {"nome": nome, "sub": sub, "comunidade": comunidade, "registros": []})
-        grupo["registros"].append(registro)
-
-    buffer = BytesIO()
-    documento = SimpleDocTemplate(
-        buffer, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm,
-        topMargin=1.2*cm, bottomMargin=1.3*cm,
-        title="Resumo por Domicílio - Separado por Supervisor"
-    )
-    estilos = _estilos_pdf()
-    texto = ParagraphStyle("DomicilioResumo", parent=estilos["texto"], fontSize=10, leading=12)
-    centro = ParagraphStyle("QuantidadeResumo", parent=texto, alignment=TA_CENTER)
-    supervisor_estilo = ParagraphStyle("SupervisorResumo", parent=texto, fontName="Helvetica-Bold", fontSize=12, leading=15)
-    elementos = []
-    filtros = resultado_relatorio.get("filtros", {})
-    ativos = []
-    for rotulo, chave in (("Domicílio", "domicilio"), ("Situação", "situacao")):
-        valor = limpar_texto(filtros.get(chave, ""))
-        if valor:
-            ativos.append(f"{rotulo}: {html.escape(valor)}")
-
-    for indice, chave in enumerate(sorted(grupos)):
-        grupo = grupos[chave]
-        if indice:
-            elementos.append(PageBreak())
-        resumo = resumir_relatorio_domicilio(grupo["registros"])
-        total = len(grupo["registros"])
-        # As quatro linhas de cabeçalho se repetem em todas as páginas do supervisor.
-        dados = [
-            [Paragraph("RESUMO GERAL POR DOMICÍLIO", estilos["titulo"]), ""],
-            [Paragraph("Supervisor: " + html.escape(grupo["nome"]) + "<br/>Subsupervisor: " + html.escape(grupo["sub"]) + "<br/>Comunidade: " + html.escape(grupo["comunidade"]), supervisor_estilo), ""],
-            [Paragraph(" | ".join(ativos), estilos["subtitulo"]), ""],
-            [Paragraph("<b>DOMICÍLIO</b>", texto), Paragraph("<b>QUANTIDADE</b>", centro)]
-        ]
-        for item in resumo:
-            dados.append([Paragraph(html.escape(item["domicilio"]), texto), Paragraph(str(item["total"]), centro)])
-        dados.append([Paragraph("<b>TOTAL DO GRUPO</b>", texto), Paragraph(f"<b>{total}</b>", centro)])
-        tabela = Table(dados, colWidths=[documento.width-3*cm, 3*cm], repeatRows=4, hAlign="LEFT")
-        tabela.setStyle(TableStyle([
-            ("SPAN", (0,0), (-1,0)), ("SPAN", (0,1), (-1,1)), ("SPAN", (0,2), (-1,2)),
-            ("BACKGROUND", (0,3), (-1,3), colors.HexColor("#EEEEEE")),
-            ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EEEEEE")),
-            ("GRID", (0,3), (-1,-1), 0.4, colors.HexColor("#BBBBBB")),
-            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-            ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6),
-            ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-            ("NOSPLIT", (0,-2), (-1,-1))
-        ]))
-        elementos.append(tabela)
-    if not grupos:
-        elementos.append(Paragraph("Nenhum registro encontrado para os filtros selecionados.", texto))
+    for resumo, filtros in secoes:
+        total = sum(int(item.get("total", 0)) for item in resumo)
+        # Distribui os locais uniformemente; mantém letra legível se a base crescer.
+        paginas = max(1, ceil(len(resumo) / 28))
+        tamanho = max(1, ceil(len(resumo) / paginas))
+        partes = [resumo[i:i+tamanho] for i in range(0, len(resumo), tamanho)] or [[]]
+        for indice, parte in enumerate(partes):
+            if elementos:
+                elementos.append(PageBreak())
+            elementos.append(Paragraph("RESUMO POR DOMICÍLIO" if separar_grupos else "RESUMO GERAL POR DOMICÍLIO", estilos["titulo"]))
+            rotulos = (("Supervisor", "supervisor"), ("Comunidade", "comunidade"), ("Subsupervisor", "subsupervisor"),
+                       ("Domicílio", "domicilio"), ("Situação", "situacao"))
+            ativos = [f"{rotulo}: {html.escape(limpar_texto(filtros.get(chave, '')))}"
+                      for rotulo, chave in rotulos if limpar_texto(filtros.get(chave, ''))]
+            if ativos:
+                elementos.append(Paragraph(" | ".join(ativos), estilos["subtitulo"]))
+            elementos.append(Spacer(1, 0.35*cm))
+            dados = [[Paragraph("<b>DOMICÍLIO</b>", texto), Paragraph("<b>QUANTIDADE</b>", centro)]]
+            for item in parte:
+                dados.append([Paragraph(html.escape(str(item.get("domicilio") or "SEM DOMICÍLIO")), texto),
+                              Paragraph(str(item.get("total", 0)), centro)])
+            if indice == len(partes)-1:
+                dados.append([Paragraph("<b>TOTAL DO GRUPO</b>" if separar_grupos else "<b>TOTAL GERAL</b>", texto), Paragraph(f"<b>{total}</b>", centro)])
+            tabela = Table(dados, colWidths=[documento.width-3*cm, 3*cm], repeatRows=1, hAlign="LEFT")
+            regras = [
+                ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#EEEEEE")),
+                ("GRID", (0,0), (-1,-1), 0.4, colors.HexColor("#BBBBBB")),
+                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6),
+                ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)
+            ]
+            if indice == len(partes)-1:
+                regras.append(("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EEEEEE")))
+            tabela.setStyle(TableStyle(regras))
+            elementos.append(tabela)
     documento.build(elementos, onFirstPage=_cabecalho_rodape_pdf, onLaterPages=_cabecalho_rodape_pdf)
     pdf = buffer.getvalue()
     buffer.close()
@@ -5753,3 +5711,89 @@ def gerar_pdf_relatorio_duplicados(dados_cruzados):
     buffer.close()
 
     return pdf
+
+# COMPARATIVO 2026: totais gerais por local, sem atribuir votos a lideranças.
+def gerar_comparativo_domicilio_2026(dados_base, votos_2026):
+    import re
+    import unicodedata
+    from decimal import Decimal, InvalidOperation
+
+    def chave(valor):
+        texto = unicodedata.normalize("NFKD", limpar_texto(valor))
+        return " ".join("".join(c for c in texto if not unicodedata.combining(c)).upper().split())
+
+    locais = {}
+    for registro in dados_base or []:
+        if chave(registro.get("situacao")) != "R":
+            continue
+        nome = limpar_texto(registro.get("domicilio")) or "SEM DOMICÍLIO"
+        k = chave(nome)
+        locais.setdefault(k, {"domicilio": nome, "esperado": 0, "obtido": None})
+        locais[k]["esperado"] += 1
+
+    vistos = set()
+    for registro in votos_2026 or []:
+        nome = limpar_texto(registro.get("local"))
+        if not nome:
+            raise ValueError("Há uma linha de votos sem LOCAL. Confira a aba VOTOS 2026.")
+        k = chave(nome)
+        if k in {"TOTAL", "TOTAL GERAL"}:
+            continue
+        if k in vistos:
+            raise ValueError(f"Local repetido em VOTOS 2026: {nome}. Consolide em uma linha para evitar duplicação.")
+        vistos.add(k)
+        valor = str(registro.get("votos", "")).strip()
+        if re.fullmatch(r"\d{1,3}(\.\d{3})+", valor):
+            valor = valor.replace(".", "")
+        try:
+            numero = Decimal(valor.replace(",", "."))
+            if not numero.is_finite() or numero < 0 or numero != numero.to_integral_value():
+                raise ValueError()
+            numero = int(numero)
+        except (InvalidOperation, ValueError, OverflowError):
+            raise ValueError(f"VOTOS inválido ou vazio para {nome}: {valor!r}.")
+        locais.setdefault(k, {"domicilio": nome, "esperado": 0, "obtido": None})
+        locais[k]["obtido"] = numero
+
+    linhas = [locais[k] for k in sorted(locais)]
+    return {"linhas": linhas,
+            "total_esperado": sum(x["esperado"] for x in linhas),
+            "total_obtido": sum(x["obtido"] or 0 for x in linhas),
+            "sem_votos": [x["domicilio"] for x in linhas if x["obtido"] is None],
+            "sem_cadastros": [x["domicilio"] for x in linhas if x["esperado"] == 0]}
+
+
+def gerar_pdf_comparativo_domicilio_2026(resultado):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.1*cm, rightMargin=1.1*cm,
+                            topMargin=1.1*cm, bottomMargin=1.2*cm,
+                            title="Resumo Comparativo 2026 por Domicílio")
+    estilos = _estilos_pdf()
+    texto = ParagraphStyle("ComparativoLocal2026", parent=estilos["texto"], fontSize=9, leading=11)
+    numero = ParagraphStyle("ComparativoNumero2026", parent=texto, alignment=TA_CENTER)
+    dados = [[Paragraph("<b>DOMICÍLIO</b>", texto), Paragraph("<b>ESPERADO</b>", numero),
+              Paragraph("<b>OBTIDO</b>", numero)]]
+    for item in resultado["linhas"]:
+        dados.append([Paragraph(html.escape(item["domicilio"]), texto),
+                      Paragraph(str(item["esperado"]), numero),
+                      Paragraph("—" if item["obtido"] is None else str(item["obtido"]), numero)])
+    dados.append([Paragraph("<b>TOTAL</b>", texto),
+                  Paragraph(f'<b>{resultado["total_esperado"]}</b>', numero),
+                  Paragraph(f'<b>{resultado["total_obtido"]}</b>', numero)])
+    tabela = Table(dados, colWidths=[doc.width-4.8*cm, 2.4*cm, 2.4*cm], repeatRows=1)
+    tabela.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), .4, colors.grey),
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#DDDDDD")),
+        ("ROWBACKGROUNDS", (0,1), (-1,-2), [colors.white, colors.HexColor("#F0F0F0")]),
+        ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#DDDDDD")),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+    ]))
+    elementos = [Paragraph("RESUMO COMPARATIVO 2026", estilos["titulo"]),
+                 Paragraph("Por domicílio | Esperado: cadastros com situação R | Obtido: VOTOS 2026", estilos["subtitulo"]),
+                 Spacer(1, .3*cm)]
+    if resultado["sem_votos"]:
+        elementos.extend([Paragraph("Traço em OBTIDO: local sem correspondência na aba VOTOS 2026. O total obtido soma apenas os valores informados.", texto), Spacer(1,.2*cm)])
+    elementos.append(tabela)
+    doc.build(elementos, onFirstPage=_cabecalho_rodape_pdf, onLaterPages=_cabecalho_rodape_pdf)
+    return buffer.getvalue()
