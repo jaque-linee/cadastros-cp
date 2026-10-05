@@ -628,7 +628,7 @@ def exibir_tela_relatorios(base):
     elif tipo_relatorio == "📊 Comparativo 2026 por Domicílio":
         st.caption("Esperado: cadastros com situação R. Obtido: total de votos por local da aba VOTOS 2026.")
         if st.button("Gerar / atualizar comparativo", type="primary", key="gerar_comparativo_2026"):
-            st.session_state.pop("comparativo_domicilio_2026", None)
+            st.session_state.pop("comparativo_domicilio_2026_v2", None)
             consulta = sheets.carregar_votos_2026(WEBHOOK_URL)
             if not consulta["sucesso"]:
                 st.error(consulta["mensagem"])
@@ -636,10 +636,10 @@ def exibir_tela_relatorios(base):
                 st.warning("A aba VOTOS 2026 está vazia.")
             else:
                 try:
-                    st.session_state["comparativo_domicilio_2026"] = relatorios.gerar_comparativo_domicilio_2026(base, consulta["dados"])
+                    st.session_state["comparativo_domicilio_2026_v2"] = relatorios.gerar_comparativo_domicilio_2026(base, consulta["dados"])
                 except Exception as erro:
                     st.error(str(erro))
-        comparativo = st.session_state.get("comparativo_domicilio_2026")
+        comparativo = st.session_state.get("comparativo_domicilio_2026_v2")
         if comparativo is not None:
             col_esperado, col_obtido = st.columns(2)
             col_esperado.metric("Esperado (situação R)", comparativo["total_esperado"])
