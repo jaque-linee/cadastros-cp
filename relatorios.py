@@ -5720,7 +5720,10 @@ def gerar_comparativo_domicilio_2026(dados_base, votos_2026):
 
     def chave(valor):
         texto = unicodedata.normalize("NFKD", limpar_texto(valor))
-        return " ".join("".join(c for c in texto if not unicodedata.combining(c)).upper().split())
+        texto = "".join(c for c in texto if not unicodedata.combining(c)).upper()
+        # Hífen e travessões representam o mesmo separador no nome do local.
+        texto = re.sub(r"\s*[-‐‑‒–—−]\s*", "-", texto)
+        return " ".join(texto.split())
 
     locais = {}
     for registro in dados_base or []:
@@ -5790,10 +5793,7 @@ def gerar_pdf_comparativo_domicilio_2026(resultado):
         ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4),
     ]))
     elementos = [Paragraph("RESUMO COMPARATIVO 2026", estilos["titulo"]),
-                 Paragraph("Por domicílio | Esperado: cadastros com situação R | Obtido: VOTOS 2026", estilos["subtitulo"]),
                  Spacer(1, .3*cm)]
-    if resultado["sem_votos"]:
-        elementos.extend([Paragraph("Traço em OBTIDO: local sem correspondência na aba VOTOS 2026. O total obtido soma apenas os valores informados.", texto), Spacer(1,.2*cm)])
     elementos.append(tabela)
     doc.build(elementos, onFirstPage=_cabecalho_rodape_pdf, onLaterPages=_cabecalho_rodape_pdf)
     return buffer.getvalue()
