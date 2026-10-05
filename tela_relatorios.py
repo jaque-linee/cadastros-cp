@@ -17,7 +17,7 @@ def exibir_tela_relatorios(base):
 
     tipo_relatorio = st.selectbox(
         "Tipo de relatório",
-        ["👤 Por Nome", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "🔀 Cruzamentos", "📋 Duplicados", "💰 Pagamentos das Lideranças", "💰 Pagamentos Resumidos"],
+        ["👤 Por Nome", "👨‍👩‍👧‍👦 Por Família", "📍 Por Zona", "🏠 Por Domicílio", "📊 Comparativo 2026 por Domicílio", "🔀 Cruzamentos", "📋 Duplicados", "💰 Pagamentos das Lideranças", "💰 Pagamentos Resumidos"],
         key="tipo_relatorio"
     )
 
@@ -625,6 +625,41 @@ def exibir_tela_relatorios(base):
     # ============================================================
     # RELATÓRIO POR DOMICÍLIO
     # ============================================================
+    elif tipo_relatorio == "📊 Comparativo 2026 por Domicílio":
+        st.caption("Esperado: cadastros com situação R. Obtido: total de votos por local da aba VOTOS 2026.")
+        if st.button("Gerar / atualizar comparativo", type="primary", key="gerar_comparativo_2026"):
+            st.session_state.pop("comparativo_domicilio_2026", None)
+            consulta = sheets.carregar_votos_2026(WEBHOOK_URL)
+            if not consulta["sucesso"]:
+                st.error(consulta["mensagem"])
+            elif not consulta["dados"]:
+                st.warning("A aba VOTOS 2026 está vazia.")
+            else:
+                try:
+                    st.session_state["comparativo_domicilio_2026"] = relatorios.gerar_comparativo_domicilio_2026(base, consulta["dados"])
+                except Exception as erro:
+                    st.error(str(erro))
+        comparativo = st.session_state.get("comparativo_domicilio_2026")
+        if comparativo is not None:
+            col_esperado, col_obtido = st.columns(2)
+            col_esperado.metric("Esperado (situação R)", comparativo["total_esperado"])
+            col_obtido.metric("Obtido (VOTOS 2026)", comparativo["total_obtido"])
+            if comparativo["sem_votos"]:
+                st.warning("Locais sem correspondência em VOTOS 2026: " + "; ".join(comparativo["sem_votos"]))
+            if comparativo["sem_cadastros"]:
+                st.info("Locais com votos e sem cadastros R correspondentes (confira os nomes): " + "; ".join(comparativo["sem_cadastros"]))
+            linhas_comparativo = [{"Domicílio": x["domicilio"], "Esperado": str(x["esperado"]),
+                                  "Obtido": "—" if x["obtido"] is None else str(x["obtido"])} for x in comparativo["linhas"]]
+            linhas_comparativo.append({"Domicílio": "TOTAL", "Esperado": str(comparativo["total_esperado"]), "Obtido": str(comparativo["total_obtido"])})
+            st.dataframe(pd.DataFrame(linhas_comparativo), use_container_width=True, hide_index=True)
+            try:
+                pdf_comparativo = relatorios.gerar_pdf_comparativo_domicilio_2026(comparativo)
+                st.download_button("📄 Baixar PDF comparativo", data=pdf_comparativo,
+                                   file_name="resumo_comparativo_2026.pdf", mime="application/pdf",
+                                   key="baixar_comparativo_2026", use_container_width=True)
+            except Exception as erro:
+                st.error(f"Não foi possível gerar o PDF: {erro}")
+
     elif tipo_relatorio == "🏠 Por Domicílio":
         filtros_disponiveis = relatorios.obter_filtros_domicilio(base)
 
@@ -689,28 +724,18 @@ def exibir_tela_relatorios(base):
             if total == 0:
                 st.info("Nenhum cadastro encontrado para os filtros selecionados.")
             else:
-                formato_domicilio = st.radio(
-                    "Conteúdo do PDF",
-                    ["Somente resumo geral", "Resumo separado por supervisor", "Relatório completo"],
-                    horizontal=True,
-                    key="formato_pdf_domicilio"
-                )
-                somente_resumo_domicilio = formato_domicilio != "Relatório completo"
-                separar_supervisores_domicilio = formato_domicilio == "Resumo separado por supervisor"
+                linhas = []
+                for numero, registro in enumerate(resultado_domicilio.get("registros", []), start=1):
+                    linhas.append({
+                        "Nº": numero,
+                        "Domicílio": registro.get("domicilio", ""),
+                        "Nome": registro.get("nome", ""),
+                        "Comunidade": registro.get("comunidade", ""),
+                        "Telefone": registro.get("telefone", "")
+                    })
 
-                if not somente_resumo_domicilio:
-                    linhas = []
-                    for numero, registro in enumerate(resultado_domicilio.get("registros", []), start=1):
-                        linhas.append({
-                            "Nº": numero,
-                            "Domicílio": registro.get("domicilio", ""),
-                            "Nome": registro.get("nome", ""),
-                            "Comunidade": registro.get("comunidade", ""),
-                            "Telefone": registro.get("telefone", "")
-                        })
-
-                    tabela_domicilio = pd.DataFrame(linhas)
-                    st.dataframe(tabela_domicilio, use_container_width=True, hide_index=True, height=min(38 * len(tabela_domicilio) + 38, 600))
+                tabela_domicilio = pd.DataFrame(linhas)
+                st.dataframe(tabela_domicilio, use_container_width=True, hide_index=True, height=min(38 * len(tabela_domicilio) + 38, 600))
 
                 st.markdown("#### Resumo por Domicílio")
 
@@ -728,10 +753,18 @@ def exibir_tela_relatorios(base):
 
                 st.dataframe(pd.DataFrame(resumo_linhas), use_container_width=True, hide_index=True)
 
+                modo_pdf_domicilio = st.radio(
+                    "Conteúdo do PDF",
+                    ["Resumo por supervisor, comunidade e sub", "Resumo geral", "Relatório completo"],
+                    key="modo_pdf_domicilio",
+                )
+                if modo_pdf_domicilio == "Resumo por supervisor, comunidade e sub":
+                    st.caption("Cada supervisor, comunidade e sub começa em uma nova página. O sub só aparece quando informado.")
                 try:
                     pdf_relatorio_domicilio = relatorios.gerar_pdf_relatorio_domicilio(
-                        resultado_domicilio, somente_resumo=somente_resumo_domicilio,
-                        separar_por_supervisor=separar_supervisores_domicilio
+                        resultado_domicilio,
+                        somente_resumo=modo_pdf_domicilio != "Relatório completo",
+                        separar_grupos=modo_pdf_domicilio == "Resumo por supervisor, comunidade e sub",
                     )
 
                     coluna_imprimir, coluna_pdf = st.columns(2)
@@ -772,9 +805,9 @@ def exibir_tela_relatorios(base):
 
                     with coluna_pdf:
                         st.download_button(
-                            label=("📄 Baixar resumo por supervisor" if separar_supervisores_domicilio else "📄 Baixar só o resumo geral" if somente_resumo_domicilio else "📄 Baixar PDF completo"),
+                            label="📄 Baixar PDF",
                             data=pdf_relatorio_domicilio,
-                            file_name=("resumo_domicilio_por_supervisor.pdf" if separar_supervisores_domicilio else "resumo_geral_por_domicilio.pdf" if somente_resumo_domicilio else "relatorio_por_domicilio.pdf"),
+                            file_name="relatorio_por_domicilio.pdf",
                             mime="application/pdf",
                             use_container_width=True,
                             key="baixar_pdf_relatorio_domicilio"
