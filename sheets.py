@@ -948,3 +948,19 @@ def carregar_relatorio_duplicados(webhook_url, timeout=30):
             "nao_encontrados": [],
             "mensagem": f"Erro ao carregar relatório de duplicados: {erro}",
         }
+
+def carregar_votos_2026(webhook_url, timeout=30):
+    """Lê os totais por local; rejeita respostas antigas do webhook."""
+    try:
+        resposta = requests.get(webhook_url, params={"acao": "votos_2026"}, timeout=timeout)
+        resposta.raise_for_status()
+        dados = resposta.json()
+        if not isinstance(dados, dict) or dados.get("fonte") != "VOTOS 2026":
+            raise ValueError("Atualize a implantação do Apps Script para ler a aba VOTOS 2026.")
+        if dados.get("error"):
+            raise ValueError(dados["error"])
+        if not isinstance(dados.get("dados"), list):
+            raise ValueError("Resposta inválida da aba VOTOS 2026.")
+        return {"sucesso": True, "dados": dados["dados"], "mensagem": ""}
+    except Exception as erro:
+        return {"sucesso": False, "dados": [], "mensagem": str(erro)}
